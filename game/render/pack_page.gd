@@ -52,9 +52,19 @@ const TEXTBOX_AT: Vector2i = Vector2i(0, 12)
 const TEXTBOX_COLUMNS: int = 20
 const TEXTBOX_ROWS: int = 6
 ## Where `PrintItemDescription` is handed, and the row spacing every text box on
-## the hardware is written with.
+## the hardware is written with. `TEXTBOX_INNERH` is two lines, so a longer text
+## is paged rather than drawn through the frame.
 const TEXT_AT: Vector2i = Vector2i(1, 14)
 const TEXT_SPACING: int = 2
+const TEXTBOX_ROWS_OF_TEXT: int = 2
+
+## `ForgetMove`'s `hlcoord 5, 2 / ld b, NUM_MOVES * 2 / ld c, MOVE_NAME_LENGTH`,
+## whose border runs from that corner to (19, 11).
+const FORGET_AT: Vector2i = Vector2i(5, 2)
+const FORGET_SIZE: Vector2i = Vector2i(15, 10)
+const FORGET_NAME_COLUMN: int = 7
+const FORGET_CURSOR_COLUMN: int = 6
+const FORGET_FIRST_ROW: int = 4
 
 ## `ItemsPocketMenuHeader`: `menu_coords 7, 1, 19, 11` with five rows of eight
 ## columns. `ScrollingMenu_UpdateDisplay` starts one cell in from that corner and
@@ -231,25 +241,78 @@ func _tm_label(entry: Dictionary) -> String:
 ## `Textbox`: the chosen frame around a cleared interior, with the description
 ## printed a tile in and on every second row.
 func _draw_textbox(map: PackedInt32Array, text: String) -> void:
-	var first: int = RomLayout.FRAME_FIRST_CODE
-	var right: int = TEXTBOX_AT.x + TEXTBOX_COLUMNS - 1
-	var bottom: int = TEXTBOX_AT.y + TEXTBOX_ROWS - 1
-	for column: int in range(TEXTBOX_AT.x + 1, right):
-		_put(map, Vector2i(column, TEXTBOX_AT.y), first + RomLayout.FRAME_HORIZONTAL)
-		_put(map, Vector2i(column, bottom), first + RomLayout.FRAME_HORIZONTAL)
-	for row: int in range(TEXTBOX_AT.y + 1, bottom):
-		_put(map, Vector2i(TEXTBOX_AT.x, row), first + RomLayout.FRAME_VERTICAL)
-		_put(map, Vector2i(right, row), first + RomLayout.FRAME_VERTICAL)
-		for column: int in range(TEXTBOX_AT.x + 1, right):
-			_put(map, Vector2i(column, row), BLANK_TILE)
-	_put(map, TEXTBOX_AT, first + RomLayout.FRAME_TOP_LEFT)
-	_put(map, Vector2i(right, TEXTBOX_AT.y), first + RomLayout.FRAME_TOP_RIGHT)
-	_put(map, Vector2i(TEXTBOX_AT.x, bottom), first + RomLayout.FRAME_BOTTOM_LEFT)
-	_put(map, Vector2i(right, bottom), first + RomLayout.FRAME_BOTTOM_RIGHT)
+	draw_frame(map, TEXTBOX_AT, Vector2i(TEXTBOX_COLUMNS, TEXTBOX_ROWS))
 	var line: int = 0
 	for row_text: String in text.split("\n", false):
+		if line >= TEXTBOX_ROWS_OF_TEXT:
+			break
 		_string(map, TEXT_AT + Vector2i(0, line * TEXT_SPACING), row_text)
 		line += 1
+
+
+## `TextboxBorder` and the `ClearBox` behind it, at any corner and any size in
+## tiles including the frame. Every box the pack opens over its own screen is one
+## of these, so the arithmetic lives here once.
+func draw_frame(map: PackedInt32Array, at: Vector2i, size: Vector2i) -> void:
+	var first: int = RomLayout.FRAME_FIRST_CODE
+	var right: int = at.x + size.x - 1
+	var bottom: int = at.y + size.y - 1
+	for column: int in range(at.x + 1, right):
+		_put(map, Vector2i(column, at.y), first + RomLayout.FRAME_HORIZONTAL)
+		_put(map, Vector2i(column, bottom), first + RomLayout.FRAME_HORIZONTAL)
+	for row: int in range(at.y + 1, bottom):
+		_put(map, Vector2i(at.x, row), first + RomLayout.FRAME_VERTICAL)
+		_put(map, Vector2i(right, row), first + RomLayout.FRAME_VERTICAL)
+		for column: int in range(at.x + 1, right):
+			_put(map, Vector2i(column, row), BLANK_TILE)
+	_put(map, at, first + RomLayout.FRAME_TOP_LEFT)
+	_put(map, Vector2i(right, at.y), first + RomLayout.FRAME_TOP_RIGHT)
+	_put(map, Vector2i(at.x, bottom), first + RomLayout.FRAME_BOTTOM_LEFT)
+	_put(map, Vector2i(right, bottom), first + RomLayout.FRAME_BOTTOM_RIGHT)
+
+
+## `MenuBox` and `PlaceVerticalMenuItems`: one of the pack's `MENU_BACKUP_TILES`
+## submenus, drawn over the screen already in [param map] so it wears the
+## attrmap's own palette rather than a layer of its own.
+func draw_menu(
+	map: PackedInt32Array, box: Gen2MenuBox, options: Array, cursor: int
+) -> void:
+	draw_frame(map, box.border_position(), box.border_size())
+	var last_column: int = box.left + box.interior().x
+	for index: int in options.size():
+		var at: Vector2i = box.item_position(index)
+		_string(map, at, String(options[index]), maxi(0, last_column - at.x + 1))
+	if cursor >= 0 and cursor < options.size() \
+		and box.has_flag(Gen2MenuBox.STATICMENU_CURSOR):
+		_put(map, box.cursor_position(cursor), CURSOR_CODE)
+
+
+## `BuySellToss_UpdateQuantityDisplay`: the frame, then `'×'` and
+## `PRINTNUM_LEADINGZEROS | 1, 2` one cell in from its own corner.
+func draw_quantity(map: PackedInt32Array, box: Gen2MenuBox, quantity: int) -> void:
+	draw_frame(map, box.border_position(), box.border_size())
+	var at: Vector2i = box.border_position() + Vector2i.ONE
+	_put(map, at, TIMES_CODE)
+	_string(
+		map, at + Vector2i(1, 0),
+		String.num_int64(maxi(quantity, 0)).lpad(QUANTITY_DIGITS, "0")
+	)
+
+
+## `ForgetMove`'s own list: a `Textbox` at `hlcoord 5, 2` holding `NUM_MOVES * 2`
+## rows of `MOVE_NAME_LENGTH`, `ListMoves` two cells in from that corner with
+## `wListMovesLineSpacing` of two rows, and `w2DMenuCursorInitX` one cell left.
+func draw_move_list(map: PackedInt32Array, names: Array, cursor: int) -> void:
+	draw_frame(map, FORGET_AT, FORGET_SIZE)
+	for index: int in names.size():
+		var row: int = FORGET_FIRST_ROW + index * ROW_SPACING
+		_string(map, Vector2i(FORGET_NAME_COLUMN, row), String(names[index]))
+	if cursor >= 0 and cursor < names.size():
+		_put(
+			map,
+			Vector2i(FORGET_CURSOR_COLUMN, FORGET_FIRST_ROW + cursor * ROW_SPACING),
+			CURSOR_CODE
+		)
 
 
 ## `_CGB_PackPals`' attrmap, as one palette index per cell.
@@ -331,11 +394,20 @@ func compose(
 	return indices
 
 
-func _string(map: PackedInt32Array, at: Vector2i, text: String) -> void:
+## [param max_tiles] below zero is unbounded; a menu passes the room its box has,
+## since a label a mod registers is not written to fit the way every cartridge
+## one is.
+func _string(
+	map: PackedInt32Array, at: Vector2i, text: String, max_tiles: int = -1
+) -> void:
 	var cell: Vector2i = at
+	var drawn: int = 0
 	for code: int in Gen2Text.encode(text):
+		if max_tiles >= 0 and drawn >= max_tiles:
+			return
 		_put(map, cell, code)
 		cell.x += 1
+		drawn += 1
 
 
 func _put(map: PackedInt32Array, at: Vector2i, tile: int) -> void:

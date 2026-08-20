@@ -240,6 +240,30 @@ func test_a_queued_map_callback_does_not_take_the_sign_down() -> void:
 	)
 
 
+## And a callback that has actually run does not take it down either, which is
+## the other half: `RunMapCallback` is map setup, and `RunSceneScript` answers
+## `PlayerEvents` with carry only when its scene script set RUN_DEFERRED_SCRIPT.
+## Route 29's two scene scripts are bare `end`s, so crossing New Bark's west edge
+## used to lose the sign seven frames in.
+func test_only_a_player_event_result_takes_the_sign_down() -> void:
+	_screen = await _walk_onto_the_door()
+	for _frame: int in WALK_FRAME_CAP:
+		_screen.advance_frame()
+		if _screen.map_name_sign_frames() > 0:
+			break
+	var raised: int = _screen.map_name_sign_frames()
+	assert_eq(raised, Gen2WorldAPI.MAP_NAME_SIGN_FRAMES)
+
+	_screen._zero_map_name_sign_for([{"source": {"kind": &"callback"}}])
+	assert_eq(_screen.map_name_sign_frames(), raised, "a map callback raises no event")
+
+	_screen._zero_map_name_sign_for([{"source": {"kind": &"scene"}, "deferred": false}])
+	assert_eq(_screen.map_name_sign_frames(), raised, "and nor does a scene of bare ends")
+
+	_screen._zero_map_name_sign_for([{"source": {"kind": &"scene"}, "deferred": true}])
+	assert_eq(_screen.map_name_sign_frames(), 0, "an `sdefer` is the carry that does")
+
+
 ## `.CheckMovingWithinLandmark`: the map the world opens on is `wPrevLandmark`,
 ## so walking back into the landmark just left raises nothing.
 func test_a_warp_back_into_the_same_landmark_raises_no_sign() -> void:

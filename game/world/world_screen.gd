@@ -1088,7 +1088,7 @@ func _after_map_settled() -> bool:
 	if sight_results.is_empty():
 		sight_results = _world.dispatch_script_events()
 	if not sight_results.is_empty():
-		_zero_map_name_sign_timer()
+		_zero_map_name_sign_for(sight_results)
 		_show_script_results(sight_results)
 		return true
 	var special_attempt: Dictionary = _world.try_special_phone_call()
@@ -3801,6 +3801,23 @@ func _advance_map_name_sign() -> void:
 ## so a queued one used to take down the very sign the map load had raised.
 func _zero_map_name_sign_timer() -> void:
 	_hide_map_name_sign()
+
+
+## The same, for a batch of script results, since only some of them are a player
+## event. `RunMapCallback`'s work is map setup and reaches `PlayerEvents` never;
+## `RunSceneScript` runs its scene script and then answers carry only when that
+## script set RUN_DEFERRED_SCRIPT, so a scene of bare `end`s (Route 29's two, and
+## most of the map scenes in either pin) raises no event and takes no sign down.
+func _zero_map_name_sign_for(results: Array) -> void:
+	for result: Dictionary in results:
+		match StringName((result.get("source", {}) as Dictionary).get("kind", &"")):
+			&"callback":
+				continue
+			&"scene":
+				if not bool(result.get("deferred", false)):
+					continue
+		_zero_map_name_sign_timer()
+		return
 
 
 func _hide_map_name_sign() -> void:

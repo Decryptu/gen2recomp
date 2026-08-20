@@ -49,6 +49,11 @@ var _last_item: int = 0
 var _staged_warp: Dictionary = {}
 var _script_value: int = 0
 var _command_count: int = 0
+## `Script_sdefer`'s own `RUN_DEFERRED_SCRIPT`, which is the only thing that
+## makes `RunSceneScript` answer `PlayerEvents` with carry: a scene script that
+## does not set it has run and raised no player event
+## (engine/overworld/events.asm).
+var _ran_deferred: bool = false
 var _active: bool = false
 var _completed: bool = false
 var _failure: Dictionary = {}
@@ -1691,6 +1696,7 @@ func _execute_later_command(source_opcode: int, command: Dictionary, bank: int) 
 			})
 			return _stage_frame_wait(delay_frames)
 		0x8C:
+			_ran_deferred = true
 			if not _push_frame(bank, int(command.get("address", 0))):
 				return {
 					"ok": false, "reason": &"missing_deferred_script",
@@ -3648,6 +3654,7 @@ func _complete_result() -> Dictionary:
 		"source": _request.duplicate(true),
 		"warp": _staged_warp.duplicate(true),
 		"commands": _command_count,
+		"deferred": _ran_deferred,
 	}
 	if _staged_day_of_week >= 0:
 		result["clock"] = {
@@ -3760,6 +3767,7 @@ func _waiting_result() -> Dictionary:
 		"events": _drain_events(),
 		"source": _request.duplicate(true),
 		"commands": _command_count,
+		"deferred": _ran_deferred,
 	}
 
 
