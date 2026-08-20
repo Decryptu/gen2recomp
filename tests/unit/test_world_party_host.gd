@@ -694,3 +694,28 @@ func test_the_user_itself_a_fainted_member_and_a_full_one_are_all_refused() -> v
 		StringName(Gen2WorldPartyHost.transfer_health(_world, _save, 0, 1, false)["reason"]),
 		&"fainted_member"
 	)
+
+
+## `StepHappiness` reaches no `HappinessChanges` row: it is a flat `inc [hl]`
+## per party member, an egg is skipped by `cp EGG / jr z, .next`, and 255 stays
+## 255 because the wrap is caught by `ld [hl], $ff`.
+func test_step_happiness_raises_every_member_but_an_egg_and_saturates() -> void:
+	_save.party[0].happiness = 254
+	var second: Gen2SaveMon = Gen2SaveBattleAdapter.from_battle_mon(
+		Gen2BattleMon.create(_data, 1, 5)
+	)
+	second.happiness = 10
+	second.is_egg = true
+	_save.party = [_save.party[0], second]
+
+	assert_eq(Gen2WorldPartyHost.apply_step_happiness(_save, 1), [0] as Array[int])
+	assert_eq(_save.party[0].happiness, 255)
+	assert_eq(_save.party[1].happiness, 10, "an egg reaches no point")
+
+	assert_true(Gen2WorldPartyHost.apply_step_happiness(_save, 1).is_empty(),
+		"nothing moved once the only eligible member is at 255")
+	_save.party[0].happiness = 100
+	assert_eq(Gen2WorldPartyHost.apply_step_happiness(_save, 3), [0] as Array[int])
+	assert_eq(_save.party[0].happiness, 103, "an owed run of passes is one add")
+	assert_true(Gen2WorldPartyHost.apply_step_happiness(null, 1).is_empty())
+	assert_true(Gen2WorldPartyHost.apply_step_happiness(_save, 0).is_empty())

@@ -127,6 +127,18 @@ var _repel_steps: int = 0
 ## before it existed restores as zero, which is the value a walk reaches after
 ## its first four steps anyway.
 var _wild_encounter_cooldown: int = 0
+## `CountStep`'s own two bytes and `StepHappiness`'s, all three of them byte
+## counters that wrap. `wStepCount` wrapping to zero is what `jr nz` reads to
+## reach `StepHappiness`, and `wHappinessStepCount`'s `and 1` makes that act on
+## every second visit, so the party gains a point every 512 steps.
+## `wPoisonStepCount` has no reader here yet: field poison is not built, and the
+## byte is counted anyway so the reader that arrives needs no migration.
+var _step_count: int = 0
+var _poison_step_count: int = 0
+var _happiness_step_count: int = 0
+## How many `StepHappiness` passes the walk owes but no party owner has spent.
+## The state has no party; the screen that does drains this.
+var _pending_step_happiness: int = 0
 ## `wStatusFlags`' `STATUSFLAGS_NO_WILD_ENCOUNTERS_F`, which `wildoff` sets and
 ## `wildon` clears around a scripted sequence.
 var _wild_encounters_off: bool = false
@@ -276,6 +288,9 @@ func to_dict() -> Dictionary:
 		"just_battled": _just_battled,
 		"repel_steps": _repel_steps,
 		"wild_encounter_cooldown": _wild_encounter_cooldown,
+		"step_count": _step_count,
+		"poison_step_count": _poison_step_count,
+		"happiness_step_count": _happiness_step_count,
 		"wild_encounters_off": _wild_encounters_off,
 		"park_balls": _park_balls,
 		"bug_contest_started": _bug_contest_started.duplicate(),
@@ -360,6 +375,12 @@ static func from_dict(raw: Variant) -> Gen2WorldState:
 			restored.update_unown_dex(int(raw_form))
 	restored.set_registered_item(int(source.get("registered_item", 0)))
 	restored.set_wild_encounter_cooldown(int(source.get("wild_encounter_cooldown", 0)))
+	## Absent in a state written before the step counters existed, which restores
+	## as a fresh walk: zero is what a new game starts on and no reader of these
+	## can tell a migrated save from one that has taken no step.
+	restored._step_count = int(source.get("step_count", 0)) & 0xFF
+	restored._poison_step_count = int(source.get("poison_step_count", 0)) & 0xFF
+	restored._happiness_step_count = int(source.get("happiness_step_count", 0)) & 1
 	restored.set_wild_encounters_off(bool(source.get("wild_encounters_off", false)))
 	restored.set_park_balls(int(source.get("park_balls", 0)))
 	var started: Variant = source.get("bug_contest_started", {})
@@ -392,6 +413,10 @@ func restore_from_dict(raw: Variant) -> void:
 	_just_battled = restored._just_battled
 	_repel_steps = restored._repel_steps
 	_wild_encounter_cooldown = restored._wild_encounter_cooldown
+	_step_count = restored._step_count
+	_poison_step_count = restored._poison_step_count
+	_happiness_step_count = restored._happiness_step_count
+	_pending_step_happiness = 0
 	_wild_encounters_off = restored._wild_encounters_off
 	_park_balls = restored._park_balls
 	_bug_contest_started = restored._bug_contest_started.duplicate()
@@ -1010,11 +1035,35 @@ func picked_fruit_trees() -> Dictionary:
 	return _picked_fruit_trees.duplicate()
 
 
-func consume_repel_step() -> void:
-	if _repel_steps <= 0:
-		return
-	_repel_steps -= 1
+## `CountStep`: the two step counters, the Repel countdown, and `StepHappiness`
+## on the pass `wStepCount` wraps. One call per step the player finishes, from
+## wherever the step was taken.
+func count_step() -> void:
+	_poison_step_count = (_poison_step_count + 1) & 0xFF
+	_step_count = (_step_count + 1) & 0xFF
+	if _step_count == 0:
+		_happiness_step_count = (_happiness_step_count + 1) & 1
+		if _happiness_step_count == 0:
+			_pending_step_happiness += 1
+	if _repel_steps > 0:
+		_repel_steps -= 1
 	changed.emit()
+
+
+func step_count() -> int:
+	return _step_count
+
+
+func poison_step_count() -> int:
+	return _poison_step_count
+
+
+## Takes the owed `StepHappiness` passes and forgets them, so a caller that has
+## a party spends each one exactly once.
+func take_pending_step_happiness() -> int:
+	var owed: int = _pending_step_happiness
+	_pending_step_happiness = 0
+	return owed
 
 
 func swarm_map() -> Vector2i:
