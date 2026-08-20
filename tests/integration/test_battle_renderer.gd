@@ -534,7 +534,19 @@ func test_a_battle_opens_on_the_slide_and_says_nothing_until_it_is_done() -> voi
 	assert_eq(String(_battle_screen.battle_snapshot()["message"]), "", "the box is empty")
 
 	var view: Dictionary = _battle_screen._renderer._view
-	assert_false(bool(view["player_pic_visible"]), "the back pic is not placed yet")
+	## `CopyBackpic` puts the player's own picture on the map before
+	## `InitBattleDisplay` ever reaches the slide, and its eighteen sprites carry
+	## the rows `ClearBox` took off, so the player comes in from the right while
+	## the opponent comes in from the left. Both are drawn without colour:
+	## `SCGB_BATTLE_GRAYSCALE` is set where the battle is entered and
+	## `SCGB_BATTLE_COLORS` only after the slide returns.
+	assert_true(bool(view["player_pic_visible"]), "the back pic slides in too")
+	assert_true(bool(view["grayscale"]), "and the battle has no colour yet")
+	assert_eq(
+		(view["intro_sprites"] as Array).size(),
+		Gen2BattleIntro.SPRITE_COLUMNS * Gen2BattleIntro.SPRITE_ROWS,
+		"`.LoadTrainerBackpicAsOAM`'s own eighteen"
+	)
 	var offsets: PackedInt32Array = PackedInt32Array(view["raster_scx"])
 	assert_eq(offsets.size(), Gen2Screen.HEIGHT)
 	assert_ne(offsets[0], 0, "and the background is somewhere else entirely")
@@ -551,6 +563,8 @@ func test_a_battle_opens_on_the_slide_and_says_nothing_until_it_is_done() -> voi
 	)
 	var settled: Dictionary = _battle_screen._renderer._view
 	assert_true(bool(settled["player_pic_visible"]))
+	assert_false(bool(settled["grayscale"]), "`SCGB_BATTLE_COLORS` runs after the slide")
+	assert_true((settled["intro_sprites"] as Array).is_empty(), "`HideSprites`")
 	assert_true(PackedInt32Array(settled["raster_scx"]).is_empty(), "and nothing is scrolled")
 
 

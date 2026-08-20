@@ -15,8 +15,15 @@ extends RefCounted
 ## `InitBattleDisplay`'s `xor a` / `ldh [hSCX], a` settles it and [method
 ## finished] is that write.
 ##
-## `.subfunction3` slides the overworld's objects off before `HideSprites`; this
-## screen has no OAM, so there is nothing to walk.
+## The player is in two pieces while it runs, and reading `.subfunction3` as the
+## overworld's leftovers cost a session: the eighteen sprites it walks are
+## `CopyBackpic.LoadTrainerBackpicAsOAM`'s own, which is the top three tile rows
+## of the player's back pic drawn as OAM. The bottom of that pic is on the
+## background and comes in with the middle band, and the two track each other to
+## within the two pixels `InitBattleDisplay`'s `xor a` / `ldh [hSCX], a` settles.
+## Without the sprites the player has no head and no shoulders for the whole
+## slide. `HideSprites` is what takes them off, after which `PlaceGraphic` puts
+## the whole pic on the background at its own square.
 
 ## 32 tiles of 8, what an offset wraps at; past the screen's 160 is blank.
 const MAP_WIDTH: int = 256
@@ -44,6 +51,20 @@ const GOLD_MIDDLE_ROWS: int = 32
 ## `ld a, c` / `ldh [hSCX], a` / `call DelayFrame` puts the whole screen at the
 ## starting offset with no band written yet. Crystal delays nowhere.
 const GOLD_LEAD_FRAMES: int = 1
+
+## `.LoadTrainerBackpicAsOAM`: six columns of three, `ld e, (SCREEN_WIDTH + 1) *
+## TILE_WIDTH` for the first x and `ld d, 8 * TILE_WIDTH` for the first y, both
+## stepping one tile. The tile ids are the back pic's own, column major over its
+## six rows, so a column contributes its top three.
+const SPRITE_COLUMNS: int = 6
+const SPRITE_ROWS: int = 3
+const SPRITE_FIRST_X: int = (Gen2BattleAnimBackground.SCREEN_WIDTH + 1) * Gen2Tiles.TILE_WIDTH
+const SPRITE_FIRST_Y: int = 8 * Gen2Tiles.TILE_HEIGHT
+## `PLAYER_SIDE` rows to a column in `vTiles0`, which is where `CopyBackpic`
+## decompressed the pic before copying it into `vTiles2 tile $31`.
+const SPRITE_PIC_ROWS: int = Gen2BattleScreenMap.PLAYER_SIDE
+## `.subfunction3` runs on every frame but the last, `cp $1 / jr z, .skip1`.
+const SPRITE_STEP: int = 2
 
 var _crystal: bool = true
 var _frame: int = 0
@@ -74,6 +95,41 @@ func advance_frame() -> bool:
 		return false
 	_frame += 1
 	return true
+
+
+## `.LoadTrainerBackpicAsOAM` and `.subfunction3` together: the player's own
+## eighteen sprites where this frame leaves them, each { tile, x, y } with OAM's
+## own biased coordinates, which is what a renderer of one already takes.
+##
+## Gold and Silver walk the same eighteen: `CopyBackpic` is shared and their own
+## `.subfunction1` steps them by two beside its `rSCX` writes. Crystal's walk is
+## measured against a real cartridge, sprite by sprite, from x 158 to 16; Gold's
+## is read from the source alone and its lead frame leaves it one step short at
+## the end, which no dump here has been asked about.
+func sprites() -> Array:
+	var out: Array = []
+	if finished():
+		# `HideSprites` runs the moment the slide returns, and `PlaceGraphic`
+		# puts the whole pic on the background instead.
+		return out
+	var walked: int = _sprite_steps()
+	for column: int in SPRITE_COLUMNS:
+		for row: int in SPRITE_ROWS:
+			out.append({
+				"tile": column * SPRITE_PIC_ROWS + row,
+				"x": SPRITE_FIRST_X + column * Gen2Tiles.TILE_WIDTH - walked * SPRITE_STEP,
+				"y": SPRITE_FIRST_Y + row * Gen2Tiles.TILE_HEIGHT,
+			})
+	return out
+
+
+## How many times `.subfunction3` has run. It is skipped on the loop's last pass,
+## so the walk is one shorter than the scroll, which is why the sprites stop two
+## pixels before the background does and `PlaceGraphic` is what lines them up.
+func _sprite_steps() -> int:
+	if _crystal:
+		return _frame
+	return maxi(_frame - GOLD_LEAD_FRAMES, 0)
 
 
 ## Per scanline in hardware draw order; an offset looks *right* into the map.

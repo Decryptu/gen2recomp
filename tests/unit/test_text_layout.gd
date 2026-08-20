@@ -187,3 +187,35 @@ func test_a_no_pause_scroll_runs_itself() -> void:
 		box._process(FRAME)
 	assert_false(box.has_pages_left(), "the second page arrived without a press")
 	assert_false(box.is_revealing())
+
+
+## `LoadBlinkingCursor` is reached by `Paragraph`, `_ContText` and `PromptText`
+## and by nothing else, and `WaitPressAorB_BlinkCursor` says so itself: "The
+## cursor has to be shown before calling this function or no cursor will be shown
+## at all." So a text ending in `done` prints its last page with no arrow and the
+## caller runs on, which is `SendOutMonText`'s "Go! <MON>!"; and a caller waiting
+## with `JoyWaitAorB` shows none either way, which is every page of
+## `ProfOaksPCBoot` including the one ending in `prompt`.
+func test_a_text_nothing_loaded_a_cursor_for_draws_no_arrow() -> void:
+	var waiting: Gen2TextBox = _box()
+	waiting.show_text("hello there")
+	assert_false(waiting.is_revealing())
+	assert_true(waiting.cursor_visible(), "a prompt text blinks its arrow")
+
+	var running_on: Gen2TextBox = _box()
+	running_on.show_text("hello there", false)
+	assert_false(running_on.is_revealing())
+	assert_false(running_on.cursor_visible())
+
+
+## Only the *last* page is exempt: a page with another behind it is reached
+## through `Paragraph` or `_ContText`, both of which load the cursor whatever
+## ends the text.
+func test_a_page_break_blinks_even_when_the_text_runs_on() -> void:
+	var box: Gen2TextBox = _box()
+	box.show_text("first" + Gen2TextStream.PAGE_BREAK + "second", false)
+	assert_true(box.has_pages_left())
+	assert_true(box.cursor_visible(), "the page break waits like any other")
+	assert_true(box.advance())
+	assert_false(box.has_pages_left())
+	assert_false(box.cursor_visible(), "and the last page does not")

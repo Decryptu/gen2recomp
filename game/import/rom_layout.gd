@@ -1121,6 +1121,25 @@ const GS_INTRO_WATER_FIRST_ROW: int = 15
 const GS_INTRO_MAGIKARP_PALETTES: int = 2
 const GS_INTRO_SHELLDER_LAPRAS_PALETTES: int = 3
 
+## `PREDEFPAL_BLACKOUT`, which is what `_CGB_BattleGrayscale` fills every
+## background and object palette with: `PalPacket_BattleGrayscale` is
+## `sgb_pal_set BLACKOUT, BLACKOUT, BLACKOUT, BLACKOUT` and `CopyPalettes` reads
+## each of those bytes as an index into `PredefPals` rather than as a colour.
+##
+## Despite the name it is not black: $7FFF, $1CE7, $0C62, $0000, the grayscale
+## ramp the whole battle is drawn in until `GetSGBLayout SCGB_BATTLE_COLORS`
+## runs, which is after `BattleIntroSlidingPics`. Identical in all three dumps.
+const PREDEFPAL_BLACKOUT: int = 0x1A
+const PREDEF_PALETTE_COLORS: int = 4
+const PREDEF_PALETTE_SIZE: int = PREDEF_PALETTE_COLORS * Gen2Palette.COLOR_BYTES
+
+
+## The offset of one `PredefPals` entry, or -1 for a layout with no pin.
+static func predef_palette_offset(layout: Dictionary, index: int) -> int:
+	var base: int = int(layout.get("predef_pals", -1))
+	return -1 if base < 0 else base + index * PREDEF_PALETTE_SIZE
+
+
 ## `PredefPals` (gfx/sgb/predef.pal), eight bytes an entry. The three the movie
 ## reads are contiguous, so the run's own base is what locates them, and that
 ## base is already pinned: `game_freak_presents.object_palette` is
@@ -1606,6 +1625,9 @@ const GOLD_SILVER: Dictionary = {
 	"base_stats": 0x51B0B,
 	"pic_pointers": 0x48000,
 	"unown_pic_pointers": 0x7C000,
+	# `PredefPals`, which `CopyPalettes` expands a `sgb_pal_set` byte through.
+	# See [constant PREDEFPAL_BLACKOUT] for the one entry the battle reads.
+	"predef_pals": 0xA265,
 	# pokegold has no `pic_animation.asm`, no `anim.asm`, no bitmasks and no
 	# frames: both of its send-outs reach `PlayStereoCry` directly, which is
 	# Crystal's own `.cry_no_anim` branch. See [constant CRYSTAL].
@@ -2070,6 +2092,8 @@ const CRYSTAL: Dictionary = {
 	"base_stats": 0x51424,
 	"pic_pointers": 0x120000,
 	"unown_pic_pointers": 0x124000,
+	# The same table; Crystal has no Gold and Silver intro to pin it under.
+	"predef_pals": 0x9DF6,
 	# `AnimateFrontpic`'s five tables, Crystal's alone: pokegold ships no
 	# `pic_animation.asm`, no `anim.asm`, no bitmasks and no frames, and both of
 	# its send-outs reach `PlayStereoCry` directly. Every address here is

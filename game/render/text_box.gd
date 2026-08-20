@@ -58,6 +58,9 @@ const TILE: int = Gen2Font.TILE
 ## Tiles per second while a page is revealing. The games run this off the frame
 ## counter; a rate is the same thing said in a way that does not assume 60 Hz.
 @export var reveal_speed: float = 30.0
+
+## Whether the last page loads the arrow; see [method show_text].
+var _blink_cursor: bool = true
 ## Whether A or B is being HELD, which is the whole of what a button does to a
 ## printing text. `PrintLetterDelay` reads `hJoyDown` and answers a held A or B
 ## with a single `DelayFrame`, whatever the speed setting says
@@ -174,8 +177,21 @@ func place_at_bottom() -> void:
 
 
 ## Lays [param text] out and starts revealing its first page.
-func show_text(text: String) -> void:
+##
+## [param blink_cursor] is whether the *last* page loads the arrow, and that is
+## not the same question as whether it waits. `WaitPressAorB_BlinkCursor`'s own
+## comment says it: "The cursor has to be shown before calling this function or
+## no cursor will be shown at all." Three routines show it, `Paragraph`,
+## `_ContText` and `PromptText`, so a page with another behind it always blinks;
+## the last page blinks only if the text ends in `prompt`.
+##
+## Two things therefore draw no arrow. A text ending in `done` reaches none of
+## the three, which is why `SendOutMonText` prints "Go! <MON>!" and runs on. And
+## a caller that waits with `JoyWaitAorB` instead loads no cursor whatever its
+## text ends in, which is every page of `ProfOaksPCBoot`.
+func show_text(text: String, blink_cursor: bool = true) -> void:
 	_pages = Gen2TextLayout.lay_out_pages(text, text_columns(), text_rows())
+	_blink_cursor = blink_cursor
 	_page = 0
 	_scroll_page = -1
 	_scroll_lines = []
@@ -430,12 +446,26 @@ func _draw_border(indices: PackedByteArray, width: int) -> void:
 
 ## The arrow, drawn only while the box is actually waiting: a page still
 ## revealing has not reached its `PromptButton` yet.
-func _draw_cursor(indices: PackedByteArray, width: int) -> void:
+## Whether `LoadBlinkingCursor` has the arrow up right now, which is the whole
+## rule for drawing it: a page still revealing has not reached its
+## `PromptButton`, a `scroll_nowait` page turns itself, a last page nothing
+## loaded the cursor for never shows one, and the blink is the other half of
+## `hVBlankCounter`.
+##
+## Public because it is a rule rather than a drawing step, and because a text
+## that owes no press is easy to draw an arrow over by accident.
+func cursor_visible() -> bool:
 	if _pages.is_empty() or is_revealing() or not _cursor_up():
-		return
+		return false
+	if not _blink_cursor and not has_pages_left():
+		return false
 	if _enter_of(_page + 1) == &"scroll_nowait":
-		return
-	if CURSOR_COLUMN >= columns or rows <= 0:
+		return false
+	return CURSOR_COLUMN < columns and rows > 0
+
+
+func _draw_cursor(indices: PackedByteArray, width: int) -> void:
+	if not cursor_visible():
 		return
 	font.draw_code(
 		CURSOR_CODE, indices, width, CURSOR_COLUMN * TILE, (rows - 1) * TILE
