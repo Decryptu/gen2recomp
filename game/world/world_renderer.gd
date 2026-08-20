@@ -8,6 +8,17 @@ extends Node2D
 const PLAYER_COLOR: Color = Color("#d34a5a")
 const FALLBACK_BACKGROUND: Color = Color("#f5f1d8")
 
+## `.InitSprite` (engine/overworld/map_objects.asm) writes an object's OAM y as
+## `add OAM_Y_OFS - 4` against a plain `add OAM_X_OFS` on the other axis, so a
+## 16x16 overworld sprite stands four pixels above its own cell and nothing
+## shifts it sideways. Every map object shares the one write: the emote, the
+## shadow, the boulder dust and the shaking grass are tracking objects that copy
+## the tracked object's `OBJECT_SPRITE_Y` and go through it too, and the jump
+## arc, the tracking bob and the fishing rod are offsets added in front of it.
+## The tuft of grass over a sprite's legs is background rather than OAM and takes
+## no lift; it moves with the sprite because OAM_PRIO is what draws it.
+const SPRITE_LIFT := Vector2(0, -4)
+
 var _world: Gen2WorldAPI = null
 var _animation: Gen2WorldAnimation = null
 var _effects: Gen2WorldEffects = null
@@ -434,7 +445,8 @@ func _draw() -> void:
 			continue
 		var object: Gen2WorldObject = entry["object"]
 		var pixel: Vector2 = Vector2(object.cell * Gen2WorldAPI.CELL_PIXELS) \
-			+ Vector2(object.step_offset(Gen2WorldAPI.CELL_PIXELS)) - camera_pixels
+			+ Vector2(object.step_offset(Gen2WorldAPI.CELL_PIXELS)) - camera_pixels \
+			+ SPRITE_LIFT
 		var texture: Texture2D = _actor_texture(
 			object.sprite, object.palette, object.facing, object.frame, object.big_object_shape()
 		)
@@ -450,7 +462,7 @@ func _draw() -> void:
 		if not battlers_only:
 			_draw_effect_sprites(object.index, pixel)
 
-	var player: Vector2 = Vector2(_world.player_pixel_position())
+	var player: Vector2 = Vector2(_world.player_pixel_position()) + SPRITE_LIFT
 	## The jump arc is a sprite offset, not a position: the shadow and the grass
 	## the hop leaves behind stay on the ground.
 	var jump: Vector2 = Vector2(0, _world.player_jump_offset())
@@ -474,7 +486,8 @@ func _draw() -> void:
 	_draw_effect_sprites(-1, player)
 	## The tree sprite stands over its own cell rather than over an object, and
 	## the source draws every one of these from `wShadowOAMSprite36` up, which is
-	## past every map object.
+	## past every map object. `Cut_Headbutt_GetPixelFacing` is a sprite anim
+	## rather than a map object, so it takes no lift.
 	for sprite: Dictionary in _effect_sprites():
 		if int(sprite["object_index"]) != -2:
 			continue
@@ -546,7 +559,8 @@ func _draw_actor(
 	tile_origin: Vector2i, tile_offset: Vector2, window_size: Vector2i
 ) -> void:
 	var cell_position: Vector2 = sprite["position_cells"]
-	var pixel: Vector2 = cell_position * float(Gen2WorldAPI.CELL_PIXELS) - camera_pixels
+	var pixel: Vector2 = cell_position * float(Gen2WorldAPI.CELL_PIXELS) - camera_pixels \
+		+ SPRITE_LIFT
 	var texture: Texture2D = _actor_texture(
 		sprite["sprite"], 0, int(sprite["facing"]), int(sprite["frame"]),
 		Gen2WorldSprite.BIG_SHAPE_NONE, sprite.get("colors", PackedColorArray())
