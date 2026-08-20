@@ -177,12 +177,17 @@ func _draw_pics() -> void:
 			_palette_map("bg_palette_maps", Gen2BattleAnimBackground.PAL_BG_ENEMY)
 		)
 	var vbank1: PackedByteArray = _vbank1()
-	var enemy_key: Array = [map_key, enemy, _enemy_pixels_key, enemy_palette, raster]
+	var enemy_key: Array = [
+		map_key, enemy, _enemy_pixels_key, enemy_palette, raster, vbank1.duplicate(),
+	]
 	if enemy_key != _enemy_pic_key:
 		_enemy_pic_key = enemy_key
 		_show_layer(
 			_enemy_pic,
-			_pic_layer(map, Gen2BattleScreenMap.ENEMY_BASE_TILE, Gen2BattleScreenMap.ENEMY_SIDE, _enemy_pixels),
+			_pic_layer(
+				map, Gen2BattleScreenMap.ENEMY_BASE_TILE,
+				Gen2BattleScreenMap.ENEMY_SIDE, _enemy_pixels, vbank1, true
+			),
 			enemy_palette
 		)
 	# `InitBattleDisplay` places the player's back pic with `PlaceGraphic` only
@@ -244,14 +249,21 @@ func _bg_map() -> PackedByteArray:
 ## falls inside this pic's own run, drawn from the pic's padded box. A tile is
 ## `base + column * side + row`, which is the column-major order `PlaceGraphic`
 ## walks and `.BGSquares` indexes.
-## [param foreign] is the cells this layer's sheet does not own, which is
-## `wAttrmap` bit 3: `PokeAnim_SetVBank1` puts the enemy's box in VRAM bank 1
-## while `AnimateFrontpic` runs, and bank 1 holds that pic and its frames alone.
-## Without it the animation's own tiles, which start at the block's 49, would be
-## read as the player's pic, whose first tile `AppearUser` names as `$31`.
+## [param vbank1] is `wAttrmap` bit 3, which is the VRAM bank each cell's tile
+## number is read from, and [param animated] is whether this layer owns bank 1.
+##
+## `PokeAnim_SetVBank1` is the whole reason both are needed. Bank 0 holds the
+## enemy's padded picture at tiles 0 to 48 and the player's back pic from `$31`,
+## which is 49; bank 1 holds the enemy's picture *and* `AnimateFrontpic`'s frames,
+## which run from that same 49. So the two sheets overlap in tile number and are
+## told apart by the bank alone: on a bank 0 cell this layer sees its own square
+## and nothing behind it, on a bank 1 cell only the layer that owns bank 1 draws
+## at all, and it may reach the frames. Reading one flat sheet instead puts the
+## animation's tiles over the player and the player's over the enemy, which is
+## the same defect from either side.
 func _pic_layer(
 	map: PackedByteArray, base: int, side: int, pixels: PackedByteArray,
-	foreign: PackedByteArray = PackedByteArray()
+	vbank1: PackedByteArray = PackedByteArray(), animated: bool = false
 ) -> PackedByteArray:
 	var out: PackedByteArray = _new_buffer()
 	var box: int = side * TILE
@@ -263,15 +275,15 @@ func _pic_layer(
 	@warning_ignore("integer_division")
 	var strip: int = pixels.size() / box
 	@warning_ignore("integer_division")
-	var tiles: int = (strip / TILE) * side
-	var owned: bool = foreign.size() == map.size()
+	var banked: int = (strip / TILE) * side
+	var square: int = side * side
+	var banks: bool = vbank1.size() == map.size()
 	for row: int in ROWS:
 		for column: int in COLUMNS:
 			var at: int = row * COLUMNS + column
-			if owned and foreign[at] != 0:
-				continue
+			var bank1: bool = banks and vbank1[at] != 0
 			var tile: int = int(map[at]) - base
-			if tile < 0 or tile >= tiles:
+			if not claims_tile(tile, bank1, animated, square, banked):
 				continue
 			@warning_ignore("integer_division")
 			var source_x: int = (tile / side) * TILE
@@ -282,6 +294,19 @@ func _pic_layer(
 				for x: int in TILE:
 					out[to + x] = pixels[from + x]
 	return out
+
+
+## Whether the layer whose first tile is [param tile]'s own base draws this
+## cell. Split out because it is the whole of `PokeAnim_SetVBank1`'s rule and
+## getting it wrong is invisible until two pictures share a tile number: bank 1
+## belongs to the animated layer alone and reaches its frames, [param banked],
+## while bank 0 gives every layer its own [param square] and nothing behind it.
+static func claims_tile(
+	tile: int, bank1: bool, animated: bool, square: int, banked: int
+) -> bool:
+	if bank1 and not animated:
+		return false
+	return tile >= 0 and tile < (banked if bank1 else square)
 
 
 ## The two pics as index buffers padded out to their own boxes, so a tile id

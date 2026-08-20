@@ -124,6 +124,7 @@ func _process(_delta: float) -> bool:
 	if _frames < SETTLE_FRAMES + DRAW_FRAMES:
 		return false
 
+	RenderingServer.force_draw()
 	var image: Image = root.get_texture().get_image()
 	var error: Error = image.save_png(_output_path)
 	if error != OK:
@@ -163,6 +164,11 @@ func _shoot_range() -> bool:
 		quit(0)
 		return true
 	if _cursor >= _range_lo:
+		# The window is not guaranteed to have been composited between two of
+		# this driver's frames, and an uncomposited one hands back the last
+		# picture that was: a whole capture can come out as one frame repeated.
+		# Drawing on demand is what makes a run of this tool reproducible.
+		RenderingServer.force_draw()
 		var image: Image = root.get_texture().get_image()
 		var error: Error = image.save_png("%s_f%d.png" % [_prefix(), _cursor])
 		if error != OK:

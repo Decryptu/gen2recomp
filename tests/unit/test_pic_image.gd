@@ -276,3 +276,26 @@ func test_a_pic_animations_tiles_collide_with_the_players_own_run() -> void:
 		Gen2BattleScreenMap.PLAYER_BASE_TILE
 	)
 	assert_eq(RomLayout.pic_anim_box_tile(25, 5), Gen2BattleScreenMap.PLAYER_BASE_TILE)
+
+
+## `PokeAnim_SetVBank1`'s rule, which is what stops the enemy's animation tiles
+## being drawn over the player and the player's back pic over the enemy. The
+## enemy's box is 7x7 and its frames run behind it; the player's is 6x6 from
+## `$31`, which is the enemy block's own 49.
+func test_a_pic_layer_claims_only_its_own_sheets_cells() -> void:
+	var square: int = Gen2PicImage.FRONTPIC_TILES * Gen2PicImage.FRONTPIC_TILES
+	var banked: int = square + 28
+	# Bank 0 is the sheet both pictures share, so neither reaches past its box.
+	assert_true(Gen2BattleRenderer.claims_tile(48, false, true, square, banked))
+	assert_false(
+		Gen2BattleRenderer.claims_tile(49, false, true, square, banked),
+		"the player's first tile is not the enemy's fiftieth"
+	)
+	# Bank 1 is the animated layer's alone, and there its frames are in reach.
+	assert_true(Gen2BattleRenderer.claims_tile(49, true, true, square, banked))
+	assert_false(
+		Gen2BattleRenderer.claims_tile(0, true, false, square, banked),
+		"a layer that owns no bank 1 sheet draws none of its cells"
+	)
+	assert_false(Gen2BattleRenderer.claims_tile(banked, true, true, square, banked))
+	assert_false(Gen2BattleRenderer.claims_tile(-1, false, false, square, banked))
