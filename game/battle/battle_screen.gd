@@ -1081,6 +1081,10 @@ func _init_battle_display() -> void:
 	)
 	_refresh_exp_bar()
 	_intro = Gen2BattleIntro.for_data(_data)
+	# `InitBattleDisplay` clears the top of the player's square before the slide
+	# and `PlaceGraphic` puts it back after, which is where [method
+	# advance_intro] restamps it.
+	Gen2BattleScreenMap.clear_intro_box(_bg_map)
 	_intro_message = ""
 	_entrance_stages = []
 	_slides = []
@@ -1127,8 +1131,10 @@ func advance_intro() -> bool:
 		return false
 	if _intro.finished():
 		# `InitBattleDisplay`'s own `xor a` / `ldh [hSCX], a` after the call, and
-		# then `BattleStartMessage`.
+		# then `hGraphicStartTile = $31` / `hlcoord 2, 6` / `PlaceGraphic`, which
+		# puts back the two tile rows its `ClearBox` took off before the slide.
 		_intro = null
+		Gen2BattleScreenMap.stamp(_bg_map, true)
 		_push_view()
 		_build_entrance()
 		_advance_entrance()
@@ -2038,7 +2044,7 @@ func show_message(text: String, prompt: bool = true) -> void:
 	## is the one a menu is drawn over and owes nothing.
 	_message_awaits_press = prompt and not text.is_empty()
 	if _box != null:
-		_box.show_text(text)
+		_box.show_text(text, prompt)
 
 
 ## What the animation layer is doing right now, for a scene test or a screenshot
@@ -4533,11 +4539,22 @@ func _push_view() -> void:
 		"player_hp": _drawn_hp(Gen2Battle.PLAYER), "player_max_hp": _player_max_hp,
 		"exp_pixels": _drawn_exp(),
 		## The background's own scroll, a value per scanline, empty when it is
-		## sitting still. `PlaceGraphic` puts the player's back pic up only after
-		## the slide has returned, so during it there is nothing to draw there.
+		## sitting still.
 		"raster_scx": _raster_offsets(),
 		"raster_scy": _raster_rows(),
-		"player_pic_visible": _intro == null,
+		## `CopyBackpic` puts the player's back pic on the tilemap before
+		## `InitBattleDisplay` ever reaches the slide, so it is there through it
+		## and comes in with the middle band. Its top three tile rows fall in the
+		## band the enemy scrolls, which is what the eighteen sprites below are
+		## for; `PlaceGraphic` afterwards is what settles the two pixels between
+		## them.
+		"player_pic_visible": true,
+		"intro_sprites": _intro.sprites() if _intro != null else [],
+		## `GetSGBLayout SCGB_BATTLE_GRAYSCALE` is called where the battle is
+		## entered and `SCGB_BATTLE_COLORS` only after `BattleIntroSlidingPics`,
+		## so a battle slides in with no colour at all and gains it on the frame
+		## the slide ends.
+		"grayscale": _intro != null,
 		## Which picture each square is holding and which panel is on the map.
 		## Both change several times while a battle is opening: see
 		## [method _build_entrance].

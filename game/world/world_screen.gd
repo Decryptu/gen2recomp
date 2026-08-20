@@ -2884,7 +2884,10 @@ func _show_prof_oaks_pc_page() -> void:
 		_close_prof_oaks_pc()
 		return
 	_apply_text_box_options()
-	_text_box.show_text(String(_oak_pc_pages[0]))
+	## `ProfOaksPCBoot` waits with `JoyWaitAorB`, which loads no cursor, so no
+	## page of the rating blinks an arrow however it ends. `_OakPCText2` ends in
+	## `prompt` and still shows none.
+	_text_box.show_text(String(_oak_pc_pages[0]), false)
 	_text_box.visible = true
 	## `ProfOaksPCBoot` plays the sound `Rate` chose after the rating is printed,
 	## not before it.
@@ -2917,7 +2920,8 @@ func _close_prof_oaks_pc() -> void:
 	if StringName(pending.get("type", &"")) == &"text" \
 		and _text_box != null and _text_box.font != null:
 		_apply_text_box_options()
-		_text_box.show_text(String(pending.get("text", "")))
+		# `OakPCText4` and its own `JoyWaitAorB`, the same as the pages above.
+		_text_box.show_text(String(pending.get("text", "")), false)
 		_text_box.visible = true
 		_script_prompt = "A: advance text"
 	else:
@@ -3708,12 +3712,18 @@ func _show_script_results(results: Array) -> void:
 				## Prof Oak's PC is the one special that draws on its own and
 				## whose script runs on past it, so its pages are shown first and
 				## this text waits behind them.
+				# `LoadBlinkingCursor` is `Paragraph`, `_ContText` and
+				# `PromptText`; a `writetext` whose text ends in `done` reaches
+				# none of them, so its last page carries no arrow and the script
+				# runs straight on.
+				_text_awaits_press = bool(event.get("prompt", true))
 				if _oak_pc_pages.is_empty():
 					_apply_text_box_options()
-					_text_box.show_text(String(event.get("text", "")))
+					_text_box.show_text(
+						String(event.get("text", "")), _text_awaits_press
+					)
 					_text_box.visible = true
 				_script_prompt = "A: advance text"
-				_text_awaits_press = bool(event.get("prompt", true))
 				continue_after_text = true
 			elif event_type == &"button":
 				if _text_box != null:

@@ -261,6 +261,62 @@ func _verify_the_transition(game_id: StringName, data: GameData) -> void:
 				]
 			)
 	print("%s: the four transitions run %s frames." % [game_id, lengths])
+	_verify_the_sliding_intro(game_id, data)
+
+
+## `BattleIntroSlidingPics`, which is the two bands and the eighteen sprites the
+## player's own back pic comes in as. Measured against a real cartridge: its OAM
+## holds six columns of three from x 158 down to 16 by two a frame, the top three
+## tile rows of each column of the pic, and `InitBattleDisplay`'s `ClearBox`
+## takes those same rows off the background for exactly as long.
+func _verify_the_sliding_intro(game_id: StringName, data: GameData) -> void:
+	var intro: Gen2BattleIntro = Gen2BattleIntro.for_data(data)
+	var first: Array = intro.sprites()
+	_r.check(
+		first.size() == Gen2BattleIntro.SPRITE_COLUMNS * Gen2BattleIntro.SPRITE_ROWS,
+		"%s: the slide starts with %d sprites, not eighteen." % [game_id, first.size()]
+	)
+	var xs: Array = []
+	var spent: int = 0
+	while not intro.finished() and spent < MAX_FRAMES:
+		intro.advance_frame()
+		spent += 1
+		var now: Array = intro.sprites()
+		if not now.is_empty():
+			xs.append(int((now[0] as Dictionary)["x"]))
+	_r.check(
+		intro.sprites().is_empty(),
+		"%s: the slide left its sprites up; `HideSprites` takes them off." % game_id
+	)
+	# Every step is `dec [hl]` twice, and the walk never turns back.
+	var steps: Dictionary = {}
+	for index: int in range(1, xs.size()):
+		steps[int(xs[index - 1]) - int(xs[index])] = true
+	_r.check(
+		steps.size() <= 1 and (steps.is_empty() or steps.has(Gen2BattleIntro.SPRITE_STEP)),
+		"%s: the sprite walk steps %s, not two a frame." % [game_id, steps.keys()]
+	)
+
+	# `ClearBox` and `PlaceGraphic`: the map is missing the pic's top two tile
+	# rows for the slide and holds all six after it.
+	var map: PackedByteArray = Gen2BattleScreenMap.seeded()
+	Gen2BattleScreenMap.clear_intro_box(map)
+	var at: int = Gen2BattleScreenMap.PLAYER_AT.y * Gen2BattleScreenMap.COLUMNS \
+		+ Gen2BattleScreenMap.PLAYER_AT.x
+	_r.check(
+		int(map[at]) == Gen2BattleScreenMap.BLANK_TILE
+			and int(map[at + 2 * Gen2BattleScreenMap.COLUMNS])
+				== Gen2BattleScreenMap.PLAYER_BASE_TILE + 2,
+		"%s: the slide's own map is not what a cartridge's `wTilemap` holds." % game_id
+	)
+	_r.check(
+		not data.battle_grayscale_palette().is_empty(),
+		"%s: `_CGB_BattleGrayscale`'s palette is not in the cache." % game_id
+	)
+	_r.note("the slide walks %d frames of sprites from x %d to %d" % [
+		xs.size(), int(xs[0]) if not xs.is_empty() else -1,
+		int(xs[xs.size() - 1]) if not xs.is_empty() else -1,
+	])
 
 
 ## `GetSubstitutePic`, on both sides and all three cartridges: the doll is four

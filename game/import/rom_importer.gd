@@ -3926,6 +3926,7 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		"bar_palettes": _import_bar_palettes(rom, layout),
 		"player_palettes": _import_player_palettes(rom, layout),
 		"transition_palettes": _import_transition_palettes(rom, layout),
+		"battle_grayscale_palette": _import_battle_grayscale_palette(rom, layout),
 		"card_palettes": _import_card_palettes(rom, layout),
 		"pokedex_palettes": _import_pokedex_palettes(rom, layout),
 		"pc_palette": _import_pc_palette(rom, layout),
@@ -4508,6 +4509,20 @@ func _import_bar_palettes(rom: RomFile, layout: Dictionary) -> Dictionary:
 		out[RomLayout.BAR_PALETTE_NAMES[index]] = [
 			rom.u16le(entry), rom.u16le(entry + Gen2Palette.COLOR_BYTES),
 		]
+	return out
+
+
+## `_CGB_BattleGrayscale`'s own palette, which is `PredefPals`' `BLACKOUT` entry
+## and is what every background and object palette holds from the moment a battle
+## is entered until `GetSGBLayout SCGB_BATTLE_COLORS` runs, several hundred
+## frames later on the far side of `BattleIntroSlidingPics`.
+func _import_battle_grayscale_palette(rom: RomFile, layout: Dictionary) -> Array:
+	var at: int = RomLayout.predef_palette_offset(layout, RomLayout.PREDEFPAL_BLACKOUT)
+	if at < 0 or not rom.in_bounds(at, RomLayout.PREDEF_PALETTE_SIZE):
+		return []
+	var out: Array = []
+	for index: int in RomLayout.PREDEF_PALETTE_COLORS:
+		out.append(rom.u16le(at + index * Gen2Palette.COLOR_BYTES))
 	return out
 
 

@@ -50,6 +50,7 @@ var _foresight_matchups: Dictionary = {}
 var _atlases: Dictionary = {}
 var _tiles: Dictionary = {}
 var _bar_palettes: Dictionary = {}
+var _battle_grayscale_palette: Array = []
 var _player_palettes: Dictionary = {}
 var _transition_palettes: Dictionary = {}
 var _card_palettes: Dictionary = {}
@@ -134,6 +135,7 @@ static func open_directory(path: String) -> GameData:
 	data._atlases = manifest.get("atlases", {})
 	data._tiles = manifest.get("tiles", {})
 	data._bar_palettes = manifest.get("bar_palettes", {})
+	data._battle_grayscale_palette = manifest.get("battle_grayscale_palette", [])
 	data._player_palettes = manifest.get("player_palettes", {})
 	data._transition_palettes = manifest.get("transition_palettes", {})
 	data._card_palettes = manifest.get("card_palettes", {})
@@ -1994,6 +1996,19 @@ func player_palette(kind: String) -> PackedColorArray:
 		Gen2Palette.from_packed(int((stored as Array)[0])),
 		Gen2Palette.from_packed(int((stored as Array)[1])),
 	]))
+
+
+## `_CGB_BattleGrayscale`'s, which is `PredefPals`' `BLACKOUT`: white, two grays
+## and black. Every background and object palette holds it from `StartBattle`'s
+## own `GetSGBLayout` until `SCGB_BATTLE_COLORS` replaces it after
+## `BattleIntroSlidingPics`, which is why a battle slides in without colour.
+func battle_grayscale_palette() -> PackedColorArray:
+	if _battle_grayscale_palette.size() < RomLayout.PREDEF_PALETTE_COLORS:
+		return PackedColorArray()
+	var out := PackedColorArray()
+	for packed: Variant in _battle_grayscale_palette:
+		out.append(Gen2Palette.from_packed(int(packed)))
+	return out
 
 
 ## `StartTrainerBattle_LoadPokeBallGraphics`' own palette, which every

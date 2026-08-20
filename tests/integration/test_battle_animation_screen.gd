@@ -159,10 +159,27 @@ func test_the_tilemap_is_the_battle_it_is_seeded_from() -> void:
 	assert_eq(map.size(), Gen2BattleScreenMap.COLUMNS * Gen2BattleScreenMap.ROWS)
 	# `GetEnemyFrontpicCoords` and `AppearUser`'s own `xor a` / `ld a, $31`.
 	assert_eq(int(map[Gen2BattleScreenMap.ENEMY_AT.x]), Gen2BattleScreenMap.ENEMY_BASE_TILE)
+	## `InitBattleDisplay`'s `hlcoord 1, 5 / lb bc, 3, 7 / ClearBox` runs between
+	## `CopyBackpic` and the slide, so the player's square is missing its top two
+	## tile rows for as long as the slide lasts and `PlaceGraphic` puts them back
+	## after. Checked against a real cartridge's own `wTilemap`, where the square
+	## holds `$33` to `$36` down each column while the pics are sliding and `$31`
+	## to `$36` once they have landed.
 	var player_at: int = Gen2BattleScreenMap.PLAYER_AT.y * Gen2BattleScreenMap.COLUMNS \
 		+ Gen2BattleScreenMap.PLAYER_AT.x
-	assert_eq(int(map[player_at]), Gen2BattleScreenMap.PLAYER_BASE_TILE)
+	assert_eq(int(map[player_at]), Gen2BattleScreenMap.BLANK_TILE)
+	var below: int = player_at + 2 * Gen2BattleScreenMap.COLUMNS
+	assert_eq(int(map[below]), Gen2BattleScreenMap.PLAYER_BASE_TILE + 2)
 	assert_eq(int(map[0]), Gen2BattleScreenMap.BLANK_TILE)
+
+	## And the slide is what is holding it: once it has run, the whole picture is
+	## on the map again.
+	while _screen.intro_running():
+		_screen.advance_frame()
+	assert_eq(
+		int(_screen._bg_map[player_at]), Gen2BattleScreenMap.PLAYER_BASE_TILE,
+		"`PlaceGraphic` puts the top rows back when the slide returns"
+	)
 
 
 func test_a_blanked_picture_stays_blank_until_something_stamps_it_back() -> void:

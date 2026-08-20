@@ -157,6 +157,7 @@ func _draw_pics() -> void:
 	var map: PackedByteArray = _bg_map()
 	_ensure_pixels()
 	var raster: Array = _raster_key()
+	var gray: bool = bool(_view.get("grayscale", false))
 	# A packed array is passed by reference, so a key holding the screen's own
 	# map is a key that changes with it: every animation that edits nothing but
 	# the tilemap, which is most of them, would compare equal to what is on
@@ -171,14 +172,14 @@ func _draw_pics() -> void:
 	# when the square is holding a trainer, which it is until that trainer has
 	# sent something out.
 	var enemy_trainer: int = int(_view.get("enemy_trainer_pic", 0))
-	if enemy_trainer > 0:
+	if enemy_trainer > 0 and not bool(_view.get("grayscale", false)):
 		enemy_palette = _remap(
 			_data.trainer_palette(enemy_trainer),
 			_palette_map("bg_palette_maps", Gen2BattleAnimBackground.PAL_BG_ENEMY)
 		)
 	var vbank1: PackedByteArray = _vbank1()
 	var enemy_key: Array = [
-		map_key, enemy, _enemy_pixels_key, enemy_palette, raster, vbank1.duplicate(),
+		map_key, enemy, _enemy_pixels_key, enemy_palette, raster, vbank1.duplicate(), gray,
 	]
 	if enemy_key != _enemy_pic_key:
 		_enemy_pic_key = enemy_key
@@ -201,13 +202,14 @@ func _draw_pics() -> void:
 		# `GetPlayerOrMonPalettePointer`'s `and a / jp nz`: a zero species is the
 		# player standing there, and the palette is the player's own.
 		var backpic: String = String(_view.get("player_backpic", ""))
-		if not backpic.is_empty():
+		if not backpic.is_empty() and not bool(_view.get("grayscale", false)):
 			player_palette = _remap(
 				_data.player_palette(String(_view.get("player_backpic_palette", "chris"))),
 				_palette_map("bg_palette_maps", Gen2BattleAnimBackground.PAL_BG_PLAYER)
 			)
 		var player_key: Array = [
-			map_key, player, _player_pixels_key, player_palette, raster, vbank1.duplicate(),
+			map_key, player, _player_pixels_key, player_palette, raster,
+			vbank1.duplicate(), gray,
 		]
 		if player_key != _player_pic_key:
 			_player_pic_key = player_key
@@ -500,7 +502,19 @@ static func _append_animation(
 ## A battler pic's own palette, permuted by whatever DMG byte the animation's
 ## last `BattleAnimRequestPals` left on that palette slot.
 func _battler_palette(species: int, slot: int) -> PackedColorArray:
+	var grayscale: PackedColorArray = _grayscale()
+	if not grayscale.is_empty():
+		return grayscale
 	return _remap(_data.palette(species), _palette_map("bg_palette_maps", slot))
+
+
+## `_CGB_BattleGrayscale`'s palette while the view says the battle is still in
+## it, which is every frame up to `GetSGBLayout SCGB_BATTLE_COLORS`. Empty once
+## the colours are loaded, which is what every other palette here answers to.
+func _grayscale() -> PackedColorArray:
+	if not bool(_view.get("grayscale", false)) or _data == null:
+		return PackedColorArray()
+	return _data.battle_grayscale_palette()
 
 
 ## `CopyPals`: colour [param index] of the result is colour
@@ -659,7 +673,10 @@ func _draw_hud_balls() -> void:
 ## transparent, which is what OAM's own colour 0 is.
 func _draw_sprites() -> void:
 	var sprites: Array = _view.get("anim_sprites", [])
-	if sprites.is_empty():
+	# `BattleIntroSlidingPics` walks the player's own eighteen, which are OAM
+	# like any other and go through the same blit.
+	var intro: Array = _view.get("intro_sprites", [])
+	if sprites.is_empty() and intro.is_empty():
 		_sprites.texture = null
 		return
 
@@ -669,6 +686,9 @@ func _draw_sprites() -> void:
 	for entry: Variant in sprites:
 		if entry is Dictionary:
 			_blit_sprite(image, entry as Dictionary)
+	for entry: Variant in intro:
+		if entry is Dictionary:
+			_blit_sprite(image, entry as Dictionary, true)
 	_sprites.texture = ImageTexture.create_from_image(image)
 	_sprites.size = image.get_size()
 	_sprites.position = Vector2.ZERO
@@ -676,15 +696,24 @@ func _draw_sprites() -> void:
 
 ## One OAM entry. The stored y and x are the hardware's, which subtracts sixteen
 ## and eight, so a zero in either is off screen rather than at the corner.
-func _blit_sprite(into: Image, sprite: Dictionary) -> void:
-	var pixels: PackedByteArray = _sprite_tile(int(sprite.get("tile", 0)))
+## [param backpic] names the player's back pic as the sprite sheet rather than
+## the animation window: `CopyBackpic` decompresses it into `vTiles0` and
+## `.LoadTrainerBackpicAsOAM` addresses it there, tile by tile, before it is ever
+## copied to `vTiles2 tile $31`.
+func _blit_sprite(into: Image, sprite: Dictionary, backpic: bool = false) -> void:
+	var index: int = int(sprite.get("tile", 0))
+	var pixels: PackedByteArray = _battler_tile(
+		Gen2BattleScreenMap.PLAYER_BASE_TILE + index
+	) if backpic else _sprite_tile(index)
 	if pixels.is_empty():
 		return
 	var attributes: int = int(sprite.get("attributes", 0))
-	var palette: PackedColorArray = _remap(
-		_object_palette(attributes & OAM_PALETTE),
-		_palette_map("ob_palette_maps", attributes & OAM_PALETTE)
-	)
+	var palette: PackedColorArray = _object_palette(attributes & OAM_PALETTE)
+	var grayscale: PackedColorArray = _grayscale()
+	if not grayscale.is_empty():
+		palette = grayscale
+	else:
+		palette = _remap(palette, _palette_map("ob_palette_maps", attributes & OAM_PALETTE))
 	var lookup: Image = Gen2PicImage.from_indices(pixels, TILE, TILE, palette, true)
 	if (attributes & OAM_XFLIP) != 0:
 		lookup.flip_x()

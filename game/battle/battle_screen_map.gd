@@ -116,6 +116,33 @@ static func slide_step(map: PackedByteArray, player_side: bool) -> void:
 			map[y * COLUMNS + to] = map[y * COLUMNS + from]
 
 
+## `InitBattleDisplay`'s `hlcoord 1, 5 / lb bc, 3, 7 / ClearBox`, which runs
+## between `CopyBackpic` and the slide and takes the top two tile rows of the
+## player's back pic off the map.
+##
+## It is what makes the slide's eighteen sprites necessary rather than a second
+## copy of the same picture: those rows fall in the band the enemy's own scroll
+## owns, so the background cannot carry them and `.LoadTrainerBackpicAsOAM`
+## does. `PlaceGraphic` puts the whole pic back when the slide returns.
+const INTRO_CLEAR_AT: Vector2i = Vector2i(1, 5)
+const INTRO_CLEAR_COLUMNS: int = 7
+const INTRO_CLEAR_ROWS: int = 3
+
+
+static func clear_intro_box(map: PackedByteArray) -> void:
+	if map.size() != COLUMNS * ROWS:
+		return
+	for row: int in INTRO_CLEAR_ROWS:
+		var y: int = INTRO_CLEAR_AT.y + row
+		if y < 0 or y >= ROWS:
+			continue
+		for column: int in INTRO_CLEAR_COLUMNS:
+			var x: int = INTRO_CLEAR_AT.x + column
+			if x < 0 or x >= COLUMNS:
+				continue
+			map[y * COLUMNS + x] = BLANK_TILE
+
+
 ## `PlaceGraphic` over one battler's box: a tile is
 ## [code]base + column * side + row[/code], the column-major order `.BGSquares`
 ## indexes and `AppearUser` restores.
