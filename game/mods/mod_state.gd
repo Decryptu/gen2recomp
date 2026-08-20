@@ -1,7 +1,8 @@
 class_name Gen2ModState
 extends RefCounted
 
-## Which installed mods the player has switched off.
+## The installation's own choices about installed mods: which are switched off,
+## and which one's view the game is drawn with.
 ##
 ## Disabled ids are stored rather than enabled ones, so a mod that was just
 ## installed runs without needing an entry written for it, and a file lost or
@@ -11,10 +12,36 @@ extends RefCounted
 ## Gen2ModHost.load_discovered] skips it, so the launcher can show it, say it
 ## is off, and switch it back on without reinstalling.
 
+## Named for the list it was written for; it now also carries the selected view.
 const PATH: String = "user://mods_disabled.json"
 
 static var _disabled: Dictionary = {}
+## The id whose renderers the game is drawn with, or the built-in one. Stored as
+## a bare id and never validated here: whether the mod behind it is installed,
+## enabled and registered is [Gen2ModHost]'s question, and it is asked every time
+## a surface builds a renderer rather than once at load.
+static var _view: StringName = Gen2ModHost.BUILT_IN_RENDERER
 static var _loaded: bool = false
+
+
+## The selected view's id. See [method Gen2ModHost.select_view].
+static func selected_view() -> StringName:
+	_ensure_loaded()
+	return _view
+
+
+## Returns false only when the change could not be written, in which case the
+## in-memory value is rolled back so it never disagrees with the file.
+static func set_selected_view(id: StringName) -> bool:
+	_ensure_loaded()
+	if String(id).is_empty():
+		return false
+	var previous: StringName = _view
+	_view = id
+	if _write():
+		return true
+	_view = previous
+	return false
 
 
 static func is_enabled(id: StringName) -> bool:
@@ -78,6 +105,7 @@ static func forget(id: StringName) -> bool:
 static func reload() -> void:
 	_loaded = false
 	_disabled = {}
+	_view = Gen2ModHost.BUILT_IN_RENDERER
 	_ensure_loaded()
 
 
@@ -86,6 +114,7 @@ static func _ensure_loaded() -> void:
 		return
 	_loaded = true
 	_disabled = {}
+	_view = Gen2ModHost.BUILT_IN_RENDERER
 	if not FileAccess.file_exists(PATH):
 		return
 	var file: FileAccess = FileAccess.open(PATH, FileAccess.READ)
@@ -98,6 +127,9 @@ static func _ensure_loaded() -> void:
 		return
 	if json.data is not Dictionary:
 		return
+	var stored_view: Variant = (json.data as Dictionary).get("view", "")
+	if stored_view is String and not (stored_view as String).is_empty():
+		_view = StringName(stored_view as String)
 	var raw: Variant = (json.data as Dictionary).get("disabled", [])
 	if raw is not Array:
 		return
@@ -115,6 +147,6 @@ static func _write() -> bool:
 	var file: FileAccess = FileAccess.open(PATH, FileAccess.WRITE)
 	if file == null:
 		return false
-	file.store_string(JSON.stringify({"disabled": ids}, "\t"))
+	file.store_string(JSON.stringify({"disabled": ids, "view": String(_view)}, "\t"))
 	file.close()
 	return true

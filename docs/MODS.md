@@ -95,7 +95,7 @@ Two example mods are in `mods/examples/`, to copy into `user://mods/`:
 
 | Mod | Shows |
 |---|---|
-| `voxel_preview/` | A world renderer. Press `V` in the overworld; it reads the same collision, block and palette data the 2D view reads and extrudes geometry from it, on the native layer with a translucent text box and one registered setting |
+| `voxel_preview/` | A world renderer. Switch it on from its page in the launcher, or press `V` in the overworld; it reads the same collision, block and palette data the 2D view reads and extrudes geometry from it, on the native layer with a translucent text box and one registered setting |
 | `new_content/` | Every non-renderer surface in one file: a type and two matchups, a species with its own art, a move, a move effect, an item with its pocket and mart shelf, a named control axis, a visible-encounter population that reads the run's rules, two rebalancing patches, both event channels and the world channel's presentation mutator |
 
 The repository examples are development material and are excluded from every
@@ -622,11 +622,36 @@ agree whenever no step is in flight. A renderer that frames its own view, which
 is what a free camera is, can ignore all three and read
 `player_position_cells()` and `map_size_cells()` directly.
 
-The host constructs a renderer per world, so `select_world_renderer()` can
-switch between the built-in `gen2` renderer and a mod's while the game runs.
-`Gen2WorldScreen.cycle_world_renderer()` is that switch, bound to `V`: the map,
-the player and any running script are untouched, because a renderer reads world
-state and must not write it. Two views of one world have to agree.
+The host constructs a renderer per world, so the view can change while the game
+runs. `Gen2WorldScreen.select_view()` is that switch, and `cycle_view()` is what
+`V` is bound to: the map, the player and any running script are untouched,
+because a renderer reads world state and must not write it. Two views of one
+world have to agree.
+
+## Choosing the view
+
+**Choosing a view is one choice.** `Gen2ModHost.select_view(id)` takes a mod id,
+not a surface, and applies to whichever of the two renderer kinds that id
+registered. Registering a world renderer and a battle renderer under one id is
+how a mod says the two are one view of one world; a mod registering only one
+keeps the built-in renderer on the other, and `gen2` selects both.
+
+| Method | Value |
+|---|---|
+| `view_ids() -> Array[StringName]` | Every id that registered a renderer of either kind, `gen2` first and the rest in load order |
+| `view_label(id) -> String` | The label the registration gave |
+| `view_surfaces(id) -> Dictionary` | `{world, battle}`, which of the two that id draws |
+| `selected_view() -> StringName` | The chosen id, whether or not its mod is loaded |
+| `select_view(id) -> Dictionary` | Chooses it, and persists the choice |
+
+The choice is stored per installation in `user://mods_disabled.json` beside the
+disabled list, so it survives a restart the way a mod's own options do, and it is
+resolved every time a surface builds a renderer rather than once at load: a
+stored id whose mod is uninstalled or switched off draws with the built-in
+renderer and is not refused, and starts drawing again the moment the mod
+registers. Players reach it from the mod's own page in the launcher, which is
+where they already change what a mod does; `V` stays as the live switch where
+[Gen2DebugKeys] is enabled.
 
 ## Replacing the battle renderer
 
@@ -703,8 +728,9 @@ final number should wait for the animation to end rather than reading the view,
 since mid-animation it is deliberately not the real value.
 
 Registration uses the same refusal rules as a world renderer, and shares both
-optional methods (`uses_hardware_viewport()`, `set_native_size()`) and the `V`
-cycle, bound in `Gen2BattleScreen` the way `Gen2WorldScreen` binds it.
+optional methods (`uses_hardware_viewport()`, `set_native_size()`), the one view
+selection above, and the `V` cycle, bound in `Gen2BattleScreen` the way
+`Gen2WorldScreen` binds it.
 
 A battle renderer has two optional methods of its own:
 

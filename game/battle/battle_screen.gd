@@ -3813,7 +3813,7 @@ func _handle_debug_key(event: InputEvent) -> bool:
 		KEY_R:
 			run_from_battle()
 		KEY_V:
-			cycle_battle_renderer()
+			cycle_view()
 		_:
 			return false
 	return true
@@ -3879,27 +3879,27 @@ func _on_native_size_changed(size_pixels: Vector2i) -> void:
 		_renderer.call(Gen2ModHost.RENDERER_RESIZE_METHOD, size_pixels)
 
 
-## Switches the live view to another registered renderer without disturbing the
-## battle behind it.
-func select_battle_renderer(id: StringName) -> Dictionary:
-	var result: Dictionary = Gen2ModHost.instance().select_battle_renderer(id)
+## Switches the live view without disturbing the battle behind it. The same one
+## choice the overworld makes: see [method Gen2WorldScreen.select_view].
+func select_view(id: StringName) -> Dictionary:
+	var result: Dictionary = Gen2ModHost.instance().select_view(id)
 	if not bool(result.get("ok", false)):
 		show_message("Renderer unavailable: %s" % String(result.get("reason", "unknown")))
 		return result
 	_build_renderer()
-	show_message("Renderer: %s" % Gen2ModHost.instance().battle_renderer_label(id))
+	show_message("Renderer: %s" % Gen2ModHost.instance().view_label(id))
 	return result
 
 
-## Selects the registered renderer after the current one, wrapping.
-func cycle_battle_renderer() -> Dictionary:
+## Selects the view after the current one, wrapping.
+func cycle_view() -> Dictionary:
 	var host: Gen2ModHost = Gen2ModHost.instance()
-	var ids: Array = host.battle_renderer_ids()
+	var ids: Array[StringName] = host.view_ids()
 	if ids.size() < 2:
 		show_message("No other renderer is registered")
 		return {"ok": false, "reason": &"single_renderer"}
-	var at: int = ids.find(host.selected_battle_renderer())
-	return select_battle_renderer(ids[posmod(at + 1, ids.size())])
+	var at: int = ids.find(host.selected_view())
+	return select_view(ids[posmod(at + 1, ids.size())])
 
 
 ## `wild` or `trainer`, decided the way the battle itself decides it: a trainer

@@ -9,9 +9,10 @@ extends RefCounted
 ##
 ## The world renderer and the battle renderer are replaceable this way. Neither
 ## requires 2D, so a renderer building geometry from the same block and collision
-## data is a registration rather than a fork, and
-## [method select_world_renderer] and [method select_battle_renderer] swap
-## between them, which is why the contract is a factory.
+## data is a registration rather than a fork, and [method select_view] swaps
+## between them, which is why the contract is a factory. A mod registering both
+## under its own id is saying they are one view of one world, and choosing that
+## view is one choice: see [method select_view].
 ##
 ## Mods are interpreted GDScript: iOS forbids JIT and runtime native loading, so
 ## a compiled extension is not an option for a distributed mod.
@@ -173,9 +174,13 @@ var _world_actors: Dictionary = {}
 ## Mod id to the visible-encounter provider it registered, held the way an actor
 ## is. See [method register_visible_encounters].
 var _visible_encounters: Dictionary = {}
-var _selected_world_renderer: StringName = BUILT_IN_RENDERER
 var _battle_renderers: Dictionary = {}
-var _selected_battle_renderer: StringName = BUILT_IN_RENDERER
+## The one id the player's view is chosen by, read from [Gen2ModState] when the
+## host is built and written back whenever it changes. It is a bare id and may
+## name a mod that is not installed, not enabled, or that registered only one of
+## the two renderer kinds; that is answered where a renderer is asked for rather
+## than by refusing it here, so an uninstalled mod costs the player nothing.
+var _selected_view: StringName = BUILT_IN_RENDERER
 var _menu_entries: Dictionary = {}
 ## The rows mods add to a party member's own submenu, in registration order. See
 ## [method register_party_member_menu].
@@ -202,6 +207,11 @@ static func instance() -> Gen2ModHost:
 		_instance.register_battle_renderer(
 			BUILT_IN_RENDERER, Gen2BattleRenderer, "Game Boy Color 2D"
 		)
+		## Read before any mod has registered anything, which is the only order
+		## available: the id is resolved every time a renderer is asked for, so a
+		## view whose mod loads later is picked up and one whose mod is gone
+		## falls back without a refusal.
+		_instance._selected_view = Gen2ModState.selected_view()
 	return _instance
 
 
@@ -231,24 +241,17 @@ func world_renderer_label(id: StringName) -> String:
 	return _renderer_label(_world_renderers, id)
 
 
+## Which world renderer the selected view resolves to. A view that registered no
+## world renderer leaves the overworld on the built-in one, which is what a mod
+## replacing only the battle screen wants.
 func selected_world_renderer() -> StringName:
-	return _selected_world_renderer
-
-
-## Chooses which registered renderer new worlds are drawn with. The caller
-## rebuilds its view; this only decides what [method create_world_renderer]
-## hands back, so a keybind can flip between 2D and a mod's renderer.
-func select_world_renderer(id: StringName) -> Dictionary:
-	var result: Dictionary = _select(_world_renderers, id)
-	if bool(result.get("ok", false)):
-		_selected_world_renderer = id
-	return result
+	return _selected_view if _world_renderers.has(_selected_view) else BUILT_IN_RENDERER
 
 
 ## A fresh renderer node for the selected world renderer, falling back to the
 ## built-in one so a screen always has something to draw with.
 func create_world_renderer() -> Node:
-	return _create(_world_renderers, _selected_world_renderer, Gen2WorldRenderer)
+	return _create(_world_renderers, selected_world_renderer(), Gen2WorldRenderer)
 
 
 ## Registers a world ACTOR under [param id]: one sprite in the overworld, drawn
@@ -350,23 +353,66 @@ func battle_renderer_label(id: StringName) -> String:
 	return _renderer_label(_battle_renderers, id)
 
 
+## The battle half of the same choice. See [method selected_world_renderer].
 func selected_battle_renderer() -> StringName:
-	return _selected_battle_renderer
-
-
-## Chooses which registered renderer new battles are drawn with. See
-## [method select_world_renderer].
-func select_battle_renderer(id: StringName) -> Dictionary:
-	var result: Dictionary = _select(_battle_renderers, id)
-	if bool(result.get("ok", false)):
-		_selected_battle_renderer = id
-	return result
+	return _selected_view if _battle_renderers.has(_selected_view) else BUILT_IN_RENDERER
 
 
 ## A fresh renderer node for the selected battle renderer, falling back to the
 ## built-in one so a screen always has something to draw with.
 func create_battle_renderer() -> Node:
-	return _create(_battle_renderers, _selected_battle_renderer, Gen2BattleRenderer)
+	return _create(_battle_renderers, selected_battle_renderer(), Gen2BattleRenderer)
+
+
+## Every id that registered a renderer of either kind, built-in first and the
+## rest in registration order. This is the list a player chooses a view from:
+## one entry per view, not one per surface.
+func view_ids() -> Array[StringName]:
+	var out: Array[StringName] = [BUILT_IN_RENDERER]
+	for id: StringName in _world_renderers:
+		if id != BUILT_IN_RENDERER:
+			out.append(id)
+	for id: StringName in _battle_renderers:
+		if id != BUILT_IN_RENDERER and not out.has(id):
+			out.append(id)
+	return out
+
+
+## What [param id] draws, as `{world, battle}`. Both false is an id that
+## registered nothing, which is every id the player has no view for.
+func view_surfaces(id: StringName) -> Dictionary:
+	return {"world": _world_renderers.has(id), "battle": _battle_renderers.has(id)}
+
+
+func view_label(id: StringName) -> String:
+	var label: String = _renderer_label(_world_renderers, id)
+	return label if not label.is_empty() else _renderer_label(_battle_renderers, id)
+
+
+## The id the player's view is chosen by, whether or not its mod is loaded.
+## [method selected_world_renderer] and [method selected_battle_renderer] are
+## what a surface actually draws with.
+func selected_view() -> StringName:
+	return _selected_view
+
+
+## Chooses the view, by mod id, for both surfaces at once: whichever of the two
+## renderer kinds [param id] registered is used, and the built-in one keeps the
+## other. Registering a world renderer and a battle renderer under one id is how
+## a mod says the two are one view of one world, and this is the only thing that
+## ever selects either.
+##
+## Persisted per installation, so the choice survives a restart the way a mod's
+## own options do. The caller rebuilds whatever it is showing; nothing here
+## touches a live screen.
+func select_view(id: StringName) -> Dictionary:
+	if id != BUILT_IN_RENDERER and not _world_renderers.has(id) \
+		and not _battle_renderers.has(id):
+		return {"ok": false, "reason": &"unknown_renderer", "detail": String(id)}
+	_selected_view = id
+	if not Gen2ModState.set_selected_view(id):
+		return {"ok": false, "reason": &"view_not_written", "detail": String(id)}
+	return {"ok": true, "id": id}
 
 
 ## Adds one entry to [param menu]. [param entry] needs a [code]label[/code]; the
@@ -1201,12 +1247,6 @@ func _register(
 
 func _renderer_label(registry: Dictionary, id: StringName) -> String:
 	return String((registry.get(id, {}) as Dictionary).get("label", ""))
-
-
-func _select(registry: Dictionary, id: StringName) -> Dictionary:
-	if not registry.has(id):
-		return {"ok": false, "reason": &"unknown_renderer", "detail": String(id)}
-	return {"ok": true, "id": id}
 
 
 func _create(registry: Dictionary, selected: StringName, fallback_script: Script) -> Node:

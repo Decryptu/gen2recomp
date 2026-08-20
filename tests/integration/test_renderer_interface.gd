@@ -70,6 +70,7 @@ var _battle_screen: Gen2BattleScreen = null
 
 
 func before_each() -> void:
+	_forget_view()
 	Fixture.build()
 	_data = GameData.open_directory(Fixture.directory())
 	Gen2ModHost.reset()
@@ -83,7 +84,15 @@ func after_each() -> void:
 		_battle_screen.free()
 		_battle_screen = null
 	Gen2ModHost.reset()
+	_forget_view()
 	RomCache.clear(Fixture.directory())
+
+
+## Choosing a view writes the installation's own file, so a test that chooses one
+## puts it back rather than leaving the player on a renderer a test registered.
+func _forget_view() -> void:
+	DirAccess.remove_absolute(Gen2ModState.PATH)
+	Gen2ModState.reload()
 
 
 func _script(source: String) -> GDScript:
@@ -95,7 +104,7 @@ func _script(source: String) -> GDScript:
 
 func _open_world(source: String) -> Node:
 	assert_true(Gen2ModHost.instance().register_world_renderer(&"native", _script(source))["ok"])
-	assert_true(Gen2ModHost.instance().select_world_renderer(&"native")["ok"])
+	assert_true(Gen2ModHost.instance().select_view(&"native")["ok"])
 	var packed: PackedScene = load("res://game/world/world_screen.tscn")
 	_world_screen = packed.instantiate() as Gen2WorldScreen
 	_world_screen.map_group = Fixture.MAP_GROUP
@@ -111,7 +120,7 @@ func _open_battle() -> Node:
 	assert_true(
 		Gen2ModHost.instance().register_battle_renderer(&"native", _script(NATIVE_SOURCE))["ok"]
 	)
-	assert_true(Gen2ModHost.instance().select_battle_renderer(&"native")["ok"])
+	assert_true(Gen2ModHost.instance().select_view(&"native")["ok"])
 	var packed: PackedScene = load("res://game/battle/battle_screen.tscn")
 	_battle_screen = packed.instantiate() as Gen2BattleScreen
 	_battle_screen.set_data(_data)
@@ -181,7 +190,7 @@ func test_a_renderer_rebuilt_mid_scene_stays_below_the_live_text_box() -> void:
 	box.visible = true
 	var texture: Texture2D = box.texture
 
-	assert_true(Gen2ModHost.instance().select_world_renderer(&"gen2")["ok"])
+	assert_true(Gen2ModHost.instance().select_view(&"gen2")["ok"])
 	_world_screen._build_renderer()
 	var viewport: SubViewport = _world_screen._screen.viewport()
 	assert_eq(_world_screen._renderer.get_parent(), viewport, "still in the viewport")
@@ -198,7 +207,7 @@ func test_a_renderer_rebuilt_mid_scene_stays_below_the_live_text_box() -> void:
 ## The same rule in the battle screen, whose box is never hidden at all.
 func test_a_battle_renderer_rebuilt_mid_scene_stays_below_the_interface() -> void:
 	await _open_battle()
-	assert_true(Gen2ModHost.instance().select_battle_renderer(&"gen2")["ok"])
+	assert_true(Gen2ModHost.instance().select_view(&"gen2")["ok"])
 	_battle_screen._build_renderer()
 	var viewport: SubViewport = _battle_screen._screen.viewport()
 	var children: Array = viewport.get_children()
