@@ -1289,8 +1289,18 @@ func interact() -> bool:
 		## nothing: an actor can never shadow an object, a background event or a
 		## tile branch. Its own pose is all it changes, so no player event is
 		## spent and the sign timer stands.
-		return _actors != null \
-			and _actors.interact(_world.facing_cell(), _world.player_facing)
+		if _actors == null \
+			or not _actors.interact(_world.facing_cell(), _world.player_facing):
+			return false
+		## On the frame of the press, which is what the offer promises. The
+		## actor layer re-collects where the press is consumed, so nothing after
+		## this sees a change to redraw for: `advance_frame` would compare a list
+		## already carrying the new pose against itself and skip its own refresh,
+		## and the picture would wait for the next unrelated change, which for a
+		## mon icon is its two-frame flip nine frames later.
+		if _renderer != null:
+			_renderer.refresh()
+		return true
 	## `OWPlayerInput`, the last branch `PlayerEvents` tries, and a player event
 	## like the rest of them.
 	_zero_map_name_sign_timer()
@@ -1539,10 +1549,12 @@ func preview_pet_actor() -> void:
 	## the sprite, is clear of the player rather than behind them.
 	_world.player_facing = Gen2WorldSprite.FACING_UP
 	_actors.set_actors([PreviewPet.new(_world)])
+	## Deliberately NOT followed by a refresh of its own, unlike the other
+	## drivers here: the press is what has to reach the picture, and a driver
+	## redrawing after it would photograph a heart that never arrived on the
+	## frame it was pressed.
 	interact()
-	advance_frames(1)
 	_script_prompt = "Debug pet actor preview"
-	_renderer.refresh()
 	_refresh_labels()
 
 
