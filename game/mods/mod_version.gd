@@ -68,8 +68,8 @@ static func _valid_token(token: String) -> bool:
 
 static func _matches_token(version: String, token: String) -> bool:
 	if token.begins_with("^"):
-		var floor: String = token.substr(1)
-		var values: Array[int] = _parts(floor)
+		var lower: String = token.substr(1)
+		var values: Array[int] = _parts(lower)
 		var ceiling: Array[int] = values.duplicate()
 		if values[0] > 0:
 			ceiling = [values[0] + 1, 0, 0]
@@ -77,19 +77,19 @@ static func _matches_token(version: String, token: String) -> bool:
 			ceiling = [0, values[1] + 1, 0]
 		else:
 			ceiling = [0, 0, values[2] + 1]
-		return _compare(version, floor) >= 0 and _compare(version, _join(ceiling)) < 0
+		return _compare(version, lower) >= 0 and _compare(version, _join(ceiling)) < 0
 	if token.begins_with("~"):
-		var floor: String = token.substr(1)
-		var values: Array[int] = _parts(floor)
-		return _compare(version, floor) >= 0 \
+		var lower: String = token.substr(1)
+		var values: Array[int] = _parts(lower)
+		return _compare(version, lower) >= 0 \
 			and _compare(version, "%d.%d.0" % [values[0], values[1] + 1]) < 0
 	if token.contains("x") or token.contains("X") or token.contains("*"):
-		var wanted: PackedStringArray = token.split(".", false)
+		var mask_parts: PackedStringArray = token.split(".", false)
 		var actual: Array[int] = _parts(version)
-		for index: int in wanted.size():
-			if wanted[index] in ["x", "X", "*"]:
+		for index: int in mask_parts.size():
+			if mask_parts[index] in ["x", "X", "*"]:
 				return true
-			if int(wanted[index]) != actual[index]:
+			if int(mask_parts[index]) != actual[index]:
 				return false
 		return true
 	var operator: String = "="

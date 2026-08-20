@@ -58,9 +58,9 @@ func _build() -> void:
 		var row: Dictionary = RomRegistry.lookup(sha1)
 		var line: HBoxContainer = Gen2LauncherUI.row(Gen2LauncherUI.GAP_MD)
 		accepted.add_child(line)
-		var name: Label = Gen2LauncherUI.body(_theme, RomRegistry.title_for(game_id))
-		name.custom_minimum_size = Vector2(96, 0)
-		line.add_child(name)
+		var title: Label = Gen2LauncherUI.body(_theme, RomRegistry.title_for(game_id))
+		title.custom_minimum_size = Vector2(96, 0)
+		line.add_child(title)
 		var revision: Label = Gen2LauncherUI.muted(
 			_theme, String(row.get("revision", "Supported"))
 		)
@@ -79,10 +79,10 @@ func set_update_result(message: String, colour: Color) -> void:
 	_result.add_theme_color_override("font_color", colour)
 
 
-func _card(host: VBoxContainer, name: String) -> VBoxContainer:
+func _card(host: VBoxContainer, title: String) -> VBoxContainer:
 	var panel: Gen2LauncherCard = Gen2LauncherCard.create(_theme, Gen2LauncherTheme.RADIUS_MD, 22)
 	host.add_child(panel)
 	var column: VBoxContainer = Gen2LauncherUI.column(Gen2LauncherUI.GAP_MD)
 	panel.add_child(column)
-	column.add_child(Gen2LauncherUI.caption(_theme, name))
+	column.add_child(Gen2LauncherUI.caption(_theme, title))
 	return column

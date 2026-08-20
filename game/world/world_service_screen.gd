@@ -384,10 +384,10 @@ func _mart_text(slot: String, filled: Dictionary = {}) -> String:
 	var prefix: String = String(MART_TEXT_PREFIX.get(
 		StringName(_mart_source().get("variant", &"standard")), ""
 	))
-	var name: String = prefix + slot
+	var slot_name: String = prefix + slot
 	if slot == "intro" and prefix.is_empty():
-		name = "welcome"
-	var text: String = _data.mart_text(name)
+		slot_name = "welcome"
+	var text: String = _data.mart_text(slot_name)
 	if text.is_empty():
 		return ""
 	return _fill_mart_markers(text, filled)
@@ -1080,11 +1080,11 @@ func _refresh_card() -> void:
 			# makes the exit restart it.
 			_radio_music = RADIO_MUSIC_RESTART_MAP if bool(tuned.get("ok", false)) \
 				else RADIO_MUSIC_ENTER_MAP
-			var show: Gen2RadioShow = _world.radio_show()
+			var radio_show: Gen2RadioShow = _world.radio_show()
 			_pokegear.set_radio(
 				_world.state.radio_knob(),
 				String(tuned.get("name", "")) if bool(tuned.get("ok", false)) else "",
-				show.lines() if show != null else PackedStringArray()
+				radio_show.lines() if radio_show != null else PackedStringArray()
 			)
 		Gen2PokegearScreen.CARD_PHONE:
 			_pokegear.set_contacts(
@@ -1421,21 +1421,21 @@ func _render_options(override: Array = []) -> void:
 	for index: int in values.size():
 		var value: Variant = values[index]
 		var label := Label.new()
-		var name: String = str(value)
+		var text: String = str(value)
 		if value is Dictionary:
 			var dictionary: Dictionary = value as Dictionary
-			name = str(dictionary.get("name", ""))
-			if name.is_empty():
-				name = str(dictionary.get("caller_label", ""))
-			if name.is_empty():
-				name = str(dictionary.get("trainer_name", "UNKNOWN"))
-			if name.is_empty() and dictionary.has("index"):
-				name = "CONTACT %d" % int(dictionary.get("index", -1))
+			text = str(dictionary.get("name", ""))
+			if text.is_empty():
+				text = str(dictionary.get("caller_label", ""))
+			if text.is_empty():
+				text = str(dictionary.get("trainer_name", "UNKNOWN"))
+			if text.is_empty() and dictionary.has("index"):
+				text = "CONTACT %d" % int(dictionary.get("index", -1))
 		if value is Dictionary and _mode == MODE.PC_ITEM_LIST:
 			var stack: int = int((value as Dictionary).get("quantity", 0))
-			name = "%s    x%d of %d" % [name, _pc_quantity, stack] if index == _cursor \
-				else "%s    x%d" % [name, stack]
-		label.text = ("> " if index == _cursor else "  ") + name
+			text = "%s    x%d of %d" % [text, _pc_quantity, stack] if index == _cursor \
+				else "%s    x%d" % [text, stack]
+		label.text = ("> " if index == _cursor else "  ") + text
 		label.add_theme_color_override("font_color", ACCENT if index == _cursor else TEXT)
 		label.add_theme_font_size_override("font_size", 18)
 		parent.add_child(label)

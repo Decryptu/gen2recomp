@@ -1358,11 +1358,11 @@ func apply_changes(
 			next_flags.erase(flag)
 	var next_engine_flags: Dictionary = _engine_flags.duplicate()
 	for raw_flag: Variant in engine_flag_changes:
-		var engine_flag: int = int(raw_flag)
+		var flag_id: int = int(raw_flag)
 		if bool(engine_flag_changes[raw_flag]):
-			next_engine_flags[engine_flag] = true
+			next_engine_flags[flag_id] = true
 		else:
-			next_engine_flags.erase(engine_flag)
+			next_engine_flags.erase(flag_id)
 	var next_scenes: Dictionary = _map_scenes.duplicate()
 	for raw_map: Variant in scene_changes:
 		next_scenes[String(raw_map)] = int(scene_changes[raw_map])

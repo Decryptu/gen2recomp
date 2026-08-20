@@ -42,9 +42,9 @@ var cursor: int = 0
 var _options: Gen2Options = null
 
 
-static func build(options: Gen2Options) -> Gen2WorldOptionsMenu:
+static func build(source_options: Gen2Options) -> Gen2WorldOptionsMenu:
 	var menu := Gen2WorldOptionsMenu.new()
-	menu._options = options if options != null else Gen2Options.new()
+	menu._options = source_options if source_options != null else Gen2Options.new()
 	return menu
 
 

@@ -138,7 +138,7 @@ var _skippable: bool = false
 ## [param skippable] is `STATUSFLAGS_HALL_OF_FAME_F`, which is set by the time
 ## the induction it follows has been through once. Null when the cache carries no
 ## credits script.
-static func create(data: GameData, skippable: bool = false) -> Gen2Credits:
+static func create(data: GameData, can_skip: bool = false) -> Gen2Credits:
 	if data == null:
 		return null
 	var script: PackedByteArray = data.credits_script()
@@ -149,7 +149,7 @@ static func create(data: GameData, skippable: bool = false) -> Gen2Credits:
 	out._script = script
 	out._copyright_index = data.credits_index("copyright")
 	out._crystal = Gen2WorldState.is_crystal_profile(data)
-	out._skippable = skippable
+	out._skippable = can_skip
 	out._construct()
 	return out
 
@@ -239,18 +239,18 @@ func advance_frame(held: Array = []) -> Array:
 	var events: Array = []
 	if Gen2Button.B in held:
 		_skip()
-	var step: int = _step
-	_step = STEP_PARSE if step >= CYCLE_FRAMES - 1 else step + 1
-	if step == STEP_PARSE:
+	var at_step: int = _step
+	_step = STEP_PARSE if at_step >= CYCLE_FRAMES - 1 else at_step + 1
+	if at_step == STEP_PARSE:
 		events = _parse()
-	elif step in _gfx_steps():
+	elif at_step in _gfx_steps():
 		_load_banner()
 		## `Credits_UpdateGFXRequestPath` and `Credits_RequestGFX` both clear
 		## `hBGMapMode`, which is what stops the copy after its three thirds.
 		_copying = false
-	elif step == _ly_step():
+	elif at_step == _ly_step():
 		_scroll = (_scroll + _ly_delta()) & 0xFF
-	elif step == _prep_step():
+	elif at_step == _prep_step():
 		_copying = false
 	_copy_third()
 	return events

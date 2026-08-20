@@ -114,7 +114,7 @@ func _ready() -> void:
 ## false and the caller keeps its own screen open.
 func open(
 	data: GameData,
-	card: StringName,
+	card_id: StringName,
 	owned: Array,
 	text: String = "",
 	delete_text: String = "",
@@ -125,7 +125,7 @@ func open(
 	if _page == null or not _page.ready() or not _page.cards_ready():
 		visible = false
 		return false
-	_card = card
+	_card = card_id
 	_owned = owned.duplicate()
 	_text = text
 	_delete_text = delete_text
@@ -141,7 +141,7 @@ func open(
 	return true
 
 
-## `Pokegear_UpdateClock`'s three readings, which the card redraws every frame.
+## `Pokegear_UpdateClock`'s three readings, which the card_id redraws every frame.
 func set_clock(weekday: int, hour: int, minute: int) -> void:
 	_weekday = weekday
 	_hour = hour
@@ -455,8 +455,8 @@ func _knob_image() -> Image:
 ## through the overworld's first palette the way every icon on these screens is.
 ## Colour zero is transparent, which is what lets one sit over the card.
 func _icon(first: int, columns: int, rows: int, repeat: bool = false) -> Image:
-	var size := Vector2i(columns, rows) * Gen2TownMapPage.TILE
-	var out := Image.create(size.x, size.y, false, Image.FORMAT_RGBA8)
+	var pixels := Vector2i(columns, rows) * Gen2TownMapPage.TILE
+	var out := Image.create(pixels.x, pixels.y, false, Image.FORMAT_RGBA8)
 	out.fill(Color(0, 0, 0, 0))
 	var tiles: PackedByteArray = _data.tile_indices("pokegear_sprites") if _data != null \
 		else PackedByteArray()

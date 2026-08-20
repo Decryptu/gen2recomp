@@ -30,31 +30,31 @@ static func from_game_data(data: GameData) -> Gen2BattleAnimData:
 		return null
 	var regions: Dictionary = {}
 	for name: StringName in [&"scripts", &"objects", &"framesets", &"oam_sets"]:
-		var region: Dictionary = data.battle_anim_region(name)
-		if region.is_empty():
+		var region_data: Dictionary = data.battle_anim_region(name)
+		if region_data.is_empty():
 			return null
-		regions[name] = region
-	var gfx: Array = []
+		regions[name] = region_data
+	var sheets: Array = []
 	for index: int in data.battle_anim_gfx_count():
-		gfx.append(data.battle_anim_gfx(index))
-	return create(regions, gfx, data.battle_anim_sine(), data.id)
+		sheets.append(data.battle_anim_gfx(index))
+	return create(regions, sheets, data.battle_anim_sine(), data.id)
 
 
 static func create(
-	regions: Dictionary, gfx: Array, sine: PackedByteArray = PackedByteArray(),
-	profile: StringName = &"crystal"
+	regions: Dictionary, sheets: Array, sine: PackedByteArray = PackedByteArray(),
+	profile_name: StringName = &"crystal"
 ) -> Gen2BattleAnimData:
 	var out := Gen2BattleAnimData.new()
 	out._regions = regions
-	out._gfx = gfx
+	out._gfx = sheets
 	out._sine = sine
-	out._profile = profile
+	out._profile = profile_name
 	return out
 
 
 ## Which cartridge this came from. Only the bg effect table reads it, and only
 ## because pokegold's is one entry shorter than Crystal's; nothing else in the
-## layer is profile split.
+## layer is profile_name split.
 func profile() -> StringName:
 	return _profile
 

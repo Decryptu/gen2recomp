@@ -411,13 +411,13 @@ func _cursor_image(
 	sheet: PackedByteArray, palette: PackedColorArray, tile: int,
 	flip_x: bool, flip_y: bool
 ) -> Image:
-	var size: int = Gen2Font.TILE
+	var side: int = Gen2Font.TILE
 	var cell := PackedByteArray()
-	cell.resize(size * size)
+	cell.resize(side * side)
 	Gen2Font.blit_slot(
-		sheet, RomLayout.PC_SELECT_TILES * size, tile, cell, size, 0, 0
+		sheet, RomLayout.PC_SELECT_TILES * side, tile, cell, side, 0, 0
 	)
-	var image: Image = Gen2PicImage.from_indices(cell, size, size, palette, true)
+	var image: Image = Gen2PicImage.from_indices(cell, side, side, palette, true)
 	if flip_x:
 		image.flip_x()
 	if flip_y:

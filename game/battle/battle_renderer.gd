@@ -306,9 +306,9 @@ func _padded_pic(pic: Dictionary, side: int) -> PackedByteArray:
 	if pic.is_empty():
 		return out
 
-	var name: String = String(pic.get("atlas", ""))
+	var atlas_name: String = String(pic.get("atlas", ""))
 	var cell: Dictionary = Gen2PicImage.atlas_cell(
-		_data.atlas_indices(name), _data.atlas(name), pic
+		_data.atlas_indices(atlas_name), _data.atlas(atlas_name), pic
 	)
 	if cell.is_empty():
 		return out

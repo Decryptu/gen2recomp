@@ -62,9 +62,9 @@ var _scroll: float = 0.0:
 		_place_all()
 
 
-static func create(theme: Gen2LauncherTheme, order: Array[StringName]) -> Gen2CartridgeStage:
+static func create(palette: Gen2LauncherTheme, order: Array[StringName]) -> Gen2CartridgeStage:
 	var stage := Gen2CartridgeStage.new()
-	stage._theme = theme
+	stage._theme = palette
 	stage._order = order
 	stage._build()
 	return stage
@@ -82,9 +82,9 @@ func _build() -> void:
 	focus_exited.connect(_place_all)
 	mouse_exited.connect(func() -> void: _hover(-1))
 	for index: int in _order.size():
-		var cartridge: Gen2Cartridge = Gen2Cartridge.create(_theme, _order[index])
-		add_child(cartridge)
-		_cartridges.append(cartridge)
+		var cartridge_node: Gen2Cartridge = Gen2Cartridge.create(_theme, _order[index])
+		add_child(cartridge_node)
+		_cartridges.append(cartridge_node)
 
 
 func cartridge(game_id: StringName) -> Gen2Cartridge:

@@ -52,8 +52,8 @@ var directory: String = ""
 
 ## Reads and validates the manifest in [param directory].
 ## Returns { ok, manifest } or { ok: false, reason, detail }.
-static func read(directory: String) -> Dictionary:
-	var path: String = "%s/%s" % [directory, FILENAME]
+static func read(folder: String) -> Dictionary:
+	var path: String = "%s/%s" % [folder, FILENAME]
 	if not FileAccess.file_exists(path):
 		return _refuse(&"missing_manifest", path)
 	var file: FileAccess = FileAccess.open(path, FileAccess.READ)
@@ -64,14 +64,14 @@ static func read(directory: String) -> Dictionary:
 	var parsed: Variant = JSON.parse_string(text)
 	if not parsed is Dictionary:
 		return _refuse(&"invalid_manifest", path)
-	return from_dictionary(parsed as Dictionary, directory)
+	return from_dictionary(parsed as Dictionary, folder)
 
 
 ## Validates an already-parsed manifest. Split out so a test, and a future pack
 ## reader, do not need a file on disk.
-static func from_dictionary(source: Dictionary, directory: String) -> Dictionary:
+static func from_dictionary(source: Dictionary, folder: String) -> Dictionary:
 	var manifest := Gen2ModManifest.new()
-	manifest.directory = directory
+	manifest.directory = folder
 	manifest.id = StringName(String(source.get("id", "")))
 	manifest.name = String(source.get("name", String(manifest.id)))
 	manifest.version = String(source.get("version", ""))
@@ -116,7 +116,7 @@ static func from_dictionary(source: Dictionary, directory: String) -> Dictionary
 			return _refuse(&"invalid_dependency_range", "%s %s" % [dependency_id, wanted])
 	if manifest.entry.is_empty():
 		return _refuse(&"missing_entry", String(manifest.id))
-	# An entry is a path inside the mod's own directory. Anything that climbs
+	# An entry is a path inside the mod's own folder. Anything that climbs
 	# out of it, or reaches for an absolute location, is refused.
 	if manifest.entry.begins_with("/") or manifest.entry.contains("..") \
 		or manifest.entry.contains(":"):

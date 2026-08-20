@@ -199,11 +199,11 @@ func _draw() -> void:
 	)
 	var window_size: Vector2i = Gen2WorldAPI.VIEW_TILES + Vector2i.ONE
 	var page: PackedInt32Array = _world.tile_indices_in_window(tile_origin, window_size)
-	var hidden: Dictionary = _hidden_tree_tiles()
+	var hidden_tiles: Dictionary = _hidden_tree_tiles()
 	for y: int in window_size.y:
 		for x: int in window_size.x:
 			var tile: int = page[y * window_size.x + x]
-			if hidden.has(tile_origin + Vector2i(x, y)):
+			if hidden_tiles.has(tile_origin + Vector2i(x, y)):
 				tile = Gen2WorldEffects.HEADBUTT_TREE_HIDDEN_TILE
 			if _atlas == null or tile < 0 or tile >= _world.current_tileset.tile_count:
 				continue
@@ -332,8 +332,8 @@ func _draw_actor(
 	sprite: Dictionary, camera_pixels: Vector2, page: PackedInt32Array,
 	tile_origin: Vector2i, tile_offset: Vector2, window_size: Vector2i
 ) -> void:
-	var position: Vector2 = sprite["position_cells"]
-	var pixel: Vector2 = position * float(Gen2WorldAPI.CELL_PIXELS) - camera_pixels
+	var cell_position: Vector2 = sprite["position_cells"]
+	var pixel: Vector2 = cell_position * float(Gen2WorldAPI.CELL_PIXELS) - camera_pixels
 	var texture: Texture2D = _actor_texture(
 		sprite["sprite"], 0, int(sprite["facing"]), int(sprite["frame"]),
 		Gen2WorldSprite.BIG_SHAPE_NONE, sprite.get("colors", PackedColorArray())
@@ -341,7 +341,7 @@ func _draw_actor(
 	if texture == null:
 		return
 	draw_texture(texture, pixel)
-	if _in_grass(Vector2i(roundi(position.x), roundi(position.y))):
+	if _in_grass(Vector2i(roundi(cell_position.x), roundi(cell_position.y))):
 		_draw_grass_over(pixel, page, tile_origin, tile_offset, window_size)
 
 
@@ -393,7 +393,7 @@ func _in_grass(cell: Vector2i) -> bool:
 func _draw_grass_over(
 	pixel: Vector2,
 	page: PackedInt32Array,
-	tile_origin: Vector2i,
+	_tile_origin: Vector2i,
 	tile_offset: Vector2,
 	window_size: Vector2i,
 ) -> void:
@@ -591,23 +591,23 @@ func _draw_effect_sprite(sprite: Dictionary, anchor: Vector2) -> void:
 ## `.LoadPalettes` writes over PAL_OW_TREE and `.FlashPalettes` then rotates
 ## left. Everything else wears the overworld palette its spawn named, at the
 ## time of day the map is on.
-func _effect_palette(sheet: Dictionary, palette_index: int, rotation: int) -> PackedColorArray:
+func _effect_palette(sheet: Dictionary, palette_index: int, rotation_step: int) -> PackedColorArray:
 	var own: PackedColorArray = sheet.get("colors", PackedColorArray())
 	if own.is_empty():
 		return _world.data.overworld_sprite_palette(palette_index, _time_of_day)
 	var rotated := PackedColorArray()
 	for slot: int in own.size():
-		rotated.append(own[(slot + rotation) % own.size()])
+		rotated.append(own[(slot + rotation_step) % own.size()])
 	return rotated
 
 
-func _effect_sheet(name: String) -> Dictionary:
+func _effect_sheet(sheet_name: String) -> Dictionary:
 	if _world == null or _world.data == null:
 		return {}
-	if _effect_sheets.has(name):
-		return _effect_sheets[name]
-	var sheet: Dictionary = _world.data.overworld_effect(name)
-	_effect_sheets[name] = sheet
+	if _effect_sheets.has(sheet_name):
+		return _effect_sheets[sheet_name]
+	var sheet: Dictionary = _world.data.overworld_effect(sheet_name)
+	_effect_sheets[sheet_name] = sheet
 	return sheet
 
 
@@ -617,10 +617,10 @@ func _effect_sheet(name: String) -> Dictionary:
 ## carrying its own palette can be asked for.
 func _draw_effect_tile(
 	sheet: Dictionary, tile: int, palette_index: int, flip_x: bool, at: Vector2,
-	rotation: int = 0
+	rotation_step: int = 0
 ) -> void:
 	var key: String = "%s:%d:%d:%d:%d:%d" % [
-		sheet["name"], tile, palette_index, int(flip_x), _time_of_day, rotation,
+		sheet["name"], tile, palette_index, int(flip_x), _time_of_day, rotation_step,
 	]
 	var texture: Texture2D = _effect_textures.get(key, null)
 	if texture == null:
@@ -628,7 +628,7 @@ func _draw_effect_tile(
 		var tiles: int = int(sheet["tiles"])
 		if tile < 0 or tile >= tiles or indices.size() < tiles * Gen2Tiles.TILE_PIXELS:
 			return
-		var palette: PackedColorArray = _effect_palette(sheet, palette_index, rotation)
+		var palette: PackedColorArray = _effect_palette(sheet, palette_index, rotation_step)
 		var image := Image.create(
 			Gen2Tiles.TILE_WIDTH, Gen2Tiles.TILE_HEIGHT, false, Image.FORMAT_RGBA8
 		)

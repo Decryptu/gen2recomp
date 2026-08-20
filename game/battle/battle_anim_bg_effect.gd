@@ -18,17 +18,17 @@ var battle_turn: int = 0
 var param: int = 0
 
 
-static func create(id: int, jumptable_index: int, battle_turn: int, param: int
+static func create(effect_id: int, jumptable: int, turn: int, parameter: int
 ) -> Gen2BattleAnimBgEffect:
 	var out := Gen2BattleAnimBgEffect.new()
-	out.id = id & 0xFF
-	out.jumptable_index = jumptable_index & 0xFF
-	out.battle_turn = battle_turn & 0xFF
-	out.param = param & 0xFF
+	out.id = effect_id & 0xFF
+	out.jumptable_index = jumptable & 0xFF
+	out.battle_turn = turn & 0xFF
+	out.param = parameter & 0xFF
 	return out
 
 
-## `EndBattleBGEffect`: zeroing the id is what frees the slot.
+## `EndBattleBGEffect`: zeroing the effect_id is what frees the slot.
 func end() -> void:
 	id = 0
 

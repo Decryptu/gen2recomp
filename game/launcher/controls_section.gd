@@ -97,7 +97,7 @@ func _build_mod_actions() -> void:
 
 
 func _mod_row(action: Dictionary) -> HBoxContainer:
-	var name: StringName = action["name"]
+	var action_name: StringName = action["name"]
 	var value: Label = _bindings_label()
 	var edit: Gen2LauncherButton = Gen2LauncherButton.create(
 		_theme, "Change", Gen2LauncherButton.Variant.QUIET
@@ -111,38 +111,38 @@ func _mod_row(action: Dictionary) -> HBoxContainer:
 	row.add_child(label)
 	row.add_child(value)
 	row.add_child(edit)
-	_rows[name] = value
-	_refresh_mod_row(name)
+	_rows[action_name] = value
+	_refresh_mod_row(action_name)
 	return row
 
 
-func _refresh_mod_row(name: StringName) -> void:
-	var label: Label = _rows.get(name)
+func _refresh_mod_row(action_name: StringName) -> void:
+	var label: Label = _rows.get(action_name)
 	if label == null:
 		return
 	# What is actually bound, which is the mod's own default until the player
 	# overrides it. Reading only the override would say "Unbound" for every mod
 	# control nobody has touched.
-	label.text = describe(_mod_bindings(name))
+	label.text = describe(_mod_bindings(action_name))
 	label.add_theme_color_override("font_color", _theme.muted)
 
 
-func _mod_bindings(name: StringName) -> Array:
-	if _options.mod_controls.has(String(name)):
-		return _options.mod_controls[String(name)]
+func _mod_bindings(action_name: StringName) -> Array:
+	if _options.mod_controls.has(String(action_name)):
+		return _options.mod_controls[String(action_name)]
 	for action: Dictionary in Gen2ModHost.instance().actions():
-		if StringName(action["name"]) == name:
+		if StringName(action["name"]) == action_name:
 			return action["default"]
 	return []
 
 
 func _open_mod_editor(action: Dictionary) -> void:
-	var name: StringName = action["name"]
+	var action_name: StringName = action["name"]
 	var sheet: Gen2BindingSheet = Gen2BindingSheet.for_mod_action(
-		_theme, _options, name, String(action["label"])
+		_theme, _options, action_name, String(action["label"])
 	)
 	sheet.bindings_changed.connect(func() -> void:
-		_refresh_mod_row(name)
+		_refresh_mod_row(action_name)
 		changed.emit()
 	)
 	sheet.open(_host)

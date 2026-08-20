@@ -553,24 +553,24 @@ func mart_entries(mart: Dictionary) -> Array:
 ## A mod describes a setting rather than drawing one: the start menu's MODS entry
 ## and the launcher's mods page are both built from these, so the two surfaces
 ## cannot disagree.
-func register_option(id: StringName, option: Dictionary) -> Dictionary:
-	var key: StringName = StringName(option.get("key", &""))
+func register_option(id: StringName, spec: Dictionary) -> Dictionary:
+	var key: StringName = StringName(spec.get("key", &""))
 	if String(id).is_empty() or String(key).is_empty():
 		return {"ok": false, "reason": &"invalid_option", "detail": String(id)}
-	var label: String = String(option.get("label", ""))
+	var label: String = String(spec.get("label", ""))
 	if label.is_empty():
 		return {"ok": false, "reason": &"option_missing_label", "detail": _option_name(id, key)}
-	var kind: StringName = StringName(option.get("kind", OPTION_LADDER))
+	var kind: StringName = StringName(spec.get("kind", OPTION_LADDER))
 	if not OPTION_KINDS.has(kind):
 		return {"ok": false, "reason": &"unknown_option_kind", "detail": String(kind)}
 	if kind == OPTION_BUTTON:
-		return _register_button_option(id, key, label, option)
+		return _register_button_option(id, key, label, spec)
 	if kind == OPTION_NUMBER:
-		return _register_number_option(id, key, label, option)
-	var values: Array = option.get("values", []) as Array
+		return _register_number_option(id, key, label, spec)
+	var values: Array = spec.get("values", []) as Array
 	if values.is_empty():
 		return {"ok": false, "reason": &"option_missing_values", "detail": _option_name(id, key)}
-	var labels: Array = option.get("labels", []) as Array
+	var labels: Array = spec.get("labels", []) as Array
 	if labels.is_empty():
 		labels = []
 		for value: Variant in values:
@@ -581,7 +581,7 @@ func register_option(id: StringName, option: Dictionary) -> Dictionary:
 	for existing: Dictionary in rows:
 		if StringName(existing.get("key", &"")) == key:
 			return {"ok": false, "reason": &"duplicate_option", "detail": _option_name(id, key)}
-	var fallback: int = maxi(_value_index(values, option.get("default", values[0])), 0)
+	var fallback: int = maxi(_value_index(values, spec.get("default", values[0])), 0)
 	rows.append({
 		"key": key, "label": label, "kind": OPTION_LADDER, "values": values.duplicate(),
 		"labels": _strings(labels), "default": fallback,
@@ -593,7 +593,7 @@ func register_option(id: StringName, option: Dictionary) -> Dictionary:
 ## A setting that is a press rather than a ladder: "recentre the camera now" has
 ## no values and nothing to persist, so it stores nothing and only emits.
 func _register_button_option(
-	id: StringName, key: StringName, label: String, option: Dictionary
+	id: StringName, key: StringName, label: String, spec: Dictionary
 ) -> Dictionary:
 	var rows: Array = _options.get(id, [])
 	for existing: Dictionary in rows:
@@ -601,22 +601,22 @@ func _register_button_option(
 			return {"ok": false, "reason": &"duplicate_option", "detail": _option_name(id, key)}
 	rows.append({
 		"key": key, "label": label, "kind": OPTION_BUTTON,
-		"press_label": String(option.get("press_label", "Go")),
+		"press_label": String(spec.get("press_label", "Go")),
 		"values": [], "labels": [], "default": 0,
 	})
 	_options[id] = rows
 	return {"ok": true, "id": id, "key": key}
 
 
-## A setting that is one whole number rather than a list of them. [param option]
+## A setting that is one whole number rather than a list of them. [param spec]
 ## takes [code]minimum[/code], [code]maximum[/code], an optional
 ## [code]step[/code] the two surfaces move by, and an optional
 ## [code]default[/code], clamped into the range as registered.
 func _register_number_option(
-	id: StringName, key: StringName, label: String, option: Dictionary
+	id: StringName, key: StringName, label: String, spec: Dictionary
 ) -> Dictionary:
-	var minimum: int = int(option.get("minimum", 0))
-	var maximum: int = int(option.get("maximum", 0))
+	var minimum: int = int(spec.get("minimum", 0))
+	var maximum: int = int(spec.get("maximum", 0))
 	if maximum < minimum:
 		return {"ok": false, "reason": &"option_range_inverted", "detail": _option_name(id, key)}
 	var rows: Array = _options.get(id, [])
@@ -626,8 +626,8 @@ func _register_number_option(
 	rows.append({
 		"key": key, "label": label, "kind": OPTION_NUMBER,
 		"minimum": minimum, "maximum": maximum,
-		"step": maxi(int(option.get("step", 1)), 1),
-		"default": clampi(int(option.get("default", minimum)), minimum, maximum),
+		"step": maxi(int(spec.get("step", 1)), 1),
+		"default": clampi(int(spec.get("default", minimum)), minimum, maximum),
 		"values": [], "labels": [],
 	})
 	_options[id] = rows

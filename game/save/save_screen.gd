@@ -352,12 +352,12 @@ func _refresh_details() -> void:
 	var save: Gen2SaveData = _load_selected_save()
 	if save != null:
 		body.add_child(Gen2LauncherUI.muted(_palette, "Player: %s" % save.player_name))
-		var actions: HBoxContainer = Gen2LauncherUI.row(Gen2LauncherUI.GAP_SM)
-		body.add_child(actions)
-		actions.add_child(_action("Continue", Gen2LauncherButton.Variant.PRIMARY, &"play", _continue_selected))
-		actions.add_child(_action("Party", Gen2LauncherButton.Variant.NEUTRAL, &"", _open_party))
-		actions.add_child(_action("Import .sav", Gen2LauncherButton.Variant.NEUTRAL, &"", _request_import))
-		actions.add_child(_action("Replace", Gen2LauncherButton.Variant.NEUTRAL, &"", _request_new_game))
+		var save_actions: HBoxContainer = Gen2LauncherUI.row(Gen2LauncherUI.GAP_SM)
+		body.add_child(save_actions)
+		save_actions.add_child(_action("Continue", Gen2LauncherButton.Variant.PRIMARY, &"play", _continue_selected))
+		save_actions.add_child(_action("Party", Gen2LauncherButton.Variant.NEUTRAL, &"", _open_party))
+		save_actions.add_child(_action("Import .sav", Gen2LauncherButton.Variant.NEUTRAL, &"", _request_import))
+		save_actions.add_child(_action("Replace", Gen2LauncherButton.Variant.NEUTRAL, &"", _request_new_game))
 		_add_party_summary(body, save)
 		_add_slot_management(body)
 		return
@@ -678,8 +678,8 @@ func _species_name(species: int) -> String:
 
 
 func _status_name(status: int) -> String:
-	var name: StringName = Gen2Status.name_of(status)
-	return "OK" if name.is_empty() else String(name).to_upper()
+	var status_name: StringName = Gen2Status.name_of(status)
+	return "OK" if status_name.is_empty() else String(status_name).to_upper()
 
 
 func _set_status(kind: StringName, title: String, detail: String) -> void:

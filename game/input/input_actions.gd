@@ -165,16 +165,16 @@ static func to_event(binding: Dictionary) -> InputEvent:
 			var key := InputEventKey.new()
 			# Physical only. A binding that also carried a keycode would match
 			# twice on a US layout and disagree with itself on any other.
-			key.physical_keycode = code
+			key.physical_keycode = code as Key
 			return key
 		KIND_PAD_BUTTON:
 			var pad := InputEventJoypadButton.new()
-			pad.button_index = code
+			pad.button_index = code as JoyButton
 			pad.device = ALL_DEVICES
 			return pad
 		KIND_PAD_AXIS:
 			var axis := InputEventJoypadMotion.new()
-			axis.axis = code
+			axis.axis = code as JoyAxis
 			axis.axis_value = signf(float(binding.get("sign", 1)))
 			axis.device = ALL_DEVICES
 			return axis

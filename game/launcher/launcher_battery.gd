@@ -22,9 +22,9 @@ var _cell: Control = null
 var _readout: Label = null
 
 
-static func create(theme: Gen2LauncherTheme) -> Gen2LauncherBattery:
+static func create(palette: Gen2LauncherTheme) -> Gen2LauncherBattery:
 	var battery := Gen2LauncherBattery.new()
-	battery._theme = theme
+	battery._theme = palette
 	battery._build()
 	return battery
 

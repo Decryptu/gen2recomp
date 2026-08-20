@@ -2344,9 +2344,13 @@ func _quick_claw() -> Variant:
 		return null
 
 	if player_claw and not enemy_claw:
-		return true if _claw_fires(mon(PLAYER)) else null
+		if _claw_fires(mon(PLAYER)):
+			return true
+		return null
 	if enemy_claw and not player_claw:
-		return false if _claw_fires(mon(ENEMY)) else null
+		if _claw_fires(mon(ENEMY)):
+			return false
+		return null
 
 	# `.both_have_quick_claw`: two rolls, the enemy's read first, and the player
 	# only wins on its own roll after the enemy's has already come up short.
@@ -2505,37 +2509,37 @@ const LANDMARK_VICTORY_ROAD: int = 0x58
 ##
 ## The `LANDMARK_SPECIAL` backup lookup in front of it is the six Cable Club
 ## rooms and is deliberately not modelled; see [method Gen2WorldAPI.landmark].
-static func region_is_kanto(landmark: int, crystal: bool = true) -> bool:
-	if landmark == Gen2WorldRadio.fast_ship_landmark(crystal):
+static func region_is_kanto(landmark_id: int, crystal: bool = true) -> bool:
+	if landmark_id == Gen2WorldRadio.fast_ship_landmark(crystal):
 		return false
-	if landmark < Gen2WorldRadio.kanto_landmark(crystal):
+	if landmark_id < Gen2WorldRadio.kanto_landmark(crystal):
 		return false
-	return landmark < Gen2WorldRadio.profile_landmark(LANDMARK_VICTORY_ROAD, crystal)
+	return landmark_id < Gen2WorldRadio.profile_landmark(LANDMARK_VICTORY_ROAD, crystal)
 
 
 ## `PlayBattleMusic`'s answer: the track a battle opens on.
 ##
-## [param landmark] is `GetWorldMapLocation`'s, [param trainer_class] and
+## [param landmark_id] is `GetWorldMapLocation`'s, [param trainer_class] and
 ## [param trainer_id] are `wOtherTrainerClass` and `wOtherTrainerID` (class 0
 ## being a wild fight), and [param time_of_day] is `wTimeOfDay`.
 static func battle_music(
-	battle_type: int,
+	battle_kind: int,
 	trainer_class: int,
 	trainer_id: int,
-	landmark: int,
-	time_of_day: int,
+	landmark_id: int,
+	day_period: int,
 	crystal: bool = true,
 ) -> int:
 	# `ld de, MUSIC_SUICUNE_BATTLE` sits in front of both compares, so the
 	# roaming branch reaches `.done` with the same track still in `de`.
-	if battle_type == BATTLETYPE_SUICUNE or battle_type == BATTLETYPE_ROAMING:
+	if battle_kind == BATTLETYPE_SUICUNE or battle_kind == BATTLETYPE_ROAMING:
 		return MUSIC_SUICUNE_BATTLE
-	var kanto: bool = region_is_kanto(landmark, crystal)
+	var kanto: bool = region_is_kanto(landmark_id, crystal)
 	if trainer_class <= 0:
 		if kanto:
 			return MUSIC_KANTO_WILD_BATTLE
 		return MUSIC_JOHTO_WILD_BATTLE_NIGHT \
-			if time_of_day == Gen2WorldPalette.TIME_NIGHT else MUSIC_JOHTO_WILD_BATTLE
+			if day_period == Gen2WorldPalette.TIME_NIGHT else MUSIC_JOHTO_WILD_BATTLE
 	if trainer_class == TRAINER_CLASS_CHAMPION or trainer_class == TRAINER_CLASS_RED:
 		return MUSIC_CHAMPION_BATTLE
 	# `docs/bugs_and_glitches.md`: only the two grunt classes reach the Rocket

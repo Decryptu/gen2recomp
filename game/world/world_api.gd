@@ -874,13 +874,13 @@ func set_party_summary(
 ## (`TryCutOW`, `TrySurfOW`, `TryWhirlpoolOW`, `TryWaterfallOW`, `TryStrengthOW`)
 ## each call `CheckPartyMove` themselves, so there is no path in either game that
 ## uses a field move the party does not know.
-func party_slot_with_move(move: int) -> int:
+func party_slot_with_move(move_id: int) -> int:
 	var moves: Array = _party_summary.get("moves", [])
 	var eggs: Array = _party_summary.get("eggs", [])
 	for slot: int in moves.size():
 		if slot < eggs.size() and bool(eggs[slot]):
 			continue
-		if moves[slot] is Array and (moves[slot] as Array).has(move):
+		if moves[slot] is Array and (moves[slot] as Array).has(move_id):
 			return slot
 	return -1
 
@@ -1573,10 +1573,10 @@ static func _rock_smash_failure(reason: StringName) -> Dictionary:
 ## Mirrors the selected save's wPlayerID, the way set_party_summary() mirrors
 ## its party. Gen2WorldAPI owns no save, so this stays optional and unset
 ## refuses rather than scoring against zero.
-func set_player_id(player_id: int) -> Dictionary:
-	if player_id < 0 or player_id > 0xFFFF:
-		return {"ok": false, "reason": &"invalid_player_id", "player_id": player_id}
-	_player_id = player_id
+func set_player_id(new_player_id: int) -> Dictionary:
+	if new_player_id < 0 or new_player_id > 0xFFFF:
+		return {"ok": false, "reason": &"invalid_player_id", "player_id": new_player_id}
+	_player_id = new_player_id
 	return {"ok": true}
 
 
@@ -3140,25 +3140,25 @@ func _field_move_prompt_request(cell: Vector2i) -> Dictionary:
 	if current_map == null or current_tileset == null or data == null:
 		return {}
 	var collision: int = collision_code_at(cell)
-	var move: int = 0
+	var move_id: int = 0
 	var tile_ok: bool = true
 	if Gen2WorldFieldMove.cut_tree_tile(collision):
-		move = Gen2WorldFieldMove.MOVE_CUT
+		move_id = Gen2WorldFieldMove.MOVE_CUT
 	elif Gen2WorldFieldMove.whirlpool_tile(collision):
-		move = Gen2WorldFieldMove.MOVE_WHIRLPOOL
+		move_id = Gen2WorldFieldMove.MOVE_WHIRLPOOL
 		tile_ok = bool(Gen2WorldFieldMove.whirlpool_replacement(
 			current_map.tileset, block_at(_script_block_cell(cell).x, _script_block_cell(cell).y)
 		).get("ok", false))
 	elif Gen2WorldFieldMove.waterfall_tile(collision):
-		move = Gen2WorldFieldMove.MOVE_WATERFALL
+		move_id = Gen2WorldFieldMove.MOVE_WATERFALL
 		## CheckMapCanWaterfall is the facing and the tile above, which is this
 		## cell only when the player faces up.
 		tile_ok = player_facing == Gen2WorldSprite.FACING_UP
 	elif Gen2WorldFieldMove.headbutt_tile(collision):
-		move = Gen2WorldFieldMove.MOVE_HEADBUTT
+		move_id = Gen2WorldFieldMove.MOVE_HEADBUTT
 	elif _surf_prompt_applies(cell):
-		move = Gen2WorldFieldMove.MOVE_SURF
-	if move == 0:
+		move_id = Gen2WorldFieldMove.MOVE_SURF
+	if move_id == 0:
 		return {}
 	return {
 		"kind": &"field_move_prompt",
@@ -3167,7 +3167,7 @@ func _field_move_prompt_request(cell: Vector2i) -> Dictionary:
 		"cell": cell,
 		"bank": 0,
 		"script": 0,
-		"move": move,
+		"move": move_id,
 		"tile_ok": tile_ok,
 	}
 

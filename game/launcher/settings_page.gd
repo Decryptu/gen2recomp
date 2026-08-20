@@ -178,12 +178,12 @@ func _open_touch_layout() -> void:
 	sheet.open(_host if _host != null else self)
 
 
-func _card(host: VBoxContainer, name: String) -> VBoxContainer:
+func _card(host: VBoxContainer, title: String) -> VBoxContainer:
 	var panel: Gen2LauncherCard = Gen2LauncherCard.create(_theme, Gen2LauncherTheme.RADIUS_MD, 22)
 	host.add_child(panel)
 	var column: VBoxContainer = Gen2LauncherUI.column(Gen2LauncherUI.GAP_MD)
 	panel.add_child(column)
-	column.add_child(Gen2LauncherUI.caption(_theme, name))
+	column.add_child(Gen2LauncherUI.caption(_theme, title))
 	return column
 
 

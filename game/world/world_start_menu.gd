@@ -92,15 +92,15 @@ static func build(
 		GATE_PARTY: party_count > 0,
 		GATE_POKEGEAR: pokegear_obtained,
 	}
-	var items: Array = []
+	var rows: Array = []
 	for entry: Dictionary in SOURCE_ENTRIES:
 		var gate: StringName = StringName(entry.get("gate", &""))
 		if not String(gate).is_empty() and not bool(passes.get(gate, false)):
 			continue
 		if entry["kind"] == ITEM_EXIT:
 			if not Gen2ModHost.instance().option_mod_ids().is_empty():
-				items.append(_entry(ITEM_MODS, "MODS", true))
-			items.append_array(Gen2ModHost.instance().menu_entries(Gen2ModHost.MENU_START))
+				rows.append(_entry(ITEM_MODS, "MODS", true))
+			rows.append_array(Gen2ModHost.instance().menu_entries(Gen2ModHost.MENU_START))
 		var label: String = String(entry["label"])
 		## `PlaceString` reads `wPlayerName` for `<PLAYER>`, so the STATUS row
 		## says the player's own name and never those eight characters.
@@ -109,11 +109,11 @@ static func build(
 		## rather than printing the marker's own characters.
 		if entry["kind"] == ITEM_PLAYER:
 			label = player_name if not player_name.is_empty() else "PLAYER"
-		items.append(_entry(
+		rows.append(_entry(
 			StringName(entry["kind"]), label, bool(entry["available"])
 		))
-	menu._items = items
-	menu.cursor = clampi(previous_cursor, 0, maxi(items.size() - 1, 0))
+	menu._items = rows
+	menu.cursor = clampi(previous_cursor, 0, maxi(rows.size() - 1, 0))
 	return menu
 
 

@@ -131,12 +131,12 @@ func set_flag(flag: StringName, reproduce_hardware: bool) -> bool:
 ## of them is not any preset's answer. What a settings row shows.
 func mode_of() -> StringName:
 	for candidate: StringName in MODES:
-		var matches: bool = true
+		var all_match: bool = true
 		for flag: StringName in FLAGS:
 			if reproduces(flag) != _mode_value(candidate, flag):
-				matches = false
+				all_match = false
 				break
-		if matches:
+		if all_match:
 			return candidate
 	return MODE_CUSTOM
 

@@ -63,9 +63,9 @@ var _squash: Vector2 = Vector2.ONE:
 		_place()
 
 
-static func create(theme: Gen2LauncherTheme, id: StringName) -> Gen2Cartridge:
+static func create(palette: Gen2LauncherTheme, id: StringName) -> Gen2Cartridge:
 	var cartridge := Gen2Cartridge.new()
-	cartridge._theme = theme
+	cartridge._theme = palette
 	cartridge.game_id = id
 	cartridge._build()
 	return cartridge

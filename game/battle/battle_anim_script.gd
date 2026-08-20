@@ -148,29 +148,29 @@ var _failed: bool = false
 ## [param param] is `wBattleAnimParam`, which the caller sets before playing;
 ## `wBattleAnimVar` starts at zero because `ClearBattleAnims` clears it.
 static func create(
-	region: PackedByteArray, base_address: int, address: int, param: int = 0
+	region: PackedByteArray, base_address: int, start_address: int, param: int = 0
 ) -> Gen2BattleAnimScript:
 	var script := Gen2BattleAnimScript.new()
 	script._region = region
 	script._base_address = base_address
-	script._address = address
+	script._address = start_address
 	script._param = param & 0xFF
-	script._stopped = not script._holds(address)
+	script._stopped = not script._holds(start_address)
 	script._failed = script._stopped
 	return script
 
 
-## Decodes one command at [param address]. Returns
+## Decodes one command at [param start_address]. Returns
 ## [code]{ ok, name, byte, operands, size, target }[/code]; `target` is the
-## address a branch would take, or -1. A delay byte answers [constant WAIT] with
+## start_address a branch would take, or -1. A delay byte answers [constant WAIT] with
 ## its own value as its single operand.
 ##
 ## Shared with [Gen2BattleAnimImporter], which walks every body with it, so the
 ## vocabulary is stated once.
 static func decode_command(
-	region: PackedByteArray, base_address: int, address: int
+	region: PackedByteArray, base_address: int, at_address: int
 ) -> Dictionary:
-	var at: int = address - base_address
+	var at: int = at_address - base_address
 	if at < 0 or at >= region.size():
 		return {"ok": false}
 	var byte: int = region[at]
@@ -316,8 +316,8 @@ func _run_loop(count: int, target: int) -> void:
 	_in_loop = false
 
 
-func _holds(address: int) -> bool:
-	var at: int = address - _base_address
+func _holds(at_address: int) -> bool:
+	var at: int = at_address - _base_address
 	return at >= 0 and at < _region.size()
 
 

@@ -134,13 +134,13 @@ func _move_vertical(delta: int) -> bool:
 func _move_2d(direction: Vector2i) -> bool:
 	var next_row: int = row() + signi(direction.y)
 	var next_column: int = column() + signi(direction.x)
-	var wrap: bool = (flags & STATICMENU_WRAP) != 0
+	var wraps: bool = (flags & STATICMENU_WRAP) != 0
 	if next_row < 0 or next_row >= rows:
-		if not wrap:
+		if not wraps:
 			return false
 		next_row = rows - 1 if next_row < 0 else 0
 	if next_column < 0 or next_column >= columns:
-		if not wrap:
+		if not wraps:
 			return false
 		next_column = columns - 1 if next_column < 0 else 0
 	var next: int = next_row * columns + next_column

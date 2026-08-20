@@ -1819,8 +1819,8 @@ func _capture_quantity(ball: int) -> int:
 func _item_name(item: int) -> String:
 	if _data == null:
 		return "BALL"
-	var name: String = _data.item_name(item)
-	return name if not name.is_empty() else "BALL %d" % item
+	var item_name: String = _data.item_name(item)
+	return item_name if not item_name.is_empty() else "BALL %d" % item
 
 
 func _is_wild_battle() -> bool:
@@ -2061,8 +2061,8 @@ func _show_forget_list() -> void:
 	var names: PackedStringArray = []
 	for index: int in _forget_moves.size():
 		var entry: Dictionary = _forget_moves[index]
-		var name: String = String(entry.get("name", ""))
-		names.append("[%s]" % name if index == _forget_cursor else name)
+		var move_name: String = String(entry.get("name", ""))
+		names.append("[%s]" % move_name if index == _forget_cursor else move_name)
 	show_message("%s %s Up and down: move, A: forget, B: back" % [
 		Gen2MoveForget.which_text(), " ".join(names),
 	])

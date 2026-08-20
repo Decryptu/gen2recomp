@@ -230,9 +230,9 @@ func first_empty_box_slot() -> Dictionary:
 		var box: Gen2SaveBox = boxes[box_index]
 		if box == null:
 			continue
-		var slot: int = box.first_empty_slot()
-		if slot >= 0:
-			return {"ok": true, "box": box_index, "slot": slot}
+		var empty_slot: int = box.first_empty_slot()
+		if empty_slot >= 0:
+			return {"ok": true, "box": box_index, "slot": empty_slot}
 	return {"ok": false, "reason": &"storage_full"}
 
 

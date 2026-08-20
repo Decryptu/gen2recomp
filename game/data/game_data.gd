@@ -134,25 +134,25 @@ static func open_directory(path: String) -> GameData:
 	data._card_palettes = manifest.get("card_palettes", {})
 	data._pokedex_palettes = manifest.get("pokedex_palettes", {})
 	data._pack = manifest.get("pack", {})
-	var pc_palette: Variant = manifest.get("pc_palette", [])
-	data._pc_palette = pc_palette if pc_palette is Array else []
+	var raw_pc_palette: Variant = manifest.get("pc_palette", [])
+	data._pc_palette = raw_pc_palette if raw_pc_palette is Array else []
 	var gender_palette: Variant = manifest.get("gender_screen_palette", [])
 	data._gender_screen_palette = gender_palette if gender_palette is Array else []
-	var copyright_string: Variant = manifest.get("copyright_string", [])
-	data._copyright_string = copyright_string if copyright_string is Array else []
-	var copyright_palette: Variant = manifest.get("copyright_palette", [])
-	data._copyright_palette = copyright_palette if copyright_palette is Array else []
+	var raw_copyright_string: Variant = manifest.get("copyright_string", [])
+	data._copyright_string = raw_copyright_string if raw_copyright_string is Array else []
+	var raw_copyright_palette: Variant = manifest.get("copyright_palette", [])
+	data._copyright_palette = raw_copyright_palette if raw_copyright_palette is Array else []
 	var text_palette: Variant = manifest.get("text_bg_palette", [])
 	data._text_bg_palette = text_palette if text_palette is Array else []
 	data._battle_object_palettes = manifest.get("battle_object_palettes", {})
 	var presents_palettes: Variant = manifest.get("presents_palettes", {})
 	data._presents_palettes = presents_palettes if presents_palettes is Dictionary else {}
-	var title: Variant = manifest.get("title", {})
-	data._title = title if title is Dictionary else {}
+	var raw_title: Variant = manifest.get("title", {})
+	data._title = raw_title if raw_title is Dictionary else {}
 	var town_map: Variant = manifest.get("town_map", {})
 	data._town_map = town_map if town_map is Dictionary else {}
-	var oak_ratings: Variant = manifest.get("oak_ratings", {})
-	data._oak_ratings = oak_ratings if oak_ratings is Dictionary else {}
+	var raw_oak_ratings: Variant = manifest.get("oak_ratings", {})
+	data._oak_ratings = raw_oak_ratings if raw_oak_ratings is Dictionary else {}
 	var pokecenter_pc: Variant = manifest.get("pokecenter_pc", {})
 	data._pokecenter_pc = pokecenter_pc if pokecenter_pc is Dictionary else {}
 	var unown_words: Variant = manifest.get("unown_words", [])
@@ -169,10 +169,10 @@ static func open_directory(path: String) -> GameData:
 	data._intro_movie = intro_movie if intro_movie is Dictionary else {}
 	var gs_intro: Variant = manifest.get("gs_intro", {})
 	data._gs_intro = gs_intro if gs_intro is Dictionary else {}
-	var menu_text: Variant = manifest.get("menu_text", {})
-	data._menu_text = menu_text if menu_text is Dictionary else {}
-	var mart_text: Variant = manifest.get("mart_text", {})
-	data._mart_text = mart_text if mart_text is Dictionary else {}
+	var raw_menu_text: Variant = manifest.get("menu_text", {})
+	data._menu_text = raw_menu_text if raw_menu_text is Dictionary else {}
+	var raw_mart_text: Variant = manifest.get("mart_text", {})
+	data._mart_text = raw_mart_text if raw_mart_text is Dictionary else {}
 	data._species = data._read_array(RomCache.species_path(path))
 	data._moves = data._read_array(RomCache.moves_path(path))
 	data._tmhm_moves = data._read_int_array(RomCache.tmhm_moves_path(path))
@@ -372,11 +372,11 @@ func world_audio_pointer(kind: StringName, bank: int, address: int) -> Dictionar
 ## `PokemonCries`' row for one species: which cry stream it plays and the
 ## `wCryPitch`/`wCryLength` it plays it at. An empty answer is a species outside
 ## the table, which is what a mod's own number is.
-func mon_cry(species: int) -> Dictionary:
+func mon_cry(number: int) -> Dictionary:
 	var rows: Variant = _audio().get("mon_cries", [])
-	if not rows is Array or species < 1 or species > (rows as Array).size():
+	if not rows is Array or number < 1 or number > (rows as Array).size():
 		return {}
-	var row: Variant = (rows as Array)[species - 1]
+	var row: Variant = (rows as Array)[number - 1]
 	if not row is Dictionary:
 		return {}
 	return {
@@ -386,11 +386,11 @@ func mon_cry(species: int) -> Dictionary:
 	}
 
 
-## The cry one species plays, which is `PlayCry`'s own two steps: the
+## The cry one number plays, which is `PlayCry`'s own two steps: the
 ## `PokemonCries` row, then the stream it names, with the row's pitch and length
 ## carried on the record so `_PlayCry`'s modulation reaches the decoder.
-func species_cry(species: int) -> Dictionary:
-	var row: Dictionary = mon_cry(species)
+func species_cry(number: int) -> Dictionary:
+	var row: Dictionary = mon_cry(number)
 	if row.is_empty():
 		return {}
 	var record: Dictionary = world_audio(&"cries", int(row["index"]))
@@ -654,10 +654,10 @@ func asleep_treemons(time_of_day: int) -> Array:
 		return []
 	# Restored to integers because JSON reads them back as floats, and this is
 	# the one treemon list a caller searches by value rather than by index.
-	var species: Array[int] = []
+	var numbers: Array[int] = []
 	for entry: Variant in value as Array:
-		species.append(int(entry))
-	return species
+		numbers.append(int(entry))
+	return numbers
 
 
 func world_encounter_count(method: StringName) -> int:
@@ -998,8 +998,8 @@ func evolutions(number: int) -> Array:
 ## a randomizer asks for.
 func egg_moves(number: int) -> Array[int]:
 	var out: Array[int] = []
-	for move: Variant in species(number).get("egg_moves", []):
-		out.append(int(move))
+	for move_id: Variant in species(number).get("egg_moves", []):
+		out.append(int(move_id))
 	return out
 
 
@@ -1840,10 +1840,10 @@ func pack_palette(index: int, female: bool = false) -> PackedColorArray:
 ## halves [constant RomLayout.FOOTPRINT_HALF_STRIDE] tiles further on, which is
 ## the offset the source calls a forgotten tile-editor fix. Empty for a species
 ## outside the run.
-func footprint_tiles(species: int) -> PackedInt32Array:
-	if species < 1 or species > RomLayout.FOOTPRINT_SPECIES:
+func footprint_tiles(number: int) -> PackedInt32Array:
+	if number < 1 or number > RomLayout.FOOTPRINT_SPECIES:
 		return PackedInt32Array()
-	var index: int = species - 1
+	var index: int = number - 1
 	var first: int = (index / 8) * (8 * RomLayout.FOOTPRINT_TILES) \
 		+ (index % 8) * RomLayout.FOOTPRINT_HALF_TILES
 	return PackedInt32Array([
@@ -2357,8 +2357,8 @@ func catalog() -> Gen2WorldCatalog:
 
 ## One catalog row with any patch folded in. Called by the catalog itself, which
 ## holds the rows; nothing else should need it.
-func overlaid_check(id: int, base: Dictionary) -> Dictionary:
-	return _overlaid(Gen2ContentOverlay.KIND_CHECK, id, base)
+func overlaid_check(check_id: int, base: Dictionary) -> Dictionary:
+	return _overlaid(Gen2ContentOverlay.KIND_CHECK, check_id, base)
 
 
 ## Whether any mod content reaches this cache at all, which is the one check a

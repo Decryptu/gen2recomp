@@ -77,13 +77,13 @@ static func fly(
 ## `TownMap_GetCurrentLandmark` has already run, so [param landmark] is resolved
 ## and never `LANDMARK_SPECIAL`. [param hall_of_fame] opens the whole Kanto map.
 static func create(
-	landmark: int, is_crystal: bool, hall_of_fame: bool = false,
+	landmark: int, is_crystal: bool, after_hall_of_fame: bool = false,
 	on_screen: StringName = SCREEN_TOWN_MAP
 ) -> Gen2TownMap:
 	var out := Gen2TownMap.new()
 	out.crystal = is_crystal
 	out.screen = on_screen
-	out.hall_of_fame = hall_of_fame
+	out.hall_of_fame = after_hall_of_fame
 	out.player_landmark = landmark
 	if on_screen == SCREEN_DEX_AREA:
 		# `.Area` sets hWY to 144, so the window is off and BG map 0, Johto's, is
@@ -93,7 +93,7 @@ static func create(
 	if out.region() == REGION_KANTO:
 		# `TownMap_GetKantoLandmarkLimits`' two branches end on the same
 		# `KANTO_LANDMARK_LAST`; only the first landmark moves.
-		out._first = Gen2WorldRadio.kanto_landmark(is_crystal) if hall_of_fame \
+		out._first = Gen2WorldRadio.kanto_landmark(is_crystal) if after_hall_of_fame \
 			else out._shift(LANDMARK_VICTORY_ROAD)
 		out._last = out._shift(LANDMARK_ROUTE_28)
 	else:
@@ -127,8 +127,8 @@ func region() -> int:
 		else REGION_JOHTO
 
 
-static func region_name(region: int) -> String:
-	return REGION_NAMES[clampi(region, REGION_JOHTO, REGION_KANTO)]
+static func region_name(region_id: int) -> String:
+	return REGION_NAMES[clampi(region_id, REGION_JOHTO, REGION_KANTO)]
 
 
 ## `.CheckPlayerLocation`: whether the dex area draws the player icon at all.

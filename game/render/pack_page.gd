@@ -162,7 +162,7 @@ func _load_sheet(indices: PackedByteArray) -> void:
 ## the three shapes [constant ROW_ITEM] names, and [param cursor] which of them
 ## the arrow stands on, or -1 while `PlaceHollowCursor` has taken it away.
 func pocket_map(
-	pocket: int, rows: Array, cursor: int, description: String,
+	_pocket: int, rows: Array, cursor: int, description: String,
 	pocket_name: PackedByteArray = PackedByteArray()
 ) -> PackedInt32Array:
 	var map := PackedInt32Array()

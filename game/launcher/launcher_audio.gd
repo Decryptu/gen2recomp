@@ -36,10 +36,10 @@ static func play(clip: StringName) -> void:
 
 ## Public so a screen can silence itself while it rebuilds, and so tests can
 ## drive the launcher without waking the audio server.
-static func set_muted(muted: bool) -> void:
+static func set_muted(on: bool) -> void:
 	var audio: Gen2LauncherAudio = _shared()
 	if audio != null:
-		audio.muted = muted
+		audio.muted = on
 
 
 static func _shared() -> Gen2LauncherAudio:

@@ -949,11 +949,11 @@ func _member_card(index: int) -> PanelContainer:
 	summary.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	summary.add_theme_constant_override("separation", 3)
 	content.add_child(summary)
-	var name := Label.new()
-	name.text = _display_name(mon)
-	name.add_theme_color_override("font_color", TEXT)
-	name.add_theme_font_size_override("font_size", 20)
-	summary.add_child(name)
+	var name_label := Label.new()
+	name_label.text = _display_name(mon)
+	name_label.add_theme_color_override("font_color", TEXT)
+	name_label.add_theme_font_size_override("font_size", 20)
+	summary.add_child(name_label)
 	var details := Label.new()
 	details.text = "%s    Level %d    HP %d/%d" % [
 		_species_name(mon.species), mon.level, mon.hp, _max_hp(mon)
@@ -994,8 +994,8 @@ func _species_name(species: int) -> String:
 
 
 func _status_name(status: int) -> String:
-	var name: StringName = Gen2Status.name_of(status)
-	return "OK" if name.is_empty() else String(name).to_upper()
+	var status_name: StringName = Gen2Status.name_of(status)
+	return "OK" if status_name.is_empty() else String(status_name).to_upper()
 
 
 func _status_color(status: int) -> Color:

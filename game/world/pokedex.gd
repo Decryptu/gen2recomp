@@ -516,10 +516,10 @@ static func weight_text(weight: int) -> String:
 
 ## The OPTION screen's rows. UNOWN is dropped while `wUnlockedUnownMode` is
 ## clear, which is `.NoUnownModeArrowCursorData`'s shorter table.
-static func mode_rows(unown_unlocked: bool = false) -> Array:
+static func mode_rows(with_unown: bool = false) -> Array:
 	var out: Array = []
 	for row: Dictionary in MODE_ROWS:
-		if int(row["mode"]) == RomLayout.DEXMODE_UNOWN and not unown_unlocked:
+		if int(row["mode"]) == RomLayout.DEXMODE_UNOWN and not with_unown:
 			continue
 		out.append(row.duplicate(true))
 	return out
