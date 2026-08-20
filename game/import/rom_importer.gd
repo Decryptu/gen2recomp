@@ -3911,6 +3911,7 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 			"tiles": int(battle_anims["gfx_tiles"]),
 		},
 		"bar_palettes": _import_bar_palettes(rom, layout),
+		"player_palettes": _import_player_palettes(rom, layout),
 		"card_palettes": _import_card_palettes(rom, layout),
 		"pokedex_palettes": _import_pokedex_palettes(rom, layout),
 		"pc_palette": _import_pc_palette(rom, layout),
@@ -4452,6 +4453,23 @@ func _import_trainers(rom: RomFile, layout: Dictionary, on_progress: Callable) -
 
 ## The four colours a battle draws its bars in. Small enough to live in the
 ## manifest beside the atlas metadata rather than in a file of its own.
+## `GetPlayerOrMonPalettePointer`'s two: the colours the player's own back pic is
+## drawn in while it is standing on the field, before a Pokemon is sent out.
+##
+## They are the first two rows of `TrainerPalettes`, which the cartridge shares
+## with two trainer classes on purpose ("Chris uses the same colors as Cal",
+## "Kris shares Falkner's palette"), so they are read at the table rather than
+## through a class number.
+func _import_player_palettes(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var out: Dictionary = {}
+	for index: int in RomLayout.PLAYER_PALETTE_NAMES.size():
+		var entry: int = RomLayout.trainer_palette_offset(layout, index)
+		out[RomLayout.PLAYER_PALETTE_NAMES[index]] = [
+			rom.u16le(entry), rom.u16le(entry + Gen2Palette.COLOR_BYTES),
+		]
+	return out
+
+
 func _import_bar_palettes(rom: RomFile, layout: Dictionary) -> Dictionary:
 	var out: Dictionary = {}
 	for index: int in RomLayout.BAR_PALETTE_NAMES.size():
@@ -5246,6 +5264,21 @@ func _import_tiles(rom: RomFile, layout: Dictionary, on_progress: Callable) -> D
 			"first_code": 0,
 			"bits": 2,
 		},
+		## `LoadBallIconGFX`, the party balls `BattleStart_TrainerHuds` puts
+		## over both huds while a battle is opening.
+		"ball_icons": {
+			"offset": int(layout["ball_icons"]),
+			"tiles": RomLayout.BALL_ICON_TILES,
+			"first_code": 0,
+			"bits": 2,
+		},
+		## `BattleTransitionTiles`, the two `DoBattleTransition` wipes with.
+		"battle_transition": {
+			"offset": int(layout["battle_transition"]),
+			"tiles": RomLayout.BATTLE_TRANSITION_TILES,
+			"first_code": 0,
+			"bits": 2,
+		},
 		## `StatsScreenPageTilesGFX`, which the stats screen and the move
 		## screen both load at `vTiles2 tile $31`.
 		"stats_tiles": {
@@ -5574,6 +5607,28 @@ func _import_pics(
 	var unown_back: Dictionary = _new_atlas(RomLayout.BACKPIC_TILES, RomLayout.UNOWN_FORMS)
 	var trainer_classes: int = RomLayout.trainer_class_count(layout)
 	var trainers: Dictionary = _new_atlas(RomLayout.TRAINER_PIC_TILES, trainer_classes)
+	# `GetTrainerBackpic`'s three, which are the player standing on the field
+	# before a Pokemon is sent out rather than anybody's front pic.
+	var player_back: Dictionary = _new_atlas(
+		RomLayout.PLAYER_BACKPIC_TILES, RomLayout.PLAYER_BACKPICS.size()
+	)
+	var backpics: Dictionary = layout.get("player_backpic", {}) as Dictionary
+	var side: int = RomLayout.PLAYER_BACKPIC_TILES
+	for slot: int in RomLayout.PLAYER_BACKPICS.size():
+		var kind: String = RomLayout.PLAYER_BACKPICS[slot]
+		var at: int = int(backpics.get(kind, -1))
+		if at < 0:
+			continue
+		# "Kris's backpic is uncompressed" (`GetKrisBackpic`): it is a plain
+		# 2bpp run where the other two are LZ behind `GetTrainerBackpic`'s own
+		# `.Decompress`. All three are stored column major, the way every pic is.
+		if kind == "kris":
+			_blit_pic(
+				rom.bytes().slice(at, at + side * side * Gen2Tiles.TILE_BYTES),
+				side, side, player_back, slot
+			)
+			continue
+		_decode_lz_into(rom, at, side, side, player_back, slot)
 
 	for entry: Dictionary in species:
 		var number: int = entry["number"]
@@ -5629,7 +5684,7 @@ func _import_pics(
 	var directory: String = RomCache.directory_for(rom.id, rom.sha1)
 	var atlases: Dictionary = {
 		"front": front, "back": back, "unown_front": unown_front, "unown_back": unown_back,
-		"trainers": trainers,
+		"trainers": trainers, "player_back": player_back,
 	}
 	var written: Dictionary = {}
 	for name: String in atlases:
@@ -5658,6 +5713,21 @@ func _new_atlas(cell_tiles: int, cells: int) -> Dictionary:
 	}
 
 
+## The same as [method _decode_into] for a pic the cartridge stores at an
+## address rather than behind a pointer, which is what `GetTrainerBackpic`'s
+## three `ld hl, ChrisBackpic` are.
+func _decode_lz_into(
+	rom: RomFile, start: int, columns: int, rows: int, atlas: Dictionary, slot: int
+) -> bool:
+	if columns <= 0 or rows <= 0 or not rom.in_bounds(start):
+		return false
+	var raw: PackedByteArray = _lz.decompress(rom.bytes(), start)
+	if _lz.failed or raw.size() < columns * rows * Gen2Tiles.TILE_BYTES:
+		return false
+	_blit_pic(raw, columns, rows, atlas, slot)
+	return true
+
+
 func _decode_into(
 	rom: RomFile,
 	layout: Dictionary,
@@ -5680,6 +5750,14 @@ func _decode_into(
 	if _lz.failed or raw.size() < columns * rows * Gen2Tiles.TILE_BYTES:
 		return false
 
+	_blit_pic(raw, columns, rows, atlas, slot)
+	return true
+
+
+## One decompressed pic into its cell of an atlas.
+func _blit_pic(
+	raw: PackedByteArray, columns: int, rows: int, atlas: Dictionary, slot: int
+) -> void:
 	var pixels: PackedByteArray = Gen2Tiles.decode_pic(raw, columns, rows)
 	var cell: int = atlas["cell"]
 	Gen2Tiles.blit(
@@ -5688,4 +5766,3 @@ func _decode_into(
 		(slot % ATLAS_COLUMNS) * cell, floori(float(slot) / float(ATLAS_COLUMNS)) * cell
 	)
 	atlas["decoded"] = int(atlas["decoded"]) + 1
-	return true

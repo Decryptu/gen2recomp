@@ -119,6 +119,17 @@ func run(r: RefCounted) -> void:
 		_verify_the_entrance(game_id, data)
 
 
+## The two bodies `BattleAnim_SendOutMon`'s parameter picks between, by the bg
+## effects each runs: `.Normal` is `BATTLE_BG_EFFECT_ENTER_MON` alone and
+## `.Shiny` is the inverted flash and the palette cycle. The beta body the fan
+## falls through to runs `BATTLE_BG_EFFECT_BETA_SEND_OUT_MON2` ($2b), which is
+## how a parameter that never reached the interpreter shows up here.
+const SEND_OUT_EFFECTS: Dictionary = {0: [0x0B], 1: [0x01, 0x06]}
+## And how long each takes: the two `anim_wait`s of `.Normal` and the ten of
+## `.Shiny`, plus the frame each batch of commands between them spends.
+const SEND_OUT_FRAMES: Dictionary = {0: 39, 1: 69}
+
+
 ## `ANIM_SEND_OUT_MON`, which every entrance plays and which nothing else in the
 ## corpus reaches with a parameter: `BattleAnim_SendOutMon` is an
 ## `anim_if_param_equal` fan, so the sweep above walks its `$0` body alone and
@@ -141,13 +152,33 @@ func _verify_the_entrance(game_id: StringName, data: GameData) -> void:
 				continue
 			var frames: int = 0
 			var sprites: int = 0
+			var effects: Array = []
 			while player.advance_frame() and frames < MAX_FRAMES:
 				frames += 1
 				sprites = maxi(sprites, player.sprites().size())
+				for effect: Gen2BattleAnimBgEffect in player.bg_effects():
+					if not effects.has(effect.id):
+						effects.append(effect.id)
 			_r.check(
 				not player.failed(),
 				"%s: the send-out animation ran off its region at param %d." % [
 					game_id, param,
+				]
+			)
+			## Which body ran, not just that one did. `BattleAnim_SendOutMon` is
+			## a fan of `anim_if_param_equal`, and a parameter that does not
+			## reach the interpreter falls through to the beta branch, which is
+			## four times as long and deforms the other battler.
+			_r.check(
+				effects == SEND_OUT_EFFECTS[param],
+				"%s: param %d ran bg effects %s, not the pinned %s." % [
+					game_id, param, effects, SEND_OUT_EFFECTS[param],
+				]
+			)
+			_r.check(
+				frames == SEND_OUT_FRAMES[param],
+				"%s: param %d ran %d frames, not the pinned %d." % [
+					game_id, param, frames, SEND_OUT_FRAMES[param],
 				]
 			)
 			_r.check(

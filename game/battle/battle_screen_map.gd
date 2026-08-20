@@ -80,6 +80,42 @@ static func faint_step(map: PackedByteArray, player_side: bool) -> void:
 		map[at.y * COLUMNS + x] = BLANK_TILE
 
 
+## `SlideBattlePicOut`, which is not the picture's box either: seven rows from
+## one above the player's, and the whole of the enemy's, shifted a column at a
+## time until the picture is off the screen.
+##
+## `DoBattle`'s `hlcoord 1, 5 / ld a, 9` walks the player's left and
+## `ResetEnemyBattleVars`' `hlcoord 18, 0 / ld a, 8` walks the enemy's right, and
+## the count is both how many columns are touched and how many steps it takes.
+const SLIDE_AT: Dictionary = {false: Vector2i(18, 0), true: Vector2i(1, 5)}
+const SLIDE_ROWS: int = 7
+const SLIDE_STEPS: Dictionary = {false: 8, true: 9}
+const SLIDE_STEP_FRAMES: int = 2
+
+
+## One outer step of `SlideBattlePicOut`: every touched cell takes its
+## neighbour's on the side the picture is leaving towards, which is `.back`'s
+## `ld a, [hld] / ld [hli], a` for the player and `.forward`'s
+## `ld a, [hli] / ld [hld], a` for the enemy.
+static func slide_step(map: PackedByteArray, player_side: bool) -> void:
+	if map.size() != COLUMNS * ROWS:
+		return
+	var at: Vector2i = SLIDE_AT[player_side]
+	var count: int = int(SLIDE_STEPS[player_side])
+	for row_index: int in SLIDE_ROWS:
+		var y: int = at.y + row_index
+		if y < 0 or y >= ROWS:
+			continue
+		for index: int in count:
+			# The player's walk reads to the right of what it writes; the
+			# enemy's reads to the left of it.
+			var to: int = at.x + index - 1 if player_side else at.x - index + 1
+			var from: int = at.x + index if player_side else at.x - index
+			if to < 0 or to >= COLUMNS or from < 0 or from >= COLUMNS:
+				continue
+			map[y * COLUMNS + to] = map[y * COLUMNS + from]
+
+
 ## `PlaceGraphic` over one battler's box: a tile is
 ## [code]base + column * side + row[/code], the column-major order `.BGSquares`
 ## indexes and `AppearUser` restores.

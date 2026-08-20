@@ -604,6 +604,21 @@ const ENEMY_HUD_TILES: int = 4
 const PLAYER_HUD_TILES: int = 6
 const EXP_BAR_TILES: int = 9
 
+## `LoadBallIconGFX`'s own `.gfx`, four sprite tiles at `vTiles0 tile $31`:
+## a live Pokemon, a statused one, a fainted one and an empty party slot, which
+## `StageBallTilesData` picks between with `$31` to `$34`.
+const BALL_ICON_TILES: int = 4
+const BALL_ICON_FIRST_TILE: int = 0x31
+## `BattleTransitionTiles`, the two `DoBattleTransition` fills the screen with.
+const BATTLE_TRANSITION_TILES: int = 2
+## `GetTrainerBackpic`: the player's own 6x6 picture, the one standing on the
+## field before a Pokemon is sent out. Three of them, and the order here is the
+## order [constant PLAYER_BACKPICS] names.
+const PLAYER_BACKPIC_TILES: int = 6
+const PLAYER_BACKPICS: Array[String] = ["chris", "kris", "dude"]
+## The two palettes those three are drawn in: the Dude wears the player's own.
+const PLAYER_PALETTE_NAMES: Array[String] = ["chris", "kris"]
+
 ## `StatsScreenPageTilesGFX`, the seventeen tiles `LoadStatsScreenPageTilesGFX`
 ## puts at `vTiles2 tile $31`: the vertical divider, the page indicator squares,
 ## the exp bar's two end caps and `'⁂'`, which `constants/charmap.asm` names as
@@ -1667,6 +1682,13 @@ const GOLD_SILVER: Dictionary = {
 	"enemy_hud": 0xF8BB2,
 	"player_hud": 0xF8BD2,
 	"exp_bar": 0xF8C02,
+	# `LoadBallIconGFX`'s four ball icons and `BattleTransitionTiles`' two, both
+	# uncompressed 2bpp runs read straight off the address.
+	"ball_icons": 0x2C1A4,
+	"battle_transition": 0x8C5B3,
+	# `GetTrainerBackpic`'s pics, LZ at the address rather than behind a
+	# pointer. Gold and Silver have one player character, so there is no Kris.
+	"player_backpic": {"chris": 0x3F9CB, "kris": -1, "dude": 0x3FB5B},
 	# Trainer card. Located by converting the pinned gfx/trainer_card PNGs and
 	# matching the bytes in the cartridge; the run is contiguous and
 	# self-consistent, status running straight into the two leader copies and
@@ -2103,6 +2125,10 @@ const CRYSTAL: Dictionary = {
 	"enemy_hud": 0xF8AC0,
 	"player_hud": 0xF8AE0,
 	"exp_bar": 0xF8B10,
+	# See the Gold and Silver block above.
+	"ball_icons": 0x2C172,
+	"battle_transition": 0x8C2F4,
+	"player_backpic": {"chris": 0x2BA1A, "kris": 0x88ED6, "dude": 0x2BBAA},
 	# Trainer card; see the Gold and Silver block above for how these were
 	# located. Crystal splits the card pic in two by gender and stores both
 	# column-major, and adds the one-tile right corner Gold and Silver lack.

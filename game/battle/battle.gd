@@ -354,7 +354,13 @@ const MIST_PROTECTED: StringName = &"mist_protected"
 ## `ANIM_SEND_OUT_MON` (constants/move_constants.asm) and the two
 ## `wBattleAnimParam` values every entrance plays it with: `BattleAnim_SendOutMon`
 ## branches on the parameter, `$0` being the ball and `$1` the shiny sparkle.
-const ANIM_SEND_OUT_MON: int = 101
+##
+## The constant is `$101`, not 101: the comments in that file are hexadecimal,
+## and the animations past the moves start at `const_next $ff`. Read as a
+## decimal it is NIGHT SHADE, which decodes, runs and draws, so nothing falls
+## over: the ball is a night shade with the wrong palette and four times the
+## frames. `tools/checks/battle_anims.gd` pins the body each parameter reaches.
+const ANIM_SEND_OUT_MON: int = 0x101
 const SEND_OUT_ANIM_NORMAL: int = 0
 const SEND_OUT_ANIM_SHINY: int = 1
 

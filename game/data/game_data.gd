@@ -50,6 +50,7 @@ var _foresight_matchups: Dictionary = {}
 var _atlases: Dictionary = {}
 var _tiles: Dictionary = {}
 var _bar_palettes: Dictionary = {}
+var _player_palettes: Dictionary = {}
 var _card_palettes: Dictionary = {}
 var _pokedex_palettes: Dictionary = {}
 var _pack: Dictionary = {}
@@ -131,6 +132,7 @@ static func open_directory(path: String) -> GameData:
 	data._atlases = manifest.get("atlases", {})
 	data._tiles = manifest.get("tiles", {})
 	data._bar_palettes = manifest.get("bar_palettes", {})
+	data._player_palettes = manifest.get("player_palettes", {})
 	data._card_palettes = manifest.get("card_palettes", {})
 	data._pokedex_palettes = manifest.get("pokedex_palettes", {})
 	data._pack = manifest.get("pack", {})
@@ -1974,6 +1976,33 @@ func trainer_dvs(number: int) -> int:
 
 ## Where a trainer class sits in the trainer atlas. Every trainer is drawn at the
 ## same size, so unlike a species pic this one always fills its cell.
+## `GetTrainerBackpic`: the player's own 6x6 picture, which is what stands on
+## the player's square until a Pokemon is sent out. [param kind] is one of
+## [constant RomLayout.PLAYER_BACKPICS]; Gold and Silver ship no Kris, and the
+## empty Dictionary is what says so.
+## `GetPlayerOrMonPalettePointer`: the player's own colours, which is what the
+## back pic on the field is drawn in until a Pokemon replaces it. The Dude wears
+## the player's, so [param kind] is a gender rather than a picture.
+func player_palette(kind: String) -> PackedColorArray:
+	var stored: Variant = _player_palettes.get(kind, null)
+	if not stored is Array or (stored as Array).size() < 2:
+		return Gen2Palette.pic_palette(PackedColorArray([Color.WHITE, Color.BLACK]))
+	return Gen2Palette.pic_palette(PackedColorArray([
+		Gen2Palette.from_packed(int((stored as Array)[0])),
+		Gen2Palette.from_packed(int((stored as Array)[1])),
+	]))
+
+
+func player_backpic(kind: String) -> Dictionary:
+	var slot: int = RomLayout.PLAYER_BACKPICS.find(kind)
+	if slot < 0:
+		return {}
+	var cell: int = int(atlas("player_back").get("cell", 0))
+	if cell <= 0:
+		return {}
+	return {"atlas": "player_back", "slot": slot, "width": cell, "height": cell}
+
+
 func trainer_pic(number: int) -> Dictionary:
 	var entry: Dictionary = trainer(number)
 	if entry.is_empty():

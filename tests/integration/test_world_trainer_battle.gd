@@ -168,7 +168,7 @@ func test_trainer_sight_reaches_the_real_battle_overlay() -> void:
 	assert_true(host.is_ready())
 	var snapshot: Dictionary = host.battle_snapshot()
 	assert_eq(snapshot["enemy"], Fixture.TRAINER_SPECIES)
-	assert_eq(snapshot["message"], "LEADER RIVAL wants to fight!")
+	assert_eq(snapshot["message"], "LEADER RIVAL\nwants to battle!")
 	assert_eq(snapshot["world_battle_active"], true)
 
 
@@ -181,7 +181,7 @@ func test_a_trainer_battle_opens_with_the_source_entrance() -> void:
 	var host: Gen2BattleScreen = _battle_opening()
 	assert_not_null(host)
 	assert_true(host.entrance_running())
-	assert_eq(host.battle_snapshot()["message"], "LEADER RIVAL wants to fight!")
+	assert_eq(host.battle_snapshot()["message"], "LEADER RIVAL\nwants to battle!")
 
 	var lines: Array = []
 	## Whose ball is being thrown, in order. The fixture carries no animation
@@ -208,7 +208,7 @@ func test_a_trainer_battle_opens_with_the_source_entrance() -> void:
 		host.advance()
 
 	assert_eq(lines, [
-		"LEADER RIVAL wants to fight!",
+		"LEADER RIVAL\nwants to battle!",
 		"LEADER RIVAL\nsent out\n%s!" % _wild_name(),
 		"Go! %s!" % _wild_name(),
 	])
@@ -309,7 +309,7 @@ func test_gold_profile_trainer_sight_reaches_the_real_battle_overlay() -> void:
 	assert_true(host.is_ready())
 	var snapshot: Dictionary = host.battle_snapshot()
 	assert_eq(snapshot["enemy"], Fixture.TRAINER_SPECIES)
-	assert_eq(snapshot["message"], "LEADER RIVAL wants to fight!")
+	assert_eq(snapshot["message"], "LEADER RIVAL\nwants to battle!")
 	assert_eq(snapshot["world_battle_active"], true)
 
 
@@ -477,7 +477,7 @@ func test_resolved_wild_encounter_reaches_the_real_battle_overlay() -> void:
 	assert_not_null(host)
 	assert_true(host.is_ready())
 	assert_eq(host.battle_snapshot()["enemy"], Fixture.TRAINER_SPECIES)
-	assert_eq(host.battle_snapshot()["message"], "Wild %s appeared!" % _wild_name())
+	assert_eq(host.battle_snapshot()["message"], "Wild %s\nappeared!" % _wild_name())
 
 
 func test_catch_tutorial_uses_the_real_battle_overlay_without_persistent_capture() -> void:
@@ -817,7 +817,7 @@ func test_hp_experience_and_pp_survive_into_the_next_wild_battle() -> void:
 	await get_tree().process_frame
 	var host: Gen2BattleScreen = _battle_opening()
 	assert_not_null(host)
-	assert_eq(host.battle_snapshot()["message"], "Wild %s appeared!" % _wild_name())
+	assert_eq(host.battle_snapshot()["message"], "Wild %s\nappeared!" % _wild_name())
 	host = _battle_host()
 
 	var player_mon: Gen2BattleMon = host._battle.party(Gen2Battle.PLAYER).mons[0]

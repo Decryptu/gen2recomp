@@ -15,6 +15,11 @@ extends SceneTree
 ## `<move> 0` photographs the entrance instead, which is `BattleStartMessage` and
 ## the opening of `DoBattle` rather than a turn: a wild one, or a trainer's with
 ## `<side>` at 1, and `<frames>` counted from the frame the pics stop sliding.
+## `<frames>` may be a range, `lo-hi`, which writes one `<output>_f<N>.png` per
+## frame in it instead of a single file: that is what a frame by frame diff
+## against a real cartridge reads. A line the entrance waits on is pressed
+## [constant PRESS_AFTER] frames after it has finished printing, since the
+## cartridge waits on a person there and nothing here can.
 ## `scene_off` clears the OPTION menu's battle-scene row first, which is what
 ## `CheckBattleScene` reads, and the capture should then show the field
 ## untouched.
@@ -27,12 +32,22 @@ const DRAW_FRAMES: int = 3
 ## A runaway guard on the event pump: no turn produces anywhere near this many
 ## steps, and a driver that never reaches its animation should say so.
 const MAX_STEPS: int = 4096
+## How long a line that owes a press is left on screen before this driver presses
+## it. A person is what the cartridge waits for; a fixed count is what makes two
+## runs of this tool the same run.
+const PRESS_AFTER: int = 40
 
 var _screen: Gen2BattleScreen = null
 var _output_path: String = ""
 var _move: int = 1
 var _side_is_enemy: bool = false
 var _frames_in: int = 0
+var _range_lo: int = -1
+var _range_hi: int = -1
+var _cursor: int = 0
+var _settle: int = 0
+var _held: int = 0
+var _last_trace: String = ""
 var _scene_off: bool = false
 var _frames: int = 0
 
@@ -48,7 +63,13 @@ func _initialize() -> void:
 	_output_path = args[1]
 	_move = int(args[2])
 	_side_is_enemy = int(args[3]) != 0
-	_frames_in = int(args[4])
+	if args[4].contains("-"):
+		var span: PackedStringArray = args[4].split("-", false)
+		_range_lo = int(span[0])
+		_range_hi = int(span[1]) if span.size() > 1 else int(span[0])
+		_frames_in = _range_hi
+	else:
+		_frames_in = int(args[4])
 	_scene_off = args.size() > 5 and args[5] == "scene_off"
 
 	var data: GameData = GameData.open(StringName(args[0]))
@@ -83,6 +104,8 @@ func _process(_delta: float) -> bool:
 			quit(1)
 			return true
 		return false
+	if _range_lo >= 0:
+		return _shoot_range()
 	if _frames < SETTLE_FRAMES + DRAW_FRAMES:
 		return false
 
@@ -100,6 +123,79 @@ func _process(_delta: float) -> bool:
 	return true
 
 
+## One frame of the entrance per captured picture, the viewport given
+## [constant DRAW_FRAMES] to catch up with each. The frame numbers are counted
+## from the one the pics stop sliding on, which is what the cartridge trace is
+## aligned to as well.
+func _shoot_range() -> bool:
+	## Godot turns processing back on for a node whose script has a `_process`,
+	## and the screen counts hardware frames in its own. Taken away again here
+	## rather than once in `_initialize`, or three of its frames are spent
+	## between every two of this driver's.
+	_screen.set_process(false)
+	if _settle > 0:
+		_settle -= 1
+		return false
+	if _cursor > _range_hi:
+		print("Wrote %d frames to %s_f*.png" % [_range_hi - _range_lo + 1, _prefix()])
+		quit(0)
+		return true
+	if _cursor >= _range_lo:
+		var image: Image = root.get_texture().get_image()
+		var error: Error = image.save_png("%s_f%d.png" % [_prefix(), _cursor])
+		if error != OK:
+			push_error("Could not write frame %d (error %d)" % [_cursor, error])
+			quit(1)
+			return true
+	_trace()
+	_cursor += 1
+	_entrance_frame()
+	_settle = DRAW_FRAMES
+	return false
+
+
+## The frame the opening changed on, and what it changed to. The cartridge's own
+## trace is a list of the frames its routines ran on, so this is the artefact the
+## two are diffed as.
+func _trace() -> void:
+	var now: Dictionary = _screen.entrance_snapshot()
+	var line: String = JSON.stringify(now)
+	if line == _last_trace:
+		return
+	_last_trace = line
+	print("%d %s" % [_cursor, line])
+
+
+func _prefix() -> String:
+	return _output_path.trim_suffix(".png")
+
+
+## One hardware frame of the opening, with the press a person would make.
+##
+## `WildPokemonAppearedText`, `WantsToBattleText` and the `cont` inside
+## `BattleText_EnemySentOut` all wait on a button; this counts
+## [constant PRESS_AFTER] frames of the line standing finished and then presses,
+## so a run of this tool is reproducible where a person is not.
+func _entrance_frame() -> void:
+	_screen.advance_frame()
+	if _screen.frames_running():
+		_held = 0
+		return
+	var box: Gen2TextBox = _screen.get("_box")
+	if box != null and box.is_revealing():
+		_held = 0
+		return
+	if not _screen.entrance_running() and not bool(_screen.battle_snapshot()["awaits_press"]):
+		_held = 0
+		return
+	_held += 1
+	if _held < PRESS_AFTER:
+		return
+	_held = 0
+	_screen.finish()
+	_screen.advance()
+
+
 ## The entrance, stopped [member _frames_in] frames after the slide. `<side>` 1
 ## opens a real trainer's fight instead of a wild one, which is the branch with
 ## `SFX_SHINE`, a line of its own and two balls thrown rather than one.
@@ -110,6 +206,8 @@ func _drive_entrance() -> bool:
 		_screen.show_matchup(16, 155, 20, 20)
 	while _screen.intro_running():
 		_screen.advance_frame()
+	if _range_lo >= 0:
+		return true
 	for _frame: int in _frames_in:
 		if not _screen.frames_running() and _screen.entrance_running():
 			_screen.finish()

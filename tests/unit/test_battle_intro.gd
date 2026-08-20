@@ -130,3 +130,49 @@ func test_the_middle_band_cuts_through_the_player_panel() -> void:
 			offsets[top], offsets[bottom - 1],
 			"so one panel is drawn in two places at once, which is why this is per scanline"
 		)
+
+
+## `SlideBattlePicOut`, the other half of what the opening display does with the
+## two squares: the pics slide in, and each of them slides out again when its
+## own side sends something out.
+func test_a_pic_slides_off_its_own_side_of_the_screen() -> void:
+	for player_side: bool in [true, false]:
+		var map: PackedByteArray = Gen2BattleScreenMap.seeded()
+		var at: Vector2i = Gen2BattleScreenMap.PLAYER_AT if player_side \
+			else Gen2BattleScreenMap.ENEMY_AT
+		var head: int = at.y * Gen2BattleScreenMap.COLUMNS + at.x
+		var base: int = Gen2BattleScreenMap.PLAYER_BASE_TILE if player_side \
+			else Gen2BattleScreenMap.ENEMY_BASE_TILE
+		assert_eq(int(map[head]), base, "the square starts with its own picture")
+
+		# One step moves the picture one column towards the edge it leaves by,
+		# which is left for the player and right for the enemy.
+		Gen2BattleScreenMap.slide_step(map, player_side)
+		var moved: int = head - 1 if player_side else head + 1
+		assert_eq(int(map[moved]), base, "one column over after one step")
+
+		for _step: int in int(Gen2BattleScreenMap.SLIDE_STEPS[player_side]):
+			Gen2BattleScreenMap.slide_step(map, player_side)
+		var side: int = Gen2BattleScreenMap.PLAYER_SIDE if player_side \
+			else Gen2BattleScreenMap.ENEMY_SIDE
+		for row: int in side:
+			for column: int in side:
+				var cell: int = (at.y + row) * Gen2BattleScreenMap.COLUMNS + at.x + column
+				assert_eq(
+					int(map[cell]), Gen2BattleScreenMap.BLANK_TILE,
+					"the whole square is empty once the walk has run"
+				)
+
+
+## The other square is not touched: `hlcoord 1, 5` and `hlcoord 18, 0` are seven
+## rows each and neither reaches the other picture.
+func test_a_slide_leaves_the_other_square_alone() -> void:
+	var map: PackedByteArray = Gen2BattleScreenMap.seeded()
+	for _step: int in int(Gen2BattleScreenMap.SLIDE_STEPS[true]):
+		Gen2BattleScreenMap.slide_step(map, true)
+	var enemy: PackedByteArray = Gen2BattleScreenMap.seeded()
+	for row: int in Gen2BattleScreenMap.ENEMY_SIDE:
+		for column: int in Gen2BattleScreenMap.ENEMY_SIDE:
+			var cell: int = (Gen2BattleScreenMap.ENEMY_AT.y + row) * Gen2BattleScreenMap.COLUMNS \
+				+ Gen2BattleScreenMap.ENEMY_AT.x + column
+			assert_eq(int(map[cell]), int(enemy[cell]))
