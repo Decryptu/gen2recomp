@@ -126,6 +126,10 @@ const HEAL_MACHINE_FLASH_FRAMES: int = Gen2WorldEffects.HEAL_MACHINE_FLASHES \
 ## constants/sfx_constants.asm. The first is played once a ball by
 ## `.LoadBallsOntoMachine`; the other two are `.HOF_PlaySFX`'s pair.
 const SFX_SECOND_PART_OF_ITEMFINDER: int = 0x12
+## `ItemFinder.ItemfinderSound`'s other half, and `PlayTransactionSound`'s.
+const SFX_TRANSACTION: int = 0x22
+## `.ItemfinderSound`'s own `ld c, 4`.
+const ITEMFINDER_SFX_PASSES: int = 4
 const SFX_GAME_FREAK_LOGO_GS: int = 0xAA
 const SFX_BOOT_PC: int = 0x0D
 ## constants/music_constants.asm's MUSIC_HEAL, which `.PlayHealMusic` starts
@@ -2331,6 +2335,21 @@ static func heal_machine_sounds(machine_type: int, balls: int) -> Array:
 		})
 	else:
 		schedule.append({"frame": flashes_at, "kind": &"music", "index": MUSIC_HEAL})
+	return schedule
+
+
+## `ItemFinder.ItemfinderSound`, which its found branch runs as a `callasm`
+## before the line: four passes of `WaitPlaySFX SFX_SECOND_PART_OF_ITEMFINDER`
+## and `WaitPlaySFX SFX_TRANSACTION`. Each holds until the four effect channels
+## are free, so the eight are a run rather than eight sounds on one frame, and
+## `.Script_FoundNothing` has none of it.
+static func itemfinder_sounds() -> Array:
+	var schedule: Array = []
+	for _pass: int in ITEMFINDER_SFX_PASSES:
+		schedule.append({
+			"kind": &"sound", "wait": true, "index": SFX_SECOND_PART_OF_ITEMFINDER,
+		})
+		schedule.append({"kind": &"sound", "wait": true, "index": SFX_TRANSACTION})
 	return schedule
 
 

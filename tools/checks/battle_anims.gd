@@ -296,6 +296,15 @@ func _verify_the_sliding_intro(game_id: StringName, data: GameData) -> void:
 		steps.size() <= 1 and (steps.is_empty() or steps.has(Gen2BattleIntro.SPRITE_STEP)),
 		"%s: the sprite walk steps %s, not two a frame." % [game_id, steps.keys()]
 	)
+	# Both games step 72 times: Crystal on 72 of its 73 frames (`.subfunction3`
+	# is skipped on the last) and Gold and Silver on all 72 passes of a loop
+	# their lead frame sits in front of. So the cartridge's own 158 down to 16.
+	# OAM's own x is eight to the right of the screen's.
+	var walk: Array = [] if xs.is_empty() else [int(xs[0]) - 8, int(xs[-1]) - 8]
+	_r.check(
+		walk == [158, 16],
+		"%s: the sprite walk runs %s, not 158 to 16." % [game_id, walk]
+	)
 
 	# `ClearBox` and `PlaceGraphic`: the map is missing the pic's top two tile
 	# rows for the slide and holds all six after it.

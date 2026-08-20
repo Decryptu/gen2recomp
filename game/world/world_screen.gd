@@ -177,11 +177,13 @@ var _replay_held_direction: int = Gen2Button.NONE
 ## Whether a frame is being spent right now, which is what tells a press
 ## delivered from inside the pump from one that arrived between two frames.
 var _spending_frame: bool = false
-## `HealMachineAnim`'s own sounds and the frame of its wait each is due on, taken
-## from the event the special emits and spent by [method advance_frame]. The
-## machine's two tiles are drawn alongside them by Gen2WorldEffects.
-var _heal_machine_sounds: Array = []
-var _heal_machine_frame: int = 0
+## A run of sounds the world owes the driver, spent one entry at a time by
+## [method advance_frame]: `HealMachineAnim`'s, whose entries are due on a frame
+## count of their own, and the ITEMFINDER's, whose are `WaitPlaySFX` and due when
+## the four effect channels are free. Nothing plays two at once, since the script
+## that started one is waiting on it.
+var _sound_schedule: Array = []
+var _sound_schedule_frame: int = 0
 var _screen_base_position: Vector2 = Vector2.ZERO
 
 @onready var _screen: Gen2Screen = %Screen
@@ -553,7 +555,7 @@ func advance_frame() -> void:
 		var wait_results: Array = _world.advance_script_wait_frame()
 		if not wait_results.is_empty():
 			_show_script_results(wait_results)
-	_advance_heal_machine_sounds()
+	_advance_sound_schedule()
 	## `_ContText`'s scroll ends on a frame rather than on a press, and the page
 	## it lands on may be the text's last, which is where the script runs on.
 	_continue_if_text_settled()
@@ -2916,6 +2918,7 @@ func _open_pokedex() -> void:
 	add_child(host)
 	host.closed.connect(_on_pokedex_closed)
 	host.cry_requested.connect(_on_pokedex_cry_requested)
+	host.sfx_requested.connect(_play_sfx)
 	_pokedex_host = host
 	_script_prompt = "Pokedex open"
 	_refresh_labels()
@@ -3088,6 +3091,11 @@ func _on_field_item_used(request: Dictionary) -> void:
 			select_fishing_rod(rods.find(StringName(request.get("rod", &""))))
 			start_fishing()
 		Gen2WorldPack.FIELD_EFFECT_ITEMFINDER:
+			## `.Script_FoundSomething` runs `.ItemfinderSound` before its line;
+			## `.Script_FoundNothing` plays nothing at all.
+			if bool(request.get("found", false)):
+				_start_sound_schedule(Gen2WorldScriptRunner.itemfinder_sounds())
+				_advance_sound_schedule()
 			_show_field_move_text(
 				_field_item_text(
 					"itemfinder_nearby",
@@ -3435,14 +3443,20 @@ func _run_heal_transfer(action: Dictionary) -> void:
 		_show_field_move_text("It won't have any effect.")
 		return
 	## `PARTYMENUTEXT_HEAL_HP`, which is the line every healing item shares.
-	_show_field_move_text("%s\nrecovered health!" % String(action.get("target_name", "")))
+	## `ItemActionText` is followed by `JoyWaitAorB`, which loads no cursor, so
+	## the line waits without an arrow the way `ProfOaksPCBoot`'s pages do.
+	_show_field_move_text(
+		"%s\nrecovered health!" % String(action.get("target_name", "")), false
+	)
 
 
-func _show_field_move_text(text: String) -> void:
+## [param blink_cursor] is whether the wait behind the line is one of the three
+## routines that call `LoadBlinkingCursor`, not whether it waits at all.
+func _show_field_move_text(text: String, blink_cursor: bool = true) -> void:
 	_field_move_text = true
 	if _text_box != null and _text_box.font != null:
 		_apply_text_box_options()
-		_text_box.show_text(text)
+		_text_box.show_text(text, blink_cursor)
 		_text_box.visible = true
 	_script_prompt = "A: continue"
 	_refresh_labels()
@@ -4295,32 +4309,46 @@ func _play_encounter_sounds() -> void:
 			_play_sfx(int((command["operands"] as Array)[1]))
 
 
-## The machine's sounds, started where the special asked for them. A schedule
-## already running is replaced rather than mixed: two heal machines cannot be
-## going at once, since the script that started the first is waiting for it.
+## The machine's sounds, started where the special asked for them.
 func _start_heal_machine_sounds(event: Dictionary) -> void:
-	_heal_machine_sounds = (event.get("sounds", []) as Array).duplicate(true)
-	_heal_machine_frame = 0
+	_start_sound_schedule((event.get("sounds", []) as Array).duplicate(true))
 	if _effects != null:
 		_effects.start_heal_machine(
 			int(event.get("machine_type", 0)), int(event.get("balls", 0))
 		)
-	_advance_heal_machine_sounds()
+	_advance_sound_schedule()
+
+
+func _start_sound_schedule(schedule: Array) -> void:
+	_sound_schedule = schedule
+	_sound_schedule_frame = 0
 
 
 ## One frame of that schedule, spent from the same pump the script's own wait is.
-func _advance_heal_machine_sounds() -> void:
-	if _heal_machine_sounds.is_empty():
-		return
-	while not _heal_machine_sounds.is_empty() \
-		and int(_heal_machine_sounds[0].get("frame", 0)) <= _heal_machine_frame:
-		var due: Dictionary = _heal_machine_sounds.pop_front()
+##
+## A `wait` entry is `WaitPlaySFX`, and it is a real wait only while the driver
+## is being serviced: a run with no audio device leaves the channels as the last
+## sound left them, so `effect_playing()` would answer true for the rest of the
+## run and the schedule would never drain. The rendered-frame count is what tells
+## the two apart, which is what the battle screen's own `ANIM_WAIT_SFX` does.
+func _advance_sound_schedule() -> void:
+	while not _sound_schedule.is_empty():
+		var due: Dictionary = _sound_schedule[0]
+		if bool(due.get("wait", false)):
+			if _audio_player != null and _audio_player.effect_playing():
+				var rendered: int = _audio_player.timeline_updates()
+				if int(due.get("rendered", -1)) != rendered:
+					due["rendered"] = rendered
+					break
+		elif int(due.get("frame", 0)) > _sound_schedule_frame:
+			break
+		_sound_schedule.pop_front()
 		var index: int = int(due.get("index", 0))
 		if StringName(due.get("kind", &"sound")) == &"music":
 			_play_music(index)
 		else:
-			_play_sfx(index)
-	_heal_machine_frame += 1
+			_play_sfx(index, bool(due.get("wait", false)))
+	_sound_schedule_frame += 1
 
 
 func _play_music(index: int) -> void:
