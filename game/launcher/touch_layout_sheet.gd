@@ -125,7 +125,7 @@ func close() -> void:
 	_pad.set_edit_mode(false)
 	Gen2InputRuntime.instance().apply_options(_options)
 	closed.emit()
-	queue_free()
+	Gen2Screen.drop(self)
 
 
 func _unhandled_input(event: InputEvent) -> void:

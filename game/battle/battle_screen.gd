@@ -350,6 +350,9 @@ var _anim_event: Dictionary = {}
 ## a flag for both.
 var _anim_hud_hidden: int = -1
 var _audio_player: Gen2AudioPlayer = null
+## False while the driver belongs to the screen that opened this one, which is
+## what says this screen may not stop or free it.
+var _owns_audio_player: bool = false
 ## `PlayBattleMusic`'s answer for this fight; see [method battle_music].
 var _battle_music: int = Gen2Battle.MUSIC_NONE
 
@@ -502,9 +505,15 @@ func _ready() -> void:
 	if not _renderer_ready:
 		return
 
-	_audio_player = AUDIO_PLAYER_SCRIPT.new()
-	_audio_player.name = "AudioPlayer"
-	add_child(_audio_player)
+	## The cartridge has one APU. A screen that opened this one hands its own
+	## driver over so a cry here takes the channels the map music is holding
+	## rather than sounding over a second copy of them; only a battle standing on
+	## its own builds a player, and only that one owns it.
+	if _audio_player == null:
+		_audio_player = AUDIO_PLAYER_SCRIPT.new()
+		_audio_player.name = "AudioPlayer"
+		_owns_audio_player = true
+		add_child(_audio_player)
 	_anim_data = Gen2BattleAnimData.from_game_data(_data)
 
 	## Under the text box, because the refusals a switch list is answered with are
@@ -563,6 +572,23 @@ func _ready() -> void:
 ## imported cache.
 func set_data(data: GameData) -> void:
 	_injected_data = data
+
+
+## `CleanUpBattleRAM` zeroes `wLowHealthAlarm`. A driver this screen does not own
+## outlives it, so the byte is cleared where the screen goes rather than where a
+## fight ends: every way out of a battle, including a wipe and a failed setup, is
+## a way out of the tree.
+func _exit_tree() -> void:
+	if _audio_player != null and not _owns_audio_player:
+		_audio_player.set_low_health_alarm(false)
+
+
+## Hands this screen the driver the opening screen is already running, before it
+## enters the tree. Without one the screen builds its own, which is what a
+## battle launched on its own does.
+func set_audio_player(player: Gen2AudioPlayer) -> void:
+	_audio_player = player
+	_owns_audio_player = false
 
 
 ## The rules the world is being played under, so the fight inside it is fought
@@ -1636,17 +1662,19 @@ func _end_script() -> void:
 
 ## `PlayBattleMusic`, which `FindFirstAliveMonAndStartBattle` runs in front of
 ## `DoBattleTransition`: the piece playing is stopped, the volume goes back to
-## maximum, and the battle's own track starts. The world's map music is stopped
-## by the screen that opened this one, so the two players never overlap.
+## maximum, and the battle's own track starts. A world battle has already had it
+## started by the screen that ran the transition, on the same driver and from the
+## same request, so this asks for a track already playing and the driver
+## continues it. A battle standing on its own is where it actually starts.
 func _play_battle_music() -> void:
 	_battle_music = Gen2Battle.MUSIC_NONE
 	if _audio_player == null or _data == null or _battle == null:
 		return
 	var landmark: int = _world_context.landmark if _world_context != null \
 		else Gen2WorldRadio.LANDMARK_SPECIAL
-	_battle_music = Gen2Battle.battle_music(
-		_battle.battle_type, _enemy_trainer_class, _enemy_trainer_index,
-		landmark, _time_of_day, Gen2WorldState.is_crystal_profile(_data),
+	_battle_music = Gen2WorldBattleAdapter.music_for(
+		_world_battle_request, landmark, _time_of_day,
+		Gen2WorldState.is_crystal_profile(_data),
 	)
 	var record: Dictionary = _data.world_audio(&"music", _battle_music)
 	if record.is_empty():
@@ -4256,7 +4284,7 @@ func _build_renderer() -> void:
 		if _screen.native_size_changed.is_connected(_on_native_size_changed):
 			_screen.native_size_changed.disconnect(_on_native_size_changed)
 		_renderer.get_parent().remove_child(_renderer)
-		_renderer.queue_free()
+		Gen2Screen.drop(_renderer)
 	_renderer = Gen2ModHost.instance().create_battle_renderer()
 	if Gen2ModHost.renderer_uses_hardware_viewport(_renderer):
 		_screen.display_content(_renderer)

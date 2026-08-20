@@ -202,9 +202,10 @@ func test_a_renderer_rebuilt_mid_scene_stays_below_the_live_text_box() -> void:
 	assert_eq(_world_screen._text_box, box, "the same live box node")
 	assert_eq(box.texture, texture, "with the glyphs it was already showing")
 	assert_true(box.visible)
-	## `_build_renderer` drops the old view with `queue_free`, which the game
-	## serves at the end of its frame and a test has to spend one to see.
-	await get_tree().process_frame
+	## And the view it replaced is off the screen on the frame it was replaced,
+	## not at the end of it: `queue_free` alone would leave the old one drawn
+	## under the new for one frame, which is a stale layer a screenshot catches.
+	assert_eq(_dropped_on(viewport), 0, "the old view is off the screen, not under the new")
 
 
 ## The same rule in the battle screen, whose box is never hidden at all.
@@ -216,7 +217,17 @@ func test_a_battle_renderer_rebuilt_mid_scene_stays_below_the_interface() -> voi
 	var children: Array = viewport.get_children()
 	assert_eq(children.find(_battle_screen._renderer), 0, "the renderer is the floor")
 	assert_true(children.find(_battle_screen._box) > 0)
-	await get_tree().process_frame
+	assert_eq(_dropped_on(viewport), 0, "the old view is off the screen, not under the new")
+
+
+## How many of the viewport's children are already dead: `queue_free` alone
+## leaves a replaced node in the tree, and drawn, until the frame ends.
+func _dropped_on(viewport: SubViewport) -> int:
+	var count: int = 0
+	for child: Node in viewport.get_children():
+		if child.is_queued_for_deletion():
+			count += 1
+	return count
 
 
 ## A page turn hides the box and the next event shows it again inside one call,

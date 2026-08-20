@@ -39,9 +39,7 @@ func _ready() -> void:
 ## drawn entirely in code can switch palette without every widget growing a
 ## repaint path of its own.
 func _build() -> void:
-	for child: Node in get_children():
-		remove_child(child)
-		child.queue_free()
+	Gen2Screen.drop_children(self)
 	theme = _palette.control_theme()
 
 	_shell = Gen2LauncherShell.create(_palette)

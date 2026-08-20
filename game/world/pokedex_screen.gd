@@ -235,7 +235,7 @@ func _open_area() -> void:
 		_data, species, nests, _world.landmark(), _world.state.hall_of_fame(),
 		_world.player_female(), _world.map_time_of_day()
 	):
-		host.queue_free()
+		Gen2Screen.drop(host)
 		return
 	host.closed.connect(_on_area_closed)
 	_area = host
@@ -244,7 +244,7 @@ func _open_area() -> void:
 
 func _on_area_closed() -> void:
 	if _area != null:
-		_area.queue_free()
+		Gen2Screen.drop(_area)
 		_area = null
 	## `.Area` redisplays the entry it left, cursor and page included.
 	_mode = Mode.ENTRY

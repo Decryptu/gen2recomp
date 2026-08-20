@@ -62,3 +62,26 @@ func test_a_fainted_player_silences_the_alarm() -> void:
 	assert_true(_alarm())
 	_screen.set_hp(40, 40, 0, 40)
 	assert_false(_alarm())
+
+
+## `CleanUpBattleRAM` zeroes the byte whole. When the driver belongs to the
+## screen that opened this one it outlives the fight, so a battle left with the
+## alarm armed would beep over the map music it hands back; the clear is where
+## the screen leaves the tree, which is every way out of a battle.
+func test_a_shared_driver_is_left_with_the_alarm_off() -> void:
+	var driver := Gen2AudioPlayer.new()
+	add_child(driver)
+	var packed: PackedScene = load("res://game/battle/battle_screen.tscn")
+	var borrower := packed.instantiate() as Gen2BattleScreen
+	borrower.set_data(_data)
+	borrower.set_audio_player(driver)
+	add_child(borrower)
+	borrower.set_hp(40, 40, 2, 40)
+	assert_true(driver.low_health_alarm())
+
+	remove_child(borrower)
+	borrower.free()
+	assert_false(driver.low_health_alarm())
+	assert_true(is_instance_valid(driver), "and the driver is not the fight's to free")
+	remove_child(driver)
+	driver.free()
