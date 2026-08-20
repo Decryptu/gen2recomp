@@ -221,6 +221,29 @@ func test_mart_overlay_purchases_the_selected_quantity() -> void:
 	assert_false(_world_screen._world.script_input_waiting())
 
 
+## `PlayTransactionSound` is the world screen's own driver, not the inspection
+## probe: an overlay is a second surface on one [Gen2AudioPlayer], the way the
+## start menu and the party screen already are.
+func test_a_purchase_plays_its_sound_through_the_world_driver() -> void:
+	await _open_world()
+	await _queue_service()
+
+	var host: Gen2WorldServiceScreen = _world_screen._service_host
+	assert_not_null(host)
+	var played: Array[int] = []
+	host.sfx_requested.connect(
+		func(index: int, _waited: bool) -> void: played.append(index)
+	)
+	assert_true(host.handle_button(Gen2Button.A))
+	assert_true(host.handle_button(Gen2Button.A))
+	assert_true(host.handle_button(Gen2Button.A))
+	assert_eq(played, [Gen2WorldServiceScreen.SFX_TRANSACTION] as Array[int])
+	## The world screen is on the other end of it, which is what stops the
+	## overlay reaching for a driver of its own. The synthetic cache carries no
+	## effect records, so the engine has nothing to start.
+	assert_true(host.sfx_requested.is_connected(_world_screen._play_sfx))
+
+
 ## `MartConfirmPurchase`'s NO, and B off the quantity box: both come back to the
 ## list with the money untouched.
 func test_mart_overlay_refuses_without_taking_money() -> void:

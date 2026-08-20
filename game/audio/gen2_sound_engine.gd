@@ -173,6 +173,9 @@ var cry_pitch: int = 0
 var cry_length: int = 0
 var cry_tracks: int = 0
 var stereo_panning_mask: int = 0
+## `wCurSFX`: which effect the four sfx channels are carrying, which is what
+## [method play_sfx_gated] compares a new request against.
+var cur_sfx: int = 0
 
 var _cur_channel: int = 0
 var _cur_track_duty: int = 0
@@ -261,6 +264,7 @@ func init_sound() -> void:
 	cry_length = 0
 	cry_tracks = 0
 	stereo_panning_mask = 0
+	cur_sfx = 0
 	_cur_track_duty = 0
 	_cur_track_volume_envelope = 0
 	_cur_track_frequency = 0
@@ -301,6 +305,43 @@ func play_music(record: Dictionary) -> bool:
 	_music_noise_sample_set = 0
 	music_on()
 	return true
+
+
+## `SFXChannelsOff`: the four effect channels' `CHANNEL_FLAGS1` zeroed and the
+## pitch sweep with them. It is what the Unown sounds and the other places that
+## cut an effect short reach in front of `PlaySFX`, which is also why their next
+## request is never the one [method play_sfx_gated] refuses.
+func sfx_channels_off() -> void:
+	for index: int in range(NUM_MUSIC_CHANNELS, NUM_CHANNELS):
+		var channel: Channel = channels[index]
+		channel.channel_on = false
+		channel.subroutine = false
+		channel.looping = false
+		channel.sfx = false
+		channel.noise = false
+		channel.cry = false
+	pitch_sweep_value = 0
+
+
+## `PlaySFX`: the wrapper every `playsound`, `specialsound` and menu beep goes
+## through, and the reason two of them do not pile onto each other. The table is
+## ordered highest priority first, so a request is refused while a *lower*-
+## numbered effect is still on the four channels; the same id restarts, since
+## the comparison is `cp e / jr c`.
+##
+## Only `PlayStereoSFX` and the battle animations behind it reach [method
+## play_sfx] without this gate. Without it every request restarted the channels
+## mid-effect, which is a fanfare cut in half by whatever the next box beeped.
+##
+## [param after_wait] is `WaitPlaySFX`, and the handful of sites that spend a
+## `WaitSFX` of their own first: the cartridge holds there until the channels
+## are free, so the gate can never be the thing that refuses those.
+func play_sfx_gated(record: Dictionary, after_wait: bool = false) -> bool:
+	var index: int = int(record.get("index", 0))
+	if not after_wait and sfx_active() and cur_sfx < index:
+		return false
+	cur_sfx = index
+	return play_sfx(record)
 
 
 ## `_PlaySFX`, including the hardware clear each active sfx channel gets first.

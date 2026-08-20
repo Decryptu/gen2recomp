@@ -1286,7 +1286,7 @@ func _play_anim_sound(sfx: int) -> void:
 	var record: Dictionary = _data.world_audio(&"sfx", sfx)
 	if record.is_empty():
 		return
-	_audio_player.play_record(record, &"sound", _audio_assets())
+	_audio_player.play_record(record, &"stereo_sfx", _audio_assets())
 
 
 ## `BattleAnimCmd_Cry`: whichever battler `hBattleTurn` names, at its own
