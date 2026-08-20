@@ -33,6 +33,7 @@ func after_each() -> void:
 		_box_screen = null
 	_clear_saves()
 	RomCache.clear(_directory)
+	Gen2ModHost.reset()
 
 
 func _clear_saves() -> void:
@@ -435,6 +436,43 @@ func test_the_stats_screen_leaves_on_b_and_on_a_over_its_last_page() -> void:
 	assert_eq(int(screen.snapshot()["page"]), Gen2StatsScreenPage.BLUE_PAGE)
 	screen.handle_button(Gen2Button.A)
 	assert_signal_emitted(screen, "closed")
+
+
+## `Gen2ModHost.register_stats_page`: a registered page is turned to after the
+## blue one, wraps back to pink, and takes the blue page's job of answering A
+## with the exit. The screen asks the host for the count rather than the caller,
+## so every screen that embeds it gets the page.
+func test_a_registered_page_joins_the_turn_order_and_becomes_the_last() -> void:
+	assert_true(bool(Gen2ModHost.instance().register_stats_page(
+		&"testmod", {"build": func(_page: Dictionary) -> Array: return []}
+	)["ok"]))
+	assert_eq(Gen2StatsScreenPage.page_count(), Gen2StatsScreenPage.NUM_PAGES + 1)
+	var screen: Gen2MonStatsScreen = Gen2MonStatsScreen.create(_data, _save().party)
+	watch_signals(screen)
+	screen.handle_button(Gen2Button.LEFT)
+	assert_eq(int(screen.snapshot()["page"]), Gen2StatsScreenPage.BLUE_PAGE + 1)
+	screen.handle_button(Gen2Button.RIGHT)
+	assert_eq(int(screen.snapshot()["page"]), Gen2StatsScreenPage.PINK_PAGE)
+	for _press: int in 3:
+		screen.handle_button(Gen2Button.A)
+	assert_signal_not_emitted(screen, "closed")
+	assert_eq(int(screen.snapshot()["page"]), Gen2StatsScreenPage.BLUE_PAGE + 1)
+	screen.handle_button(Gen2Button.A)
+	assert_signal_emitted(screen, "closed")
+
+
+## The two halves of a Pokémon no cartridge page prints. A registered page is
+## handed the snapshot and nothing else, so both are in it whether or not one is
+## registered, and the copy is the mon's rather than the mon's own dictionary.
+func test_the_snapshot_carries_the_dvs_and_stat_experience_a_page_cannot_reach() -> void:
+	var save: Gen2SaveData = _save()
+	var mon: Gen2SaveMon = save.party[0]
+	mon.stat_exp["attack"] = 25600
+	var page: Dictionary = Gen2MonStatsScreen.create(_data, save.party).snapshot()
+	assert_eq(int(page["dvs"]), mon.dvs)
+	assert_eq(int((page["stat_exp"] as Dictionary)["attack"]), 25600)
+	(page["stat_exp"] as Dictionary)["attack"] = 0
+	assert_eq(int(mon.stat_exp["attack"]), 25600)
 
 
 ## `.d_up` and `.d_down` neither wrap nor reach past the party, and each reload

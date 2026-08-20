@@ -2,7 +2,7 @@
 	"id": "new_content",
 	"name": "New Content Example",
 	"version": "1.0.0",
-	"api_version": 7,
+	"api_version": 8,
 	"entry": "mod.gd",
-	"description": "Adds a type and two matchups, a species with its own art, a move and its effect, an item with a pocket and a mart shelf, a named control axis and a visible wild population that reads the run's rules; rebalances two cartridge rows, watches both event channels and rewrites how a world text is shown. The reference for everything a mod can register that is not a renderer."
+	"description": "Adds a type and two matchups, a species with its own art, a move and its effect, an item with a pocket and a mart shelf, a named control axis, a fourth page on the stats screen and a visible wild population that reads the run's rules; rebalances two cartridge rows, watches both event channels and rewrites how a world text is shown. The reference for everything a mod can register that is not a renderer."
 }

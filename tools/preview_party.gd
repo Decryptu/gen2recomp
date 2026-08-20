@@ -3,7 +3,7 @@ extends SceneTree
 ## Captures the window-resolution save overlays against a real cache: the party,
 ## the PC boxes and the start menu's pack.
 ##
-##   Godot --path . -s res://tools/preview_party.gd -- <game> <out.png> [party|box|pack|select] [presses]
+##   Godot --path . -s res://tools/preview_party.gd -- <game> <out.png> [party|box|pack|select|stats] [presses]
 ##
 ## `presses` is a comma-separated button list driven into the overlay before the
 ## shot, the way `preview_world_services.gd` photographs a second page: `d` is
@@ -43,7 +43,9 @@ var _elapsed: int = 0
 func _initialize() -> void:
 	var args: PackedStringArray = OS.get_cmdline_user_args()
 	if args.size() < 2:
-		push_error("Usage: preview_party.gd -- <game> <out.png> [party|box|pack|select]")
+		push_error(
+			"Usage: preview_party.gd -- <game> <out.png> [party|box|pack|select|stats]"
+		)
 		quit(1)
 		return
 	var game: StringName = StringName(args[0])
@@ -91,6 +93,15 @@ func _build(data: GameData) -> Control:
 		return boxes
 	if _what == "pack" or _what == "select":
 		return _build_pack(data, save)
+	## The stats screen's mod seam has no player until a mod is installed, so the
+	## shipped example's own page is registered here: this is the one place the
+	## fourth page and its relaid-out indicators can be looked at.
+	if _what == "stats":
+		var manifest: Dictionary = Gen2ModManifest.read("res://mods/examples/new_content")
+		if not bool(manifest.get("ok", false)) \
+			or not bool(Gen2ModHost.instance().load_mod(manifest["manifest"]).get("ok", false)):
+			push_error("Could not load the example mod's stats page.")
+			return null
 	var party := Gen2PartyScreen.new()
 	party.set_context(data, save, true)
 	return party
@@ -142,6 +153,7 @@ func _process(_delta: float) -> bool:
 	if _elapsed == FRAMES_BEFORE_CAPTURE:
 		_drive(_programs[_at])
 		return false
+	RenderingServer.force_draw()
 	var image: Image = root.get_texture().get_image()
 	var path: String = _output_path
 	if _programs.size() > 1:

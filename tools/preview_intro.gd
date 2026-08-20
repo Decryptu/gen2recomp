@@ -177,6 +177,7 @@ func _process(_delta: float) -> bool:
 	if _elapsed == FRAMES_BEFORE_CAPTURE:
 		_drive(_steps[_at])
 		return false
+	RenderingServer.force_draw()
 	var image: Image = root.get_texture().get_image()
 	var path: String = _output_path
 	if _steps.size() > 1:

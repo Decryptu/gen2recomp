@@ -87,6 +87,7 @@ func _process(_delta: float) -> bool:
 	if _frames < SETTLE_FRAMES:
 		return false
 
+	RenderingServer.force_draw()
 	var image: Image = root.get_texture().get_image()
 	var error: Error = image.save_png(_output_path)
 	if error != OK:

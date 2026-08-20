@@ -26,7 +26,13 @@ const ROWS: int = 18
 const PINK_PAGE: int = 1
 const GREEN_PAGE: int = 2
 const BLUE_PAGE: int = 3
+## The cartridge's three. A mod adds its own after the blue page; see
+## [method page_count].
 const NUM_PAGES: int = 3
+## The most pages the upper half can indicate. The run of 2x2 blocks is centred
+## against the right arrow and the left arrow moves with it, so a sixth block
+## would stand on the front pic's own cell.
+const MAX_PAGES: int = 5
 
 ## Everything on this screen prints with the battle-extra strip loaded.
 const FONT: StringName = Gen2Text.FONT_BATTLE_EXTRA
@@ -52,13 +58,20 @@ const SHINY: Vector2i = Vector2i(19, 0)
 const NICKNAME: Vector2i = Vector2i(8, 2)
 const SPECIES_SLASH: Vector2i = Vector2i(9, 4)
 const DIVIDER_ROW: int = 7
-const PAGE_LEFT_ARROW: Vector2i = Vector2i(12, 6)
 const PAGE_RIGHT_ARROW: Vector2i = Vector2i(19, 6)
+const PAGE_ARROW_ROW: int = 6
 
-## `StatsScreen_LoadPageIndicators`: three 2x2 blocks, one per page.
+## `StatsScreen_LoadPageIndicators`: three 2x2 blocks, one per page, the last
+## ending against the right arrow. See [method page_indicators], which is where
+## a fourth or fifth goes.
 const PAGE_INDICATORS: Array[Vector2i] = [
 	Vector2i(13, 5), Vector2i(15, 5), Vector2i(17, 5),
 ]
+const PAGE_INDICATOR_ROW: int = 5
+const PAGE_INDICATOR_STEP: int = 2
+## The rightmost block's column, which the source's third indicator sits on and
+## every page count keeps.
+const PAGE_INDICATOR_LAST_COLUMN: int = 17
 
 ## `hlcoord 0, 0`, and `PrepMonFrontpic` centres a seven-tile cell there.
 const PIC_AT: Vector2i = Vector2i(0, 0)
@@ -197,6 +210,39 @@ static func pic_size() -> int:
 	return PIC_TILES * TILE
 
 
+## How many pages the screen turns between: the cartridge's three plus whatever
+## mods have registered, capped at [constant MAX_PAGES]. Every page number in
+## this screen is one-based off [constant PINK_PAGE], so the last is this.
+static func page_count() -> int:
+	return mini(NUM_PAGES + Gen2ModHost.instance().stats_pages().size(), MAX_PAGES)
+
+
+## The 2x2 indicator blocks for [param count] pages. The run ends against the
+## right arrow on [constant PAGE_INDICATOR_LAST_COLUMN] whatever the count, so
+## the source's own three are unmoved and extra blocks grow leftward.
+static func page_indicators(count: int) -> Array[Vector2i]:
+	var out: Array[Vector2i] = []
+	var first: int = PAGE_INDICATOR_LAST_COLUMN - (count - 1) * PAGE_INDICATOR_STEP
+	for index: int in count:
+		out.append(Vector2i(first + index * PAGE_INDICATOR_STEP, PAGE_INDICATOR_ROW))
+	return out
+
+
+## The left arrow, one column left of the first indicator, which is where the
+## source's own sits for three pages.
+static func page_left_arrow(count: int) -> Vector2i:
+	return Vector2i(page_indicators(count)[0].x - 1, PAGE_ARROW_ROW)
+
+
+## The `build` Callables of the pages past the blue one, in the order they are
+## turned to.
+static func extra_page_builders() -> Array:
+	var out: Array = []
+	for entry: Dictionary in Gen2ModHost.instance().stats_pages():
+		out.append(entry["build"])
+	return out
+
+
 ## The hatch hint `EggStatsScreen` picks for a step counter.
 static func egg_message(steps: int) -> String:
 	if steps < EGG_SOON_STEPS:
@@ -224,6 +270,8 @@ func draw(page: Dictionary) -> PackedByteArray:
 			_draw_green(page, indices)
 		BLUE_PAGE:
 			_draw_blue(page, indices)
+		var number when number > BLUE_PAGE:
+			_draw_registered(page, indices, number - BLUE_PAGE - 1)
 		_:
 			_draw_pink(page, indices)
 	return indices
@@ -310,19 +358,23 @@ func _draw_upper(page: Dictionary, into: PackedByteArray) -> void:
 	tiles.draw_run(
 		Gen2BattleTiles.HP_BAR_EMPTY, COLUMNS, into, width, 0, DIVIDER_ROW * TILE
 	)
-	_code(into, width, CODE_LEFT_ARROW, PAGE_LEFT_ARROW)
+	var count: int = page_count()
+	_code(into, width, CODE_LEFT_ARROW, page_left_arrow(count))
 	_code(into, width, CODE_RIGHT_ARROW, PAGE_RIGHT_ARROW)
-	_page_indicators(into, width, int(page.get("page", PINK_PAGE)))
+	_page_indicators(into, width, int(page.get("page", PINK_PAGE)), count)
 
 
 ## Three 2x2 blocks, the open page's drawn from the large square instead of the
 ## small one. The source writes the four tiles in the order top-left, top-right,
 ## bottom-left, bottom-right off one incrementing tile number.
-func _page_indicators(into: PackedByteArray, width: int, open_page: int) -> void:
-	for index: int in PAGE_INDICATORS.size():
+func _page_indicators(
+	into: PackedByteArray, width: int, open_page: int, count: int
+) -> void:
+	var blocks: Array[Vector2i] = page_indicators(count)
+	for index: int in blocks.size():
 		var first: int = Gen2BattleTiles.PAGE_SQUARE_LARGE \
 			if index + PINK_PAGE == open_page else Gen2BattleTiles.PAGE_SQUARE_SMALL
-		var at: Vector2i = PAGE_INDICATORS[index]
+		var at: Vector2i = blocks[index]
 		for quadrant: int in 4:
 			@warning_ignore("integer_division")
 			var offset := Vector2i(quadrant % 2, quadrant / 2)
@@ -449,6 +501,35 @@ func _draw_blue(page: Dictionary, into: PackedByteArray) -> void:
 		BLUE_DIVIDER_COLUMN * TILE, LOWER_FIRST_ROW * TILE
 	)
 	draw_stats(into, width, STAT_NAMES_AT, page.get("stats", {}))
+
+
+## A registered page's own lower half. The mod answers placements and this writes
+## them with the screen's font and the same divider the pink and blue pages
+## stand, so a page it draws cannot reach the upper half or the front pic.
+## Anything outside the lower ten rows is dropped rather than clipped.
+func _draw_registered(page: Dictionary, into: PackedByteArray, index: int) -> void:
+	var builders: Array = extra_page_builders()
+	if index < 0 or index >= builders.size():
+		return
+	var width: int = COLUMNS * TILE
+	var placements: Variant = (builders[index] as Callable).call(page)
+	if not placements is Array:
+		return
+	for placement: Dictionary in placements as Array:
+		if placement.has("divider"):
+			var column: int = int(placement["divider"])
+			if column < 0 or column >= COLUMNS:
+				continue
+			tiles.draw_run_down(
+				Gen2BattleTiles.STATS_DIVIDER, LOWER_ROWS, into, width,
+				column * TILE, LOWER_FIRST_ROW * TILE
+			)
+			continue
+		var at: Vector2i = placement.get("at", Vector2i.ZERO)
+		if at.y < LOWER_FIRST_ROW or at.y >= LOWER_FIRST_ROW + LOWER_ROWS \
+			or at.x < 0 or at.x >= COLUMNS:
+			continue
+		_text(into, width, String(placement.get("text", "")), at)
 
 
 ## `EggStatsScreen`, which replaces the whole screen rather than a page of it:

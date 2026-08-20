@@ -64,6 +64,7 @@ func _process(_delta: float) -> bool:
 	_frames += 1
 	if _frames < SETTLE_FRAMES:
 		return false
+	RenderingServer.force_draw()
 	var image: Image = root.get_texture().get_image()
 	if image.save_png(_output_path) != OK:
 		push_error("Could not write %s" % _output_path)

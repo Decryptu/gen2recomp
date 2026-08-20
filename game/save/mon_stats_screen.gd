@@ -2,8 +2,10 @@ class_name Gen2MonStatsScreen
 extends RefCounted
 
 ## The stats screen's model (`engine/pokemon/stats_screen.asm`): which member of
-## a list is shown, which of the three pages is open, and what each page has to
-## say about it. [Gen2StatsScreenPage] draws the answer.
+## a list is shown, which page is open, and what each page has to say about it.
+## The pages are the cartridge's three plus whatever mods have registered
+## ([method Gen2ModHost.register_stats_page]), which is
+## [method Gen2StatsScreenPage.page_count]. [Gen2StatsScreenPage] draws the answer.
 ##
 ## `StatsScreenInit` is opened over whatever screen asked for it and hands
 ## control back on the way out, so this owns no nodes: whoever embedded it draws
@@ -23,7 +25,6 @@ signal closed
 signal cry_requested(species: int)
 
 const PINK_PAGE: int = Gen2StatsScreenPage.PINK_PAGE
-const BLUE_PAGE: int = Gen2StatsScreenPage.BLUE_PAGE
 
 var _data: GameData = null
 var _mons: Array = []
@@ -74,7 +75,7 @@ func handle_button(button: int) -> bool:
 			closed.emit()
 			return true
 		Gen2Button.A:
-			if egg or _page == BLUE_PAGE:
+			if egg or _page == _last_page():
 				closed.emit()
 				return true
 			_turn_page(1)
@@ -99,7 +100,16 @@ func handle_button(button: int) -> bool:
 ## `.d_right` and `.d_left`: the pages wrap in both directions, and a page change
 ## reloads the lower half without reloading the Pokémon.
 func _turn_page(delta: int) -> void:
-	_page = wrapi(_page - PINK_PAGE + delta, 0, Gen2StatsScreenPage.NUM_PAGES) + PINK_PAGE
+	_page = wrapi(
+		_page - PINK_PAGE + delta, 0, Gen2StatsScreenPage.page_count()
+	) + PINK_PAGE
+
+
+## `.d_right`'s wrap point, which is the blue page until a mod registers one past
+## it (see [method Gen2ModHost.register_stats_page]). A is the exit on this page
+## and a page turn everywhere else, so both follow the count rather than BLUE.
+func _last_page() -> int:
+	return PINK_PAGE + Gen2StatsScreenPage.page_count() - 1
 
 
 ## `.d_up` and `.d_down`: neither wraps, and the row the party menu is left on
@@ -147,6 +157,11 @@ func snapshot() -> Dictionary:
 		"fainted": mon.hp <= 0,
 		"pokerus": mon.pokerus,
 		"types": _types(species),
+		## Neither is on a cartridge page. They are here because a registered
+		## page is handed this snapshot and nothing else, and the two hidden
+		## halves of a Pokémon are what such a page exists to say.
+		"dvs": mon.dvs,
+		"stat_exp": mon.stat_exp.duplicate(),
 		"item_name": _data.item_name(mon.item) if mon.item != 0 \
 			else Gen2StatsScreenPage.THREE_DASHES,
 		"moves": _moves(mon),
