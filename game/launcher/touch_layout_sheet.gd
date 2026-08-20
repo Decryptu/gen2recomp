@@ -33,6 +33,8 @@ static func create(palette: Gen2LauncherTheme, options: Gen2Options) -> Gen2Touc
 
 func _build() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	## A modal, so the arrows belong to it rather than to the page under it.
+	add_to_group(Gen2FocusGuard.MODAL_GROUP)
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	theme = _theme.control_theme()
 
