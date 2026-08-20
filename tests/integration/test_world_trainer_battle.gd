@@ -95,10 +95,22 @@ func _trigger_trainer() -> void:
 	assert_not_null(_battle_child())
 
 
+## The battle overlay, once `DoBattleTransition` has been spent.
+##
+## The encounter is resolved on the frame it fires, and the transition owns
+## every frame between that and the battle screen being built, so a test that
+## looked for the child on the same frame would find nothing.
 func _battle_child() -> Gen2BattleScreen:
-	for child: Node in _world_screen.get_children():
-		if child is Gen2BattleScreen:
-			return child as Gen2BattleScreen
+	var guard: int = 600
+	while guard > 0:
+		for child: Node in _world_screen.get_children():
+			if child is Gen2BattleScreen:
+				return child as Gen2BattleScreen
+		if _world_screen.battle_transition_running():
+			_world_screen.advance_frame()
+			guard -= 1
+			continue
+		return null
 	return null
 
 
@@ -1068,3 +1080,35 @@ func test_a_trainer_battle_opens_on_the_track_its_class_names() -> void:
 		Gen2Battle.region_is_kanto(_world_screen._world.landmark()),
 		"the fixture map is in Johto"
 	)
+
+
+## `StartBattle`: `DoBattleTransition` owns every frame between the encounter
+## resolving and the battle screen existing, and the map is what it draws over.
+func test_a_battle_runs_its_transition_before_the_overlay_exists() -> void:
+	await _open_world()
+	await _walk_one(Vector2i.RIGHT)
+	for _frame: int in 400:
+		_world_screen.advance_frame()
+		if _world_screen.battle_transition_running():
+			break
+		var pending: Dictionary = _world_screen._world.pending_script_input()
+		if StringName(pending.get("type", &"")) in [&"text", &"button"]:
+			_world_screen._advance_script_input()
+	assert_true(
+		_world_screen.battle_transition_running(),
+		"the encounter is resolved and the transition is what is on screen"
+	)
+	var seen: bool = false
+	var frames: int = 0
+	while _world_screen.battle_transition_running() and frames < 600:
+		frames += 1
+		seen = seen or _world_screen._battle_transition.cells().count(
+			Gen2BattleTransition.CELL_BLACK
+		) > 0
+		## Nothing is built until the last of its frames is spent.
+		for child: Node in _world_screen.get_children():
+			assert_false(child is Gen2BattleScreen, "no overlay while the transition runs")
+		_world_screen.advance_frame()
+	assert_true(seen, "the outro blacks the map out on the way")
+	assert_gt(frames, Gen2BattleTransition.LEAD_FRAMES, "the flash and an outro")
+	assert_not_null(_battle_child(), "and the battle behind it once it lands")

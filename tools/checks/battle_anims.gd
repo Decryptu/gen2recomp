@@ -117,6 +117,7 @@ func run(r: RefCounted) -> void:
 		_run_every_animation(game_id, data)
 		_play_every_animation(game_id, data)
 		_verify_the_entrance(game_id, data)
+		_verify_the_transition(game_id, data)
 
 
 ## The two bodies `BattleAnim_SendOutMon`'s parameter picks between, by the bg
@@ -192,6 +193,74 @@ func _verify_the_entrance(game_id: StringName, data: GameData) -> void:
 		"%s: SFX_SHINE is not in the audio index, so a trainer battle opens silently." % game_id
 	)
 	print("%s: the entrance runs both send-out branches on both sides." % game_id)
+
+
+## `DoBattleTransition` on a real cache: the two tiles it wipes with, the palette
+## it floods the map with, and all four animations run to the end.
+##
+## The tiles are content whose value is known independently, which is what checks
+## the address: one of them is solid colour 3 and the other is the chequered
+## square, and no other pair of tiles in the dump is that.
+func _verify_the_transition(game_id: StringName, data: GameData) -> void:
+	var sheet: Dictionary = data.tile_sheet("battle_transition")
+	var indices: PackedByteArray = data.tile_indices("battle_transition")
+	if not _r.check(
+		int(sheet.get("tiles", 0)) == RomLayout.BATTLE_TRANSITION_TILES
+			and indices.size() == RomLayout.BATTLE_TRANSITION_TILES * Gen2Tiles.TILE_PIXELS,
+		"%s: the transition sheet is %d tiles, %d pixels." % [
+			game_id, int(sheet.get("tiles", 0)), indices.size(),
+		]
+	):
+		return
+	var width: int = int(sheet["width"])
+	var square: Array[int] = []
+	var black: Array[int] = []
+	for y: int in Gen2Tiles.TILE_HEIGHT:
+		for x: int in Gen2Tiles.TILE_WIDTH:
+			square.append(int(indices[y * width + x]))
+			black.append(int(indices[y * width + Gen2Tiles.TILE_WIDTH + x]))
+	_r.check(
+		black.count(3) == black.size(),
+		"%s: BATTLETRANSITION_BLACK is not solid colour 3." % game_id
+	)
+	_r.check(
+		square.count(3) < square.size() and square.count(3) > 0,
+		"%s: BATTLETRANSITION_SQUARE has no pattern in it." % game_id
+	)
+	for dark: bool in [false, true]:
+		var palette: PackedColorArray = data.battle_transition_palette(dark)
+		_r.check(
+			palette.size() == RomLayout.TRANSITION_PALETTE_COLORS,
+			"%s: the %s transition palette has %d colours." % [
+				game_id, "dark" if dark else "day", palette.size(),
+			]
+		)
+	## Every animation, to the frame the screen is black on. Nothing here says
+	## what one looks like; what it pins is that all four reach their own end
+	## rather than running off a table, and how long each takes.
+	var lengths: Array[int] = []
+	for stronger: bool in [false, true]:
+		for cave: bool in [false, true]:
+			var rng := RandomNumberGenerator.new()
+			rng.seed = 5
+			var transition: Gen2BattleTransition = Gen2BattleTransition.create(
+				stronger, cave, true, false, rng, data.battle_anim_sine()
+			)
+			var frames: int = 0
+			while transition.advance_frame() and frames < MAX_FRAMES:
+				frames += 1
+			lengths.append(frames)
+			var cells: PackedByteArray = transition.cells()
+			var black_cells: int = 0
+			for cell: int in cells:
+				black_cells += 1 if cell == Gen2BattleTransition.CELL_BLACK else 0
+			_r.check(
+				transition.finished() and black_cells == cells.size(),
+				"%s: the %s transition left %d of %d cells unwiped." % [
+					game_id, "cave" if cave else "route", black_cells, cells.size(),
+				]
+			)
+	print("%s: the four transitions run %s frames." % [game_id, lengths])
 
 
 ## `GetSubstitutePic`, on both sides and all three cartridges: the doll is four

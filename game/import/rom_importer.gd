@@ -3912,6 +3912,7 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		},
 		"bar_palettes": _import_bar_palettes(rom, layout),
 		"player_palettes": _import_player_palettes(rom, layout),
+		"transition_palettes": _import_transition_palettes(rom, layout),
 		"card_palettes": _import_card_palettes(rom, layout),
 		"pokedex_palettes": _import_pokedex_palettes(rom, layout),
 		"pc_palette": _import_pc_palette(rom, layout),
@@ -4467,6 +4468,23 @@ func _import_player_palettes(rom: RomFile, layout: Dictionary) -> Dictionary:
 		out[RomLayout.PLAYER_PALETTE_NAMES[index]] = [
 			rom.u16le(entry), rom.u16le(entry + Gen2Palette.COLOR_BYTES),
 		]
+	return out
+
+
+## `StartTrainerBattle_LoadPokeBallGraphics.pals` and its `.darkpals`, four
+## colours each: the whole background is put on `PAL_BG_TEXT` and filled with
+## one of them, which is why a trainer transition turns the map red.
+func _import_transition_palettes(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var entry: Dictionary = layout.get("battle_transition", {}) as Dictionary
+	var out: Dictionary = {}
+	for index: int in RomLayout.TRANSITION_PALETTE_NAMES.size():
+		var at: int = int(entry.get("palette" if index == 0 else "dark_palette", -1))
+		if at < 0:
+			continue
+		var colors: Array = []
+		for color: int in RomLayout.TRANSITION_PALETTE_COLORS:
+			colors.append(rom.u16le(at + color * Gen2Palette.COLOR_BYTES))
+		out[RomLayout.TRANSITION_PALETTE_NAMES[index]] = colors
 	return out
 
 
@@ -5274,7 +5292,7 @@ func _import_tiles(rom: RomFile, layout: Dictionary, on_progress: Callable) -> D
 		},
 		## `BattleTransitionTiles`, the two `DoBattleTransition` wipes with.
 		"battle_transition": {
-			"offset": int(layout["battle_transition"]),
+			"offset": int((layout["battle_transition"] as Dictionary)["tiles"]),
 			"tiles": RomLayout.BATTLE_TRANSITION_TILES,
 			"first_code": 0,
 			"bits": 2,

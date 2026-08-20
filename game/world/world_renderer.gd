@@ -43,6 +43,14 @@ func set_world(world: Gen2WorldAPI, animation: Gen2WorldAnimation = null) -> voi
 ## Gen2ModHost.RENDERER_EFFECTS_METHOD: the emote bubbles, boulder dust, grass
 ## rustle and headbutt tree this view draws over the map. Presentation only, so a
 ## renderer may be handed null and draw none of them.
+## `DoBattleTransition`'s own screen: the cells it has written, the two tiles it
+## draws them with and the palette it floods the map with, or an empty one when
+## it floods nothing.
+var _transition_cells: PackedByteArray = PackedByteArray()
+var _transition_tiles: PackedByteArray = PackedByteArray()
+var _transition_palette: PackedColorArray = PackedColorArray()
+
+
 func set_effects(effects: Gen2WorldEffects) -> void:
 	_effects = effects
 	queue_redraw()
@@ -146,6 +154,14 @@ func _rebuild_atlas() -> void:
 
 
 func _tile_palettes() -> Array:
+	## `StartTrainerBattle_LoadPokeBallGraphics.pal_loop` puts every background
+	## tile on `PAL_BG_TEXT` and fills that one palette, which is why a trainer
+	## transition draws the whole map in four colours.
+	if not _transition_palette.is_empty():
+		var flooded: Array = []
+		for _tile: int in _world.current_tileset.tile_count:
+			flooded.append(Gen2WorldPalette.fade_palette(_transition_palette, _fade_order))
+		return flooded
 	return Gen2WorldPalette.tile_palettes(
 		_world.data,
 		_world.current_map,
@@ -172,6 +188,80 @@ func _paint_tile(image: Image, indices: PackedByteArray, palettes: Array, tile: 
 			image.set_pixel(
 				left + x, y,
 				palette[color_index] if color_index < palette.size() else _background_color
+			)
+
+
+## `DoBattleTransition`, drawn over whatever the map was already showing.
+##
+## [param cells] is [method Gen2BattleTransition.cells], [param tiles] the two
+## tiles `LoadBattleTransitionGFX` loads as index buffers, and [param palette]
+## the four colours the whole map is flooded with while a trainer's ball is up.
+## An empty palette is the wild branch, which floods nothing: its black tile is
+## colour 3 of whatever palette the cell under it was already drawn in, and that
+## is why the wedges are dark green over grass rather than black.
+func set_transition(
+	cells: PackedByteArray, tiles: PackedByteArray, palette: PackedColorArray
+) -> void:
+	var was: PackedColorArray = _transition_palette
+	_transition_cells = cells
+	_transition_tiles = tiles
+	_transition_palette = palette
+	if palette != was:
+		_actor_textures.clear()
+		_effect_textures.clear()
+		_anim_textures.clear()
+		_rebuild_atlas()
+	queue_redraw()
+
+
+func clear_transition() -> void:
+	if _transition_cells.is_empty() and _transition_palette.is_empty():
+		return
+	var was_flooding: bool = not _transition_palette.is_empty()
+	_transition_cells = PackedByteArray()
+	_transition_tiles = PackedByteArray()
+	_transition_palette = PackedColorArray()
+	if was_flooding:
+		_actor_textures.clear()
+		_effect_textures.clear()
+		_anim_textures.clear()
+		_rebuild_atlas()
+	queue_redraw()
+
+
+## The transition's own cells, over the map and over everything standing on it.
+## `wTilemap` is one plane, so a wedge covers an NPC the way it covers a tree.
+func _draw_transition(page: PackedInt32Array, palettes: Array, window: Vector2i) -> void:
+	var black: int = Gen2BattleTransition.CELL_BLACK
+	for y: int in Gen2BattleTransition.ROWS:
+		for x: int in Gen2BattleTransition.COLUMNS:
+			var cell: int = int(_transition_cells[y * Gen2BattleTransition.COLUMNS + x])
+			if cell == Gen2BattleTransition.CELL_NONE:
+				continue
+			var palette: PackedColorArray = _transition_palette
+			if palette.is_empty():
+				var tile: int = page[y * window.x + x] if y * window.x + x < page.size() else 0
+				palette = palettes[tile] if tile >= 0 and tile < palettes.size() \
+					else PackedColorArray()
+			var at := Rect2(
+				Vector2(x * Gen2Tiles.TILE_WIDTH, y * Gen2Tiles.TILE_HEIGHT),
+				Vector2(Gen2Tiles.TILE_WIDTH, Gen2Tiles.TILE_HEIGHT)
+			)
+			if cell == black or _transition_tiles.is_empty():
+				draw_rect(at, palette[3] if palette.size() > 3 else Color.BLACK, true)
+				continue
+			_draw_transition_square(at, palette)
+
+
+## `BATTLETRANSITION_SQUARE`, the one tile of the pair that has a pattern in it.
+func _draw_transition_square(at: Rect2, palette: PackedColorArray) -> void:
+	for y: int in Gen2Tiles.TILE_HEIGHT:
+		for x: int in Gen2Tiles.TILE_WIDTH:
+			var index: int = int(_transition_tiles[y * Gen2Tiles.TILE_WIDTH + x])
+			draw_rect(
+				Rect2(at.position + Vector2(x, y), Vector2.ONE),
+				palette[index] if index < palette.size() else Color.BLACK,
+				true
 			)
 
 
@@ -286,6 +376,10 @@ func _draw() -> void:
 		if bool(sprite.get("screen", false)):
 			_draw_effect_sprite(sprite, Vector2.ZERO)
 	_draw_encounter_pulse(camera_pixels)
+	## Last, over the map and over everything standing on it: `wTilemap` is one
+	## plane and a wedge covers an NPC the way it covers a tree.
+	if not _transition_cells.is_empty():
+		_draw_transition(page, _tile_palettes(), window_size)
 
 
 func _actor_texture(

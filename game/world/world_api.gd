@@ -1704,8 +1704,14 @@ const ENVIRONMENT_TOWN: int = 1
 const ENVIRONMENT_ROUTE: int = 2
 const ENVIRONMENT_INDOOR: int = 3
 const ENVIRONMENT_CAVE: int = 4
+const ENVIRONMENT_5: int = 5
 const ENVIRONMENT_GATE: int = 6
 const ENVIRONMENT_DUNGEON: int = 7
+## The three `StartTrainerBattle_DetermineWhichAnimation` calls a cave, which is
+## what puts a battle on the flash-and-wave transition rather than the spin.
+const CAVE_ENVIRONMENTS: Array[int] = [
+	ENVIRONMENT_CAVE, ENVIRONMENT_5, ENVIRONMENT_DUNGEON,
+]
 
 ## `TILESET_POKECENTER` and `TILESET_POKECOM_CENTER`, the two `.SetSpawn`
 ## respawns in. The second is Crystal's alone and its number is past the split,

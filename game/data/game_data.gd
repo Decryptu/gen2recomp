@@ -51,6 +51,7 @@ var _atlases: Dictionary = {}
 var _tiles: Dictionary = {}
 var _bar_palettes: Dictionary = {}
 var _player_palettes: Dictionary = {}
+var _transition_palettes: Dictionary = {}
 var _card_palettes: Dictionary = {}
 var _pokedex_palettes: Dictionary = {}
 var _pack: Dictionary = {}
@@ -133,6 +134,7 @@ static func open_directory(path: String) -> GameData:
 	data._tiles = manifest.get("tiles", {})
 	data._bar_palettes = manifest.get("bar_palettes", {})
 	data._player_palettes = manifest.get("player_palettes", {})
+	data._transition_palettes = manifest.get("transition_palettes", {})
 	data._card_palettes = manifest.get("card_palettes", {})
 	data._pokedex_palettes = manifest.get("pokedex_palettes", {})
 	data._pack = manifest.get("pack", {})
@@ -1991,6 +1993,19 @@ func player_palette(kind: String) -> PackedColorArray:
 		Gen2Palette.from_packed(int((stored as Array)[0])),
 		Gen2Palette.from_packed(int((stored as Array)[1])),
 	]))
+
+
+## `StartTrainerBattle_LoadPokeBallGraphics`' own palette, which every
+## background tile is drawn in while a trainer transition runs. The dark one is
+## `wTimeOfDayPal`'s `DARKNESS_F`.
+func battle_transition_palette(dark: bool = false) -> PackedColorArray:
+	var stored: Variant = _transition_palettes.get("dark" if dark else "day", null)
+	if not stored is Array or (stored as Array).size() < RomLayout.TRANSITION_PALETTE_COLORS:
+		return Gen2Palette.pic_palette(PackedColorArray([Color.WHITE, Color.BLACK]))
+	var out := PackedColorArray()
+	for packed: Variant in stored as Array:
+		out.append(Gen2Palette.from_packed(int(packed)))
+	return out
 
 
 func player_backpic(kind: String) -> Dictionary:

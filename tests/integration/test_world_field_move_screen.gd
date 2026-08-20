@@ -658,6 +658,7 @@ func test_a_rare_score_that_passes_its_roll_opens_the_tree_battle() -> void:
 	assert_eq(Gen2WorldTreemon.coord_score(HEADBUTT_CELL), 7)
 	await _headbutt_with(7, 1)
 
+	_world_screen.settle_battle_transition()
 	assert_not_null(_world_screen._battle_host, "a passed RARE roll reaches startbattle")
 	var battle: Gen2Battle = _world_screen._battle_host._battle
 	var enemy: Gen2BattleMon = battle.party(Gen2Battle.ENEMY).active_mon()
@@ -776,6 +777,7 @@ func test_rock_smash_needs_no_badge_and_refuses_when_facing_no_rock() -> void:
 func test_a_passed_rock_roll_opens_a_battle_and_a_failed_one_does_not() -> void:
 	await _open_rock_smash_world()
 	await _rock_smash_with(2)
+	_world_screen.settle_battle_transition()
 	assert_not_null(_world_screen._battle_host, "a roll under 4 reaches startbattle")
 	var battle: Gen2Battle = _world_screen._battle_host._battle
 	assert_eq(battle.party(Gen2Battle.ENEMY).active_mon().species, TREEMON_SPECIES)

@@ -88,6 +88,11 @@ var _pending_step_events: Dictionary = {}
 ## empty on every other frame. The map swaps between the two stages, which is
 ## where the setup script's own list sits.
 var _map_fade: Dictionary = {}
+## `DoBattleTransition` and the battle it is in front of: the encounter is
+## resolved when the transition starts, and the battle screen is not built until
+## it has finished.
+var _battle_transition: Gen2BattleTransition = null
+var _battle_transition_request: Dictionary = {}
 ## `wLandmarkSignTimer` and the window the sign is drawn in. The map load decides
 ## whether there is a sign (`Gen2WorldAPI.map_name_sign_pending`); the sixty
 ## frames it stands for are spent here, like every other overworld countdown.
@@ -489,6 +494,9 @@ func advance_frame() -> void:
 	## Before everything the map draws: the fade owns the frame the map swaps on,
 	## and nothing else runs while `RunMapSetupScript` is spending its own.
 	_advance_map_fade()
+	## `DoBattleTransition`'s own `.loop`, which owns every frame between the
+	## encounter and the battle screen.
+	_advance_battle_transition()
 	## `RefreshMapSprites` runs inside the setup script and `PlaceMapNameSign`
 	## with the rest of the map's background, so a sign raised by the load this
 	## frame carried is spent from the next one.
@@ -716,7 +724,7 @@ func _advance_held_direction() -> void:
 func _overlay_open() -> bool:
 	## A map fade is not an overlay, but nothing may move or be pressed inside
 	## one either: `RunMapSetupScript` runs with the joypad unread.
-	return not _map_fade.is_empty() \
+	return not _map_fade.is_empty() or _battle_transition != null \
 		or _battle_host != null or _service_host != null \
 		or _start_menu_host != null or _party_host != null \
 		or _hall_of_fame_host != null or _trainer_card_host != null \
@@ -2100,7 +2108,131 @@ func _handle_fishing_result(result: Dictionary) -> void:
 	_refresh_labels()
 
 
+## `StartBattle`: the transition first, and the battle screen only once it has
+## finished. `PlayBattleMusic` opens with `PlayMusic MUSIC_NONE`, so the map's
+## own track stops here rather than when the fight is built.
 func _start_battle_request(request: Dictionary) -> void:
+	if _battle_host != null or _battle_transition != null or _data == null:
+		return
+	if _audio_player != null:
+		_audio_player.stop_all()
+	_battle_transition_request = request.duplicate(true)
+	_battle_transition = _build_battle_transition(request)
+	if _battle_transition == null:
+		_open_battle_host(_battle_transition_request)
+		return
+	_apply_battle_transition()
+	_script_prompt = "Battle starting"
+	_refresh_labels()
+
+
+## `StartTrainerBattle_DetermineWhichAnimation`'s two bits, and the ball only a
+## trainer's own transition draws.
+func _build_battle_transition(request: Dictionary) -> Gen2BattleTransition:
+	if _world == null or _data == null:
+		return null
+	var values: Dictionary = request.get("values", {})
+	if bool(values.get("tutorial", false)):
+		return null
+	var environment: int = _world.current_map.environment if _world.current_map != null else 0
+	## `cp CAVE / cp ENVIRONMENT_5 / cp DUNGEON`, the three the flash and the
+	## wavy outro belong to.
+	var cave: bool = environment in Gen2WorldAPI.CAVE_ENVIRONMENTS
+	var lead: int = _battle_lead_level()
+	var opponent: int = int(values.get("level", lead))
+	return Gen2BattleTransition.create(
+		lead + Gen2BattleTransition.STRONGER_MARGIN < opponent,
+		cave,
+		int(values.get("trainer_class", 0)) > 0,
+		_render_time_of_day() == Gen2WorldPalette.TIME_DARK,
+		_encounter_random,
+		_data.battle_anim_sine()
+	)
+
+
+## `wBattleMonLevel`, which is the party's own lead rather than the battle's:
+## the transition is picked before `InitBattleMon` has run.
+func _battle_lead_level() -> int:
+	var save: Gen2SaveData = _injected_save if _injected_save != null \
+		else _selected_runtime_save()
+	if save == null or save.party.is_empty():
+		return 1
+	return int((save.party[0] as Gen2SaveMon).level)
+
+
+## `DoBattleTransition` alone, driven to [param frames] frames in, for a
+## screenshot: the transition over the map it actually runs on, without the
+## battle behind it. [param trainer] is the branch that draws the Poke Ball and
+## floods every background tile with `PAL_BG_TEXT`.
+func preview_battle_transition(frames: int, trainer: bool = false) -> void:
+	_battle_transition = Gen2BattleTransition.create(
+		false, false, trainer, false, _encounter_random,
+		_data.battle_anim_sine() if _data != null else PackedByteArray()
+	)
+	_apply_battle_transition()
+	for _frame: int in maxi(frames, 0):
+		if _battle_transition == null:
+			break
+		_battle_transition.advance_frame()
+		_apply_battle_transition()
+
+
+## Spends `DoBattleTransition` where the caller wants the battle rather than the
+## animation in front of it, which is every driver that opens one without a
+## person watching.
+func settle_battle_transition(limit: int = 600) -> void:
+	var guard: int = limit
+	while _battle_transition != null and guard > 0:
+		advance_frame()
+		guard -= 1
+
+
+## Whether `DoBattleTransition` is still running, which is the several seconds
+## between an encounter resolving and the battle screen existing.
+func battle_transition_running() -> bool:
+	return _battle_transition != null
+
+
+## One frame of it, and the battle behind it when the last one has been spent.
+func _advance_battle_transition() -> void:
+	if _battle_transition == null:
+		return
+	_battle_transition.advance_frame()
+	_apply_battle_transition()
+	if not _battle_transition.finished():
+		return
+	var request: Dictionary = _battle_transition_request
+	_battle_transition = null
+	_battle_transition_request = {}
+	if _renderer != null and _renderer.has_method("clear_transition"):
+		_renderer.clear_transition()
+	if _renderer != null and _renderer.has_method(Gen2ModHost.RENDERER_FADE_METHOD):
+		_renderer.call(Gen2ModHost.RENDERER_FADE_METHOD, Gen2WorldPalette.FADE_IDENTITY, false)
+	_open_battle_host(request)
+
+
+## What the transition is showing right now, handed to whatever is drawing the
+## map. A renderer of a mod's own that does not take it draws the map as it was,
+## which is the same contract the map fade has.
+func _apply_battle_transition() -> void:
+	if _renderer == null or _battle_transition == null:
+		return
+	if _renderer.has_method(Gen2ModHost.RENDERER_FADE_METHOD):
+		_renderer.call(
+			Gen2ModHost.RENDERER_FADE_METHOD, _battle_transition.palette_order(), false
+		)
+	if not _renderer.has_method("set_transition"):
+		return
+	_renderer.set_transition(
+		_battle_transition.cells(),
+		_data.tile_indices("battle_transition") if _data != null else PackedByteArray(),
+		_data.battle_transition_palette(
+			_render_time_of_day() == Gen2WorldPalette.TIME_DARK
+		) if _battle_transition.ball_drawn() and _data != null else PackedColorArray()
+	)
+
+
+func _open_battle_host(request: Dictionary) -> void:
 	if _battle_host != null or _data == null:
 		return
 	var values: Dictionary = request.get("values", {})

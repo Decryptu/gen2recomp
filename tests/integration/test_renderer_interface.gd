@@ -415,6 +415,7 @@ func test_a_visible_encounter_provider_is_driven_validated_drawn_and_fought() ->
 	_world_screen._world.player_cell = cell
 	_world_screen._after_player_move({"kind": &"step"})
 	## The adapter's own prepared request, which is the `values` block itself.
+	_world_screen.settle_battle_transition()
 	var request: Dictionary = _world_screen._battle_host.world_battle_request()
 	assert_eq(int(request["dvs"]), shiny)
 	assert_eq(int(request["level"]), 5)
