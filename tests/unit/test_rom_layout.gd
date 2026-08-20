@@ -517,3 +517,38 @@ func test_the_cry_table_carries_every_cry_constant() -> void:
 		var last: int = int(layout["cry_pointers"]) \
 			+ (RomLayout.AUDIO_CRY_COUNT - 1) * RomLayout.AUDIO_POINTER_SIZE
 		assert_lt(last + RomLayout.AUDIO_POINTER_SIZE, RomRegistry.EXPECTED_SIZE, "%s" % id)
+
+
+## `PokeAnim_ConvertAndApplyBitmask.GetTilemap`, which is `poke_anim_box`'s two
+## tables and the two `add`s past them. A 7x7's numbering is the block's own, so
+## the whole remap is the identity there.
+func test_pic_anim_box_tile_is_get_tilemaps_own_remap() -> void:
+	for tile: int in 98:
+		assert_eq(RomLayout.pic_anim_box_tile(tile, 7), tile, "7x7 is the identity")
+	# `._5by5` is `poke_anim_box 5`: rows 1 to 5 of the block, columns 2 to 6.
+	assert_eq(RomLayout.pic_anim_box_tile(0, 5), 1 * 7 + 2)
+	assert_eq(RomLayout.pic_anim_box_tile(4, 5), 1 * 7 + 6, "down the pic's first column")
+	assert_eq(RomLayout.pic_anim_box_tile(5, 5), 2 * 7 + 2, "the pic's second column")
+	assert_eq(RomLayout.pic_anim_box_tile(24, 5), 5 * 7 + 6)
+	assert_eq(RomLayout.pic_anim_box_tile(25, 5), 49, "`.add_24`, the first frame tile")
+	# `._6by6` is the same table one column and one row further out.
+	assert_eq(RomLayout.pic_anim_box_tile(0, 6), 1 * 7 + 1)
+	assert_eq(RomLayout.pic_anim_box_tile(35, 6), 6 * 7 + 6)
+	assert_eq(RomLayout.pic_anim_box_tile(36, 6), 49, "`.add_13`")
+
+
+## `.Sizes: db 4, 5, 7`, indexed by `height - 5`. Nothing else has a bitmask, so
+## a height the cache does not hold answers zero rather than reading the table.
+func test_pic_anim_bitmask_bytes_is_get_sizes() -> void:
+	assert_eq(RomLayout.pic_anim_bitmask_bytes(5), 4)
+	assert_eq(RomLayout.pic_anim_bitmask_bytes(6), 5)
+	assert_eq(RomLayout.pic_anim_bitmask_bytes(7), 7)
+	assert_eq(RomLayout.pic_anim_bitmask_bytes(0), 0)
+	assert_eq(RomLayout.pic_anim_bitmask_bytes(8), 0)
+
+
+## `AnimateFrontpic` is Crystal's alone; pokegold ships no `pic_animation.asm`.
+func test_only_crystal_carries_pic_animation_pins() -> void:
+	assert_false(RomLayout.pic_anim(RomLayout.for_id(RomRegistry.CRYSTAL)).is_empty())
+	assert_true(RomLayout.pic_anim(RomLayout.for_id(RomRegistry.GOLD)).is_empty())
+	assert_true(RomLayout.pic_anim(RomLayout.for_id(RomRegistry.SILVER)).is_empty())

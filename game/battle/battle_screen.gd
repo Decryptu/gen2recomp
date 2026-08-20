@@ -205,6 +205,13 @@ var _hud_balls: Array = []
 var _hud_border: Array = []
 ## `SlideBattlePicOut`, one entry per square still sliding off.
 var _slides: Array[Dictionary] = []
+## `AnimateFrontpic` over the enemy's square, or null when none is running.
+var _frontpic: Gen2PicAnimation = null
+## `wAttrmap` bit 3, which `PokeAnim_SetVBank1` sets over that square while the
+## animation runs and `PokeAnim_SetVBank0` clears in `PokeAnim_DeinitFrames`. It
+## is the whole reason the animation's tile numbers may sit on top of the
+## player's: bank 1 holds the enemy's picture and its frames and nothing else.
+var _bg_vbank1: PackedByteArray = PackedByteArray()
 ## The text the event pump produced while a bar was still draining. The source
 ## prints it after the bar arrives, since `applydamage` runs before
 ## `criticaltext` and `supereffectivetext`.
@@ -408,7 +415,8 @@ func _process(delta: float) -> void:
 ## because that answers whether a bar is on screen.
 func frames_running() -> bool:
 	var bars: bool = not _bars.is_empty() or (_exp_bar != null and not _exp_bar.paused())
-	return bars or _intro != null or animation_running() or fainting() or sliding()
+	return bars or _intro != null or animation_running() or fainting() or sliding() \
+		or animating_frontpic()
 
 
 ## One hardware frame of everything that counts them. Public through
@@ -422,6 +430,7 @@ func advance_frame() -> bool:
 	moved = advance_bars() or moved
 	moved = advance_faint() or moved
 	moved = advance_slide() or moved
+	moved = advance_frontpic() or moved
 	moved = advance_animation() or moved
 	_resume_after_frames(was_running)
 	return moved
@@ -485,6 +494,58 @@ func advance_slide() -> bool:
 		_slides.remove_at(0)
 	_push_view()
 	return true
+
+
+## Whether the enemy's picture is still wobbling through `AnimateFrontpic`.
+func animating_frontpic() -> bool:
+	return _frontpic != null
+
+
+## One turn of `AnimateFrontpic`'s own `.loop`, which is one `SetUpPokeAnim` and
+## so one hardware frame. The animation edits the tilemap and nothing else, the
+## way `PokeAnim_PlaceGraphic` does, so what it leaves is stamped into the
+## screen's own map over the enemy's square.
+func advance_frontpic() -> bool:
+	if _frontpic == null:
+		return false
+	var cry: StringName = _frontpic.advance()
+	if cry != &"":
+		# `PokeAnim_StereoCry` is `PlayStereoCry2`, the sibling that does not
+		# `WaitSFX`: the picture keeps moving over it, which is the whole reason
+		# the cry is inside the animation rather than in front of it.
+		_play_entrance_cry(Gen2Battle.ENEMY, _enemy)
+	_stamp_frontpic()
+	if _frontpic.finished():
+		# `PokeAnim_DeinitFrames` ends with `PokeAnim_SetVBank0`, which puts the
+		# square back on the sheet everything else is read from.
+		_frontpic = null
+		_bg_vbank1 = PackedByteArray()
+	_push_view()
+	return true
+
+
+## The animation's 7x7 box into the enemy's square. Its cells are numbered the
+## way `PokeAnim_PlaceGraphic` numbers them, which is the column-major order
+## [method Gen2BattleScreenMap.stamp] already writes for that square.
+func _stamp_frontpic() -> void:
+	if _frontpic == null or _frontpic.box.size() != Gen2PicAnimation.BOX * Gen2PicAnimation.BOX:
+		return
+	if _bg_vbank1.size() != _bg_map.size():
+		_bg_vbank1.resize(_bg_map.size())
+		_bg_vbank1.fill(0)
+	var at: Vector2i = Gen2BattleScreenMap.ENEMY_AT
+	for column: int in Gen2PicAnimation.BOX:
+		for row: int in Gen2PicAnimation.BOX:
+			var x: int = at.x + column
+			var y: int = at.y + row
+			if x < 0 or x >= Gen2BattleScreenMap.COLUMNS \
+					or y < 0 or y >= Gen2BattleScreenMap.ROWS:
+				continue
+			_bg_map[y * Gen2BattleScreenMap.COLUMNS + x] = (
+				Gen2BattleScreenMap.ENEMY_BASE_TILE
+				+ int(_frontpic.box[column * Gen2PicAnimation.BOX + row])
+			) & 0xFF
+			_bg_vbank1[y * Gen2BattleScreenMap.COLUMNS + x] = 1
 
 
 ## `PlayerMonFaintedAnimation` or `EnemyMonFaintedAnimation`, which
@@ -1023,6 +1084,8 @@ func _init_battle_display() -> void:
 	_intro_message = ""
 	_entrance_stages = []
 	_slides = []
+	_frontpic = null
+	_bg_vbank1 = PackedByteArray()
 	_hud_balls = []
 	_hud_border = []
 	## `InitBattleDisplay` clears both panels off the map, and the two pictures
@@ -1091,10 +1154,14 @@ func advance_intro() -> bool:
 ## | 6 | the player slides off, `SendOutMonText` prints without waiting | the same |
 ## | 7 | the ball, the cry and the player's panel | the same |
 ##
-## The one part of `BattleStartMessage` not here is `AnimateFrontpic`: the
-## cartridge wobbles the enemy's picture and plays the cry inside that animation,
-## and this project imports neither the pic animations nor their pointers, so the
-## cry is played on its own the way `.cry_no_anim` plays it.
+## `AnimateFrontpic` is the enemy's alone and is where its cry comes from:
+## `BattleStartMessage`'s wild branch runs `ANIM_MON_NORMAL` and
+## `ShowSetEnemyMonAndSendOutAnimation` runs `ANIM_MON_SLOW`, both at
+## `hlcoord 12, 0`, and both `jr .skip_cry` past `PlayStereoCry` because the
+## animation plays it. Crystal's alone: pokegold has no `pic_animation.asm` and
+## both of its send-outs reach `PlayStereoCry` directly, which is the
+## `.cry_no_anim` branch and what this project falls back on. The player's own
+## send-out has no animation on either cartridge.
 func _build_entrance() -> void:
 	_entrance_stages = []
 	var text: String = _intro_message
@@ -1111,7 +1178,12 @@ func _build_entrance() -> void:
 		})
 	else:
 		# `BattleCheckEnemyShininess` and the cry, both in front of the line.
-		_entrance_stages.append({"events": _battle.entrance_events(Gen2Battle.ENEMY, false)})
+		_entrance_stages.append(
+			_with_frontpic(
+				{"events": _battle.entrance_events(Gen2Battle.ENEMY, false)},
+				Gen2PicAnimation.ANIM_MON_NORMAL
+			)
+		)
 	# `BattleStart_TrainerHuds` is pushed in front of the line it is called with.
 	_entrance_stages.append({"apply": ENTRANCE_START_HUDS, "message": text})
 	# `EmptyBattleTextbox` and `ClearSprites` take the balls away the moment that
@@ -1126,10 +1198,15 @@ func _build_entrance() -> void:
 		_entrance_stages.append({
 			"message": "%s\nsent out\n%s!" % [_enemy_battler_label(), _name_of(_enemy)],
 		})
-		_entrance_stages.append({
-			"apply": ENTRANCE_ENEMY_PIC,
-			"events": _battle.entrance_events(Gen2Battle.ENEMY),
-		})
+		_entrance_stages.append(
+			_with_frontpic(
+				{
+					"apply": ENTRANCE_ENEMY_PIC,
+					"events": _battle.entrance_events(Gen2Battle.ENEMY),
+				},
+				Gen2PicAnimation.ANIM_MON_SLOW
+			)
+		)
 		_entrance_stages.append({"apply": ENTRANCE_ENEMY_HUD})
 	# `DoBattle`'s own `ld c, 40`, then `SlideBattlePicOut` and `SendOutMonText`.
 	_entrance_stages.append({"delay": PLAYER_ENTRANCE_FRAMES})
@@ -1145,6 +1222,39 @@ func _build_entrance() -> void:
 		"events": _battle.entrance_events(Gen2Battle.PLAYER),
 	})
 	_entrance_stages.append({"apply": ENTRANCE_PLAYER_HUD})
+
+
+## Moves the enemy's cry out of [param stage]'s events and into
+## `AnimateFrontpic`, where the cartridge plays it. A cache with no animation for
+## this species, and a battle scene switched off, both leave the stage as it was,
+## which is the source's own `.cry_no_anim`.
+func _with_frontpic(stage: Dictionary, kind: int) -> Dictionary:
+	if _data == null or _battle == null:
+		return stage
+	# `farcall CheckBattleScene / jr c, .cry_no_anim`: with the OPTION menu's
+	# battle-scene row off, the picture is left alone and `PlayStereoCry` is
+	# played where it stands.
+	if not Gen2OptionsStore.current().battle_scene:
+		return stage
+	var record: Dictionary = _data.pic_animation(_enemy, _enemy_unown_form)
+	if record.is_empty():
+		return stage
+	var events: Array = stage.get("events", []) as Array
+	var kept: Array = []
+	var animate: bool = false
+	for event: Variant in events:
+		# `CheckFaintedFrzSlp` and `CheckSleepingTreeMon` gate the cry, and both
+		# gate the animation with it: the source's `jr c, .skip_cry` jumps past
+		# the pair. So an entrance with no cry event has no animation either.
+		if event is Dictionary and StringName((event as Dictionary)["type"]) == Gen2Battle.CRY:
+			animate = true
+			continue
+		kept.append(event)
+	if not animate:
+		return stage
+	stage["events"] = kept
+	stage["frontpic"] = kind
+	return stage
 
 
 ## What an entrance stage's `apply` names, each one routine of the source's.
@@ -1199,6 +1309,12 @@ func _advance_entrance() -> bool:
 			stage["message"] = ""
 			show_message(message, prompt)
 			if prompt:
+				return true
+		if stage.has("frontpic"):
+			var kind: int = int(stage["frontpic"])
+			stage.erase("frontpic")
+			_begin_frontpic(kind)
+			if animating_frontpic():
 				return true
 		var events: Array = stage.get("events", []) as Array
 		_entrance_stages.pop_front()
@@ -1260,6 +1376,7 @@ func entrance_snapshot() -> Dictionary:
 		"player_backpic": _player_backpic,
 		"balls": _hud_balls.size(),
 		"sliding": sliding(),
+		"frontpic": animating_frontpic(),
 		"animating": animation_running(),
 		"anim": int(_anim_event.get("index", 0)) if _anim != null else 0,
 	}
@@ -1269,6 +1386,22 @@ func entrance_snapshot() -> Dictionary:
 ## and both of them drawn by the entrance in the first place.
 func _hud_visible() -> bool:
 	return _enemy_hud_visible and _player_hud_visible and _anim_hud_hidden < 0
+
+
+## `predef AnimateFrontpic` on the enemy's square, which `LoadMonAnimation` and
+## `PokeAnim_InitPicAttributes` set up before the first frame is spent.
+func _begin_frontpic(kind: int) -> void:
+	if _data == null:
+		return
+	var record: Dictionary = _data.pic_animation(_enemy, _enemy_unown_form)
+	if record.is_empty():
+		return
+	var animation := Gen2PicAnimation.new(record, kind)
+	if animation.finished():
+		return
+	_frontpic = animation
+	_stamp_frontpic()
+	_push_view()
 
 
 ## `SlideBattlePicOut` over one square.
@@ -4420,6 +4553,7 @@ func _push_view() -> void:
 		"trainer_hud_border": _hud_border,
 		## `wTilemap` and the video state an animation writes over it.
 		"bg_map": _bg_map,
+		"bg_vbank1": _bg_vbank1,
 		"bg_palette_maps": _background_maps(&"bg"),
 		"ob_palette_maps": _background_maps(&"ob"),
 		"anim_sprites": _anim.sprites() if _anim != null else [],

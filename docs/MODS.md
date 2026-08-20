@@ -256,6 +256,11 @@ host.register_content(Gen2ContentOverlay.KIND_SPECIES, manifest.id, 256, {
 })
 ```
 
+A species drawing its own `pics` stands still when it is sent out: the wobble is
+`AnimateFrontpic`, whose frames are the tiles the cartridge packs behind the
+picture, and a supplied one has none. The cry still plays, which is the source's
+own `.cry_no_anim` branch.
+
 A trainer class names one `pic` rather than two. An `icon` is the party menu's
 own strip, the eight tiles of its two 2x2 frames, or one of the cartridge's icon
 numbers to borrow a picture that already exists. Art left out is not an error: a
