@@ -3230,6 +3230,23 @@ func test_heal_machine_sounds_follow_the_sequence_the_machine_type_selects() -> 
 	)
 
 
+## `ItemFinder.ItemfinderSound`: four passes of two `WaitPlaySFX`, so eight
+## entries that wait on the channels rather than on a frame count. The other
+## branch, `.Script_FoundNothing`, has no `callasm` at all.
+func test_the_itemfinder_sounds_are_eight_waited_effects_in_pairs() -> void:
+	var sounds: Array = Gen2WorldScriptRunner.itemfinder_sounds()
+	assert_eq(sounds.size(), Gen2WorldScriptRunner.ITEMFINDER_SFX_PASSES * 2)
+	for index: int in sounds.size():
+		var entry: Dictionary = sounds[index]
+		assert_true(bool(entry["wait"]), "every one of them is a `WaitPlaySFX`")
+		assert_false(entry.has("frame"), "and none is due on a count")
+		assert_eq(
+			int(entry["index"]),
+			Gen2WorldScriptRunner.SFX_TRANSACTION if index % 2 == 1 \
+				else Gen2WorldScriptRunner.SFX_SECOND_PART_OF_ITEMFINDER,
+		)
+
+
 func test_check_pokerus_special_reads_the_low_nibble_across_the_party_summary() -> void:
 	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
 	scripts["48:6360"] = [

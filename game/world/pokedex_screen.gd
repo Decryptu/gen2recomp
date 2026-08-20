@@ -24,6 +24,11 @@ signal closed
 ## player: the overworld's own answers it, the way it answers a script's cry.
 signal cry_requested(species: int)
 
+## `PlaySFX`, for the one sound this screen makes of its own:
+## `Pokedex_DisplayChangingModesMessage`'s. Answered by the overworld's player
+## the way [signal cry_requested] is.
+signal sfx_requested(index: int)
+
 enum Mode { LIST, ENTRY, OPTION, SEARCH, SEARCH_RESULTS, AREA, UNOWN }
 
 ## The dex is drawn in hardware pixels and the start menu it opens over is
@@ -34,6 +39,12 @@ const SCREEN_SCENE: PackedScene = preload("res://game/render/gen2_screen.tscn")
 ## `Pokedex_BlinkArrowCursor` counts its own frames and shows the arrow on the
 ## eight it is off `$8`, so the cursor is up for eight frames and down for eight.
 const CURSOR_BLINK_FRAMES: int = 8
+
+## `Pokedex_DisplayChangingModesMessage`'s two `ld c, 64` / `call DelayFrames`,
+## with `SFX_CHANGE_DEX_MODE` played between them.
+const CHANGING_MODES_FRAMES: int = 64
+## constants/sfx_constants.asm.
+const SFX_CHANGE_DEX_MODE: int = 0x5C
 
 ## `DexEntryScreen_ArrowCursorData`'s four positions, in its own order. PRNT
 ## wants a printer, which is deliberately out, so it is drawn and refuses.
@@ -53,6 +64,10 @@ var _option_cursor: int = 0
 ## `Pokedex_ReinitDexEntryScreen` puts back on PAGE for each new entry.
 var _entry_cursor: int = 0
 var _mode_rows: Array = []
+## Frames still owed to `Pokedex_DisplayChangingModesMessage`. The routine is a
+## pair of blocking `DelayFrames`, so nothing else on this screen runs while it
+## is above zero, the arrow's own blink included.
+var _changing_modes_frames: int = 0
 
 var _area: Gen2TownMapScreen = null
 
@@ -117,7 +132,7 @@ func current_mode() -> Mode:
 
 
 func handle_button(button: int) -> bool:
-	if _dex == null:
+	if _dex == null or _changing_modes_frames > 0:
 		return false
 	if _mode == Mode.AREA:
 		return _area.handle_button(button)
@@ -285,12 +300,15 @@ func _choose_mode() -> void:
 	if _dex.change_mode(int(row["mode"])):
 		_world.state.set_last_dex_mode(_dex.mode)
 		# `Pokedex_DisplayChangingModesMessage` puts its two lines in the option
-		# screen's own description box and spends 128 frames there. The message
-		# is drawn; the wait is not, since nothing here rebuilds an order slowly
-		# enough to need one.
+		# screen's own description box and holds there for 64 frames, the sound
+		# and 64 more. The listing opens when they are spent, which is
+		# `.skip_changing_mode` falling through to `Pokedex_BlackOutBG`.
 		_message = Gen2Pokedex.CHANGING_MODES_TEXT
+		_changing_modes_frames = CHANGING_MODES_FRAMES * 2
 		_refresh()
-		_message = ""
+		return
+	# `.skip_changing_mode`: the mode already in use shows no message and waits
+	# no frames.
 	_open_list_mode()
 
 
@@ -551,6 +569,13 @@ func _process(delta: float) -> void:
 
 
 func advance_frame() -> void:
+	if _changing_modes_frames > 0:
+		_changing_modes_frames -= 1
+		if _changing_modes_frames == CHANGING_MODES_FRAMES:
+			sfx_requested.emit(SFX_CHANGE_DEX_MODE)
+		elif _changing_modes_frames == 0:
+			_open_list_mode()
+		return
 	_blink = (_blink + 1) % (CURSOR_BLINK_FRAMES * 2)
 	if _blink == 0 or _blink == CURSOR_BLINK_FRAMES:
 		_refresh()

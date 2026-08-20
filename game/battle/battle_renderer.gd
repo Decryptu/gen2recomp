@@ -469,9 +469,9 @@ static func _animation_columns(animation: Dictionary, side: int) -> int:
 static func _append_animation(
 	data: GameData, animation: Dictionary, out: PackedByteArray, strip: int, side: int
 ) -> void:
-	var name: String = String(animation.get("atlas", ""))
+	var atlas: String = String(animation.get("atlas", ""))
 	var cell: Dictionary = Gen2PicImage.atlas_cell(
-		data.atlas_indices(name), data.atlas(name), animation
+		data.atlas_indices(atlas), data.atlas(atlas), animation
 	)
 	if cell.is_empty():
 		return

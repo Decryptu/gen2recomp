@@ -63,7 +63,7 @@ const SPRITE_FIRST_Y: int = 8 * Gen2Tiles.TILE_HEIGHT
 ## `PLAYER_SIDE` rows to a column in `vTiles0`, which is where `CopyBackpic`
 ## decompressed the pic before copying it into `vTiles2 tile $31`.
 const SPRITE_PIC_ROWS: int = Gen2BattleScreenMap.PLAYER_SIDE
-## `.subfunction3` runs on every frame but the last, `cp $1 / jr z, .skip1`.
+## `dec [hl]` twice per sprite.
 const SPRITE_STEP: int = 2
 
 var _crystal: bool = true
@@ -101,18 +101,22 @@ func advance_frame() -> bool:
 ## eighteen sprites where this frame leaves them, each { tile, x, y } with OAM's
 ## own biased coordinates, which is what a renderer of one already takes.
 ##
-## Gold and Silver walk the same eighteen: `CopyBackpic` is shared and their own
-## `.subfunction1` steps them by two beside its `rSCX` writes. Crystal's walk is
-## measured against a real cartridge, sprite by sprite, from x 158 to 16; Gold's
-## is read from the source alone and its lead frame leaves it one step short at
-## the end, which no dump here has been asked about.
+## Gold and Silver walk the same eighteen: `.LoadTrainerBackpicAsOAM` is
+## byte-identical in both disassemblies and their own `.subfunction1` steps them
+## by two beside its `rSCX` writes. Crystal's walk is measured against a real
+## cartridge, sprite by sprite, from x 158 to 16, and Gold's ends on the same 16:
+## its lead frame spends no step, but its loop skips none either.
 func sprites() -> Array:
 	var out: Array = []
 	if finished():
 		# `HideSprites` runs the moment the slide returns, and `PlaceGraphic`
 		# puts the whole pic on the background instead.
 		return out
-	var walked: int = _sprite_steps()
+	# Crystal's `.subfunction3` is skipped on the loop's last pass, `cp $1 /
+	# jr z, .skip1`, so 72 of its 73 frames step. Gold and Silver spend their
+	# lead frame before the loop and then step on all 72 of its passes, with no
+	# such test. Both walks are 72 steps long and the frame index is the count.
+	var walked: int = _frame
 	for column: int in SPRITE_COLUMNS:
 		for row: int in SPRITE_ROWS:
 			out.append({
@@ -121,15 +125,6 @@ func sprites() -> Array:
 				"y": SPRITE_FIRST_Y + row * Gen2Tiles.TILE_HEIGHT,
 			})
 	return out
-
-
-## How many times `.subfunction3` has run. It is skipped on the loop's last pass,
-## so the walk is one shorter than the scroll, which is why the sprites stop two
-## pixels before the background does and `PlaceGraphic` is what lines them up.
-func _sprite_steps() -> int:
-	if _crystal:
-		return _frame
-	return maxi(_frame - GOLD_LEAD_FRAMES, 0)
 
 
 ## Per scanline in hardware draw order; an offset looks *right* into the map.

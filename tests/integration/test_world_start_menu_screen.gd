@@ -388,6 +388,29 @@ func test_a_field_item_closes_the_pack_and_answers_in_the_world() -> void:
 	assert_eq(_world_screen._world.state.item_quantity(ITEMFINDER), 1)
 
 
+## `ItemFinder.Script_FoundSomething` runs `.ItemfinderSound` in front of its
+## line and `.Script_FoundNothing` runs nothing, so the sounds are the branch's
+## rather than the item's. Driven through the screen's own handler, since the
+## schedule is spent by the world's pump as soon as it is started.
+func test_only_the_itemfinder_s_found_branch_owes_the_driver_its_sounds() -> void:
+	await _open_world()
+	_world_screen._on_field_item_used({
+		"effect": Gen2WorldPack.FIELD_EFFECT_ITEMFINDER, "item": ITEMFINDER,
+		"found": false,
+	})
+	assert_eq((_world_screen.get("_sound_schedule") as Array), [], "`.Script_FoundNothing`")
+
+	_world_screen._on_field_item_used({
+		"effect": Gen2WorldPack.FIELD_EFFECT_ITEMFINDER, "item": ITEMFINDER,
+		"found": true,
+	})
+	## With no audio device the driver is never busy, so `WaitPlaySFX` waits for
+	## nothing and the whole run is spent where it starts. What the test can see
+	## is that the run existed: the counter it was started with is back at one.
+	assert_eq(int(_world_screen.get("_sound_schedule_frame")), 1)
+	assert_eq((_world_screen.get("_sound_schedule") as Array), [], "all eight spent")
+
+
 ## `UseRod`: the rod the pack chose is the one `FishFunction` casts, and a cast
 ## it would refuse is `.FailFish`, which is `.Oak` with the pack still open.
 func test_a_rod_casts_from_the_pack_and_is_refused_away_from_water() -> void:
@@ -1295,6 +1318,44 @@ func test_unown_mode_is_offered_once_its_flag_is_set_and_returns_to_the_option_s
 		state.last_dex_mode(), RomLayout.DEXMODE_NEW,
 		"the listing keeps the mode it had"
 	)
+
+
+## `Pokedex_DisplayChangingModesMessage`: the OPTION screen holds its two lines
+## for 64 frames, plays `SFX_CHANGE_DEX_MODE`, holds 64 more and only then falls
+## through to the listing. `.skip_changing_mode` is the mode already in use,
+## which shows no message and waits nothing at all.
+func test_changing_the_dex_mode_holds_its_message_and_sounds_between_the_two_waits() -> void:
+	await _open_world()
+	_world_screen._world.state.set_engine_flag(Gen2WorldStartMenu.ENGINE_POKEDEX)
+	_world_screen._open_pokedex()
+	var dex: Gen2PokedexScreen = _world_screen._pokedex_host
+	var sounds: Array[int] = []
+	dex.sfx_requested.connect(func(index: int) -> void: sounds.append(index))
+
+	dex.handle_button(Gen2Button.SELECT)
+	assert_eq(dex.current_mode(), Gen2PokedexScreen.Mode.OPTION)
+	dex.handle_button(Gen2Button.DOWN)
+	dex.handle_button(Gen2Button.A)
+	assert_eq(dex.current_mode(), Gen2PokedexScreen.Mode.OPTION, "the message stands")
+	assert_eq(dex.get("_message"), Gen2Pokedex.CHANGING_MODES_TEXT)
+	assert_false(dex.handle_button(Gen2Button.B), "and nothing answers a press")
+
+	for _frame: int in Gen2PokedexScreen.CHANGING_MODES_FRAMES:
+		dex.advance_frame()
+	assert_eq(sounds, [Gen2PokedexScreen.SFX_CHANGE_DEX_MODE], "sounded halfway")
+	assert_eq(dex.current_mode(), Gen2PokedexScreen.Mode.OPTION, "and still holding")
+	for _frame: int in Gen2PokedexScreen.CHANGING_MODES_FRAMES:
+		dex.advance_frame()
+	assert_eq(dex.current_mode(), Gen2PokedexScreen.Mode.LIST)
+	assert_eq(dex.get("_message"), "", "the listing is drawn without it")
+
+	## The row the listing is already on is `.skip_changing_mode`.
+	var mode: int = _world_screen._world.state.last_dex_mode()
+	dex.handle_button(Gen2Button.SELECT)
+	dex.handle_button(Gen2Button.A)
+	assert_eq(dex.current_mode(), Gen2PokedexScreen.Mode.LIST, "no wait and no message")
+	assert_eq(sounds.size(), 1, "and no second sound")
+	assert_eq(_world_screen._world.state.last_dex_mode(), mode)
 
 
 ## `Pokedex_UpdateMainScreen`'s START reaches the search screen, and its CANCEL
