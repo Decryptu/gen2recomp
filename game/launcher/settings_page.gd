@@ -15,6 +15,15 @@ const PRINTER_LABELS: Array[String] = ["Lightest", "Lighter", "Normal", "Darker"
 ## [constant Gen2Rules.MODES], in its order. Written out rather than capitalized
 ## from the names, which would say "Qol".
 const RULE_MODES: Array[String] = ["Current", "Vanilla", "QoL"]
+## What each mode answers, said once. [constant Gen2Rules.MODE_CURRENT]'s row
+## counts the table rather than describing it, so a flag added later cannot leave
+## this sentence wrong.
+const RULE_MODE_TEXT: Dictionary = {
+	Gen2Rules.MODE_CURRENT: "what this port ships",
+	Gen2Rules.MODE_VANILLA: "every one of them reproduced, cartridge for cartridge",
+	Gen2Rules.MODE_QOL: "every one of them corrected",
+	Gen2Rules.MODE_CUSTOM: "your own picks",
+}
 
 var _theme: Gen2LauncherTheme = null
 var _options: Gen2Options = null
@@ -22,6 +31,10 @@ var _saved: Label = null
 ## Where a modal opens. The launcher root rather than this page, so a sheet
 ## covers the dock as well and is not clipped by the settings scroll.
 var _host: Control = null
+## The line under the Bugs row, which names the mode the flags actually describe.
+## Rewritten rather than rebuilt, because a mode press must not rebuild the row
+## the press came from.
+var _rules_summary: Label = null
 
 
 static func create(palette: Gen2LauncherTheme, host: Control = null) -> Gen2SettingsPage:
@@ -107,16 +120,25 @@ func _build() -> void:
 	var rules: VBoxContainer = _card(column, "Gameplay")
 	rules.add_child(Gen2LauncherUI.muted(
 		_theme,
-		"What the engine does where this port and the cartridge disagree. A run "
-		+ "keeps the rules it was created with, so changing these affects the next "
-		+ "new game rather than a save already in progress."
+		"Generation II shipped with bugs, and this port can play them either way. "
+		+ "A run keeps the rules it was created with, so changing these affects "
+		+ "the next new game rather than a save already in progress."
 	))
 	rules.add_child(Gen2LauncherUI.field(_theme, "Bugs", Gen2LauncherUI.segmented(
 		_theme, RULE_MODES, maxi(Gen2Rules.MODES.find(_options.rules.mode), 0),
 		func(index: int) -> void:
 			_options.rules.set_mode(Gen2Rules.MODES[index])
+			_refresh_rules()
 			_persist()
 	)))
+	_rules_summary = Gen2LauncherUI.muted(_theme, "")
+	rules.add_child(_rules_summary)
+	var listing: Gen2LauncherButton = Gen2LauncherButton.create(
+		_theme, "Which bugs...", Gen2LauncherButton.Variant.QUIET
+	)
+	listing.pressed.connect(_open_rules_sheet)
+	rules.add_child(listing)
+	_refresh_rules()
 	rules.add_child(Gen2LauncherUI.field(_theme, "Trainer AI", Gen2LauncherUI.segmented(
 		_theme, _titles(Gen2Rules.DIFFICULTIES),
 		maxi(Gen2Rules.DIFFICULTIES.find(_options.rules.difficulty), 0),
@@ -170,6 +192,78 @@ func _build() -> void:
 			_persist()
 	)))
 	column.add_child(Gen2LauncherUI.dock_safe_space())
+
+
+## Test and screen seam: what the Bugs row says and what the sheet lists, from
+## one place so the two cannot disagree. `mode` is what the flags describe rather
+## than what was last pressed, which is `custom` once one has been moved.
+func rules_snapshot() -> Dictionary:
+	var rules: Gen2Rules = _options.rules
+	var mode: StringName = rules.mode_of()
+	var flags: Array = []
+	var reproduced: int = 0
+	for flag: StringName in Gen2Rules.FLAGS:
+		var on: bool = rules.reproduces(flag)
+		reproduced += 1 if on else 0
+		var text: Dictionary = Gen2Rules.FLAG_TEXT.get(flag, {})
+		flags.append({
+			"flag": flag, "on": on,
+			"title": String(text.get("title", "")),
+			"detail": String(text.get("detail", "")),
+		})
+	return {
+		"mode": mode,
+		"summary": "%s: %s. %d of %d bugs reproduced." % [
+			String(mode).capitalize(), String(RULE_MODE_TEXT.get(mode, "")),
+			reproduced, flags.size(),
+		],
+		"flags": flags,
+	}
+
+
+func _refresh_rules() -> void:
+	if _rules_summary == null:
+		return
+	_rules_summary.text = String(rules_snapshot()["summary"])
+
+
+func _set_rule_flag(flag: StringName, reproduce_hardware: bool) -> void:
+	_options.rules.set_flag(flag, reproduce_hardware)
+	_refresh_rules()
+	_persist()
+
+
+## The five bugs themselves, each with what the cartridge does and a switch. The
+## model has carried per-flag overrides and a `custom` mode since it was written
+## and nothing reached them, so a player could pick an end of the table and not
+## see what was in it.
+func _open_rules_sheet() -> void:
+	var rules: Gen2Rules = _options.rules
+	var sheet: Gen2LauncherSheet = Gen2LauncherSheet.create(_theme, "Bugs and glitches")
+	sheet.body().add_child(Gen2LauncherUI.muted(
+		_theme, "On reproduces the cartridge. Off is this port's corrected answer."
+	))
+	for row: Dictionary in rules_snapshot()["flags"] as Array:
+		var flag := StringName(row["flag"])
+		var entry: VBoxContainer = Gen2LauncherUI.column(2)
+		sheet.body().add_child(entry)
+		var switch: Gen2LauncherToggle = _toggle(
+			bool(row["on"]), func(on: bool) -> void: _set_rule_flag(flag, on)
+		)
+		entry.add_child(Gen2LauncherUI.field(_theme, String(row["title"]), switch))
+		entry.add_child(Gen2LauncherUI.muted(_theme, String(row["detail"])))
+	var reset: Gen2LauncherButton = Gen2LauncherButton.create(
+		_theme, "Back to %s" % String(rules.mode).capitalize(),
+		Gen2LauncherButton.Variant.QUIET
+	)
+	reset.pressed.connect(func() -> void:
+		rules.clear_flags()
+		_refresh_rules()
+		_persist()
+		sheet.close()
+	)
+	sheet.add_action(reset)
+	sheet.open(_host if _host != null else self)
 
 
 func _open_touch_layout() -> void:
