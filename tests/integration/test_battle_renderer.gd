@@ -11,6 +11,7 @@ var _battle_screen: Gen2BattleScreen = null
 
 
 func before_each() -> void:
+	_forget_view()
 	Gen2ModHost.reset()
 	_data = Fixture.build()
 	_data = GameData.open_directory(Fixture.directory())
@@ -22,6 +23,14 @@ func after_each() -> void:
 		_battle_screen = null
 	RomCache.clear(Fixture.directory())
 	Gen2ModHost.reset()
+	_forget_view()
+
+
+## Choosing a view writes the installation's own file, so a test that chooses one
+## puts it back rather than leaving the player on a renderer a test registered.
+func _forget_view() -> void:
+	DirAccess.remove_absolute(Gen2ModState.PATH)
+	Gen2ModState.reload()
 
 
 func _open_battle() -> void:
@@ -74,7 +83,7 @@ func refresh() -> void:
 	pass
 """)
 	assert_true(Gen2ModHost.instance().register_battle_renderer(&"stub", script)["ok"])
-	assert_true(Gen2ModHost.instance().select_battle_renderer(&"stub")["ok"])
+	assert_true(Gen2ModHost.instance().select_view(&"stub")["ok"])
 
 	await _open_battle()
 	assert_true(_battle_screen.is_ready())
@@ -113,7 +122,7 @@ func refresh() -> void:
 	pass
 """)
 	assert_true(Gen2ModHost.instance().register_battle_renderer(&"staged", script)["ok"])
-	assert_true(Gen2ModHost.instance().select_battle_renderer(&"staged")["ok"])
+	assert_true(Gen2ModHost.instance().select_view(&"staged")["ok"])
 
 	var world: Gen2WorldAPI = Gen2WorldAPI.open(_data, 1, 1, Vector2i(4, 4))
 	world.player_facing = Gen2WorldSprite.FACING_LEFT
@@ -174,7 +183,7 @@ func handle_battle_input(event) -> bool:
 	return consume
 """)
 	assert_true(Gen2ModHost.instance().register_battle_renderer(&"steered", script)["ok"])
-	assert_true(Gen2ModHost.instance().select_battle_renderer(&"steered")["ok"])
+	assert_true(Gen2ModHost.instance().select_view(&"steered")["ok"])
 	await _open_battle()
 	assert_true(_battle_screen.is_ready())
 	var renderer: Node = _battle_screen._renderer
@@ -231,7 +240,7 @@ func refresh() -> void:
 	pass
 """)
 	assert_true(Gen2ModHost.instance().register_battle_renderer(&"named", script)["ok"])
-	assert_true(Gen2ModHost.instance().select_battle_renderer(&"named")["ok"])
+	assert_true(Gen2ModHost.instance().select_view(&"named")["ok"])
 	await _open_battle()
 	var renderer: Node = _battle_screen._renderer
 
@@ -265,7 +274,7 @@ func refresh() -> void:
 	pass
 """)
 	assert_true(Gen2ModHost.instance().register_battle_renderer(&"broken_data", script)["ok"])
-	assert_true(Gen2ModHost.instance().select_battle_renderer(&"broken_data")["ok"])
+	assert_true(Gen2ModHost.instance().select_view(&"broken_data")["ok"])
 
 	await _open_battle()
 	assert_false(_battle_screen.is_ready())
@@ -289,7 +298,7 @@ func uses_hardware_viewport() -> bool:
 	return false
 """)
 	assert_true(Gen2ModHost.instance().register_battle_renderer(&"native", script)["ok"])
-	assert_true(Gen2ModHost.instance().select_battle_renderer(&"native")["ok"])
+	assert_true(Gen2ModHost.instance().select_view(&"native")["ok"])
 
 	await _open_battle()
 	assert_true(_battle_screen.is_ready())

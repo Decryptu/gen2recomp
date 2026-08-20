@@ -420,33 +420,33 @@ func _on_native_size_changed(size_pixels: Vector2i) -> void:
 		_renderer.call(Gen2ModHost.RENDERER_RESIZE_METHOD, size_pixels)
 
 
-## Switches the live view to another registered renderer without disturbing the
-## world behind it. This is the boundary a keybind uses to flip between the 2D
-## view and a mod's: nothing about the map, the player or the running script
-## changes, because a renderer only ever reads them.
-func select_world_renderer(id: StringName) -> Dictionary:
-	var result: Dictionary = Gen2ModHost.instance().select_world_renderer(id)
+## Switches the live view without disturbing the world behind it. The choice is
+## the whole view rather than the overworld's half of it, so a fight started
+## after this is drawn by the same mod: nothing about the map, the player or the
+## running script changes, because a renderer only ever reads them.
+func select_view(id: StringName) -> Dictionary:
+	var result: Dictionary = Gen2ModHost.instance().select_view(id)
 	if not bool(result.get("ok", false)):
 		_script_prompt = "Renderer unavailable: %s" % String(result.get("reason", "unknown"))
 		_refresh_labels()
 		return result
 	_build_renderer()
-	_script_prompt = "Renderer: %s" % Gen2ModHost.instance().world_renderer_label(id)
+	_script_prompt = "Renderer: %s" % Gen2ModHost.instance().view_label(id)
 	_refresh_labels()
 	return result
 
 
-## Selects the registered renderer after the current one, wrapping. One key can
-## then cycle every installed view, which is how a mod's 3D world is reached.
-func cycle_world_renderer() -> Dictionary:
+## Selects the view after the current one, wrapping. One key can then cycle every
+## installed view, which is how a mod's 3D world is reached with no launcher.
+func cycle_view() -> Dictionary:
 	var host: Gen2ModHost = Gen2ModHost.instance()
-	var ids: Array = host.world_renderer_ids()
+	var ids: Array[StringName] = host.view_ids()
 	if ids.size() < 2:
 		_script_prompt = "No other renderer is registered"
 		_refresh_labels()
 		return {"ok": false, "reason": &"single_renderer"}
-	var at: int = ids.find(host.selected_world_renderer())
-	return select_world_renderer(ids[posmod(at + 1, ids.size())])
+	var at: int = ids.find(host.selected_view())
+	return select_view(ids[posmod(at + 1, ids.size())])
 
 
 ## Real time becomes hardware frames here and nowhere else in the overworld.
@@ -952,7 +952,7 @@ func _handle_debug_key(event: InputEvent) -> bool:
 		KEY_P:
 			_open_phone_list()
 		KEY_V:
-			cycle_world_renderer()
+			cycle_view()
 		KEY_F5:
 			var saved: Dictionary = persist_world_snapshot()
 			_script_prompt = "World saved" if bool(saved.get("ok", false)) else "Save failed"

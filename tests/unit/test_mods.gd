@@ -19,6 +19,10 @@ func before_each() -> void:
 func after_each() -> void:
 	_clear()
 	Gen2ModHost.reset()
+	## Choosing a view writes the installation's own file, so a test that chooses
+	## one puts it back rather than leaving the player on a test's renderer.
+	DirAccess.remove_absolute(Gen2ModState.PATH)
+	Gen2ModState.reload()
 
 
 ## Recursive, because an installed mod can carry nested directories and a
@@ -556,12 +560,12 @@ func register(host, manifest) -> void:
 	assert_eq(host.load_discovered(), [&"voxel_battle"])
 	assert_true(host.battle_renderer_ids().has(&"voxel_battle"))
 
-	assert_true(host.select_battle_renderer(&"voxel_battle")["ok"])
+	assert_true(host.select_view(&"voxel_battle")["ok"])
 	var renderer: Node = host.create_battle_renderer()
 	assert_true(renderer.has_method("is_voxel_battle_renderer"))
 	renderer.free()
 
-	assert_true(host.select_battle_renderer(Gen2ModHost.BUILT_IN_RENDERER)["ok"])
+	assert_true(host.select_view(Gen2ModHost.BUILT_IN_RENDERER)["ok"])
 	var built_in: Node = host.create_battle_renderer()
 	assert_true(built_in is Gen2BattleRenderer)
 	built_in.free()
@@ -640,12 +644,12 @@ func register(host, manifest) -> void:
 
 	# Selecting is what a keybind does, and it must change what a new world is
 	# handed without the screen knowing which renderer it asked for.
-	assert_true(host.select_world_renderer(&"voxel")["ok"])
+	assert_true(host.select_view(&"voxel")["ok"])
 	var renderer: Node = host.create_world_renderer()
 	assert_true(renderer.has_method("is_voxel_renderer"))
 	renderer.free()
 
-	assert_true(host.select_world_renderer(Gen2ModHost.BUILT_IN_RENDERER)["ok"])
+	assert_true(host.select_view(Gen2ModHost.BUILT_IN_RENDERER)["ok"])
 	var built_in: Node = host.create_world_renderer()
 	assert_true(built_in is Gen2WorldRenderer)
 	built_in.free()
@@ -1478,3 +1482,122 @@ func test_a_tool_run_lists_the_mods_it_finds_and_runs_none_of_them() -> void:
 	)
 	assert_true(Gen2ModHost.instance().menu_entries(Gen2ModHost.MENU_START).is_empty())
 	Gen2ModInstaller.uninstall(&"quiet")
+
+
+## A world renderer and a battle renderer meeting their contracts and nothing
+## more, for the tests below that care about which id was chosen rather than
+## about what is drawn.
+func _world_renderer_script() -> GDScript:
+	var script := GDScript.new()
+	script.source_code = """extends Node2D
+func set_world(_world, _animation = null) -> void:
+	pass
+func set_time_of_day(_time_of_day: int) -> void:
+	pass
+func refresh() -> void:
+	pass
+func refresh_animation() -> void:
+	pass
+"""
+	script.reload()
+	return script
+
+
+func _battle_renderer_script() -> GDScript:
+	var script := GDScript.new()
+	script.source_code = """extends Node2D
+func set_battle_data(_data) -> bool:
+	return true
+func set_view(_view: Dictionary) -> void:
+	pass
+func refresh() -> void:
+	pass
+"""
+	script.reload()
+	return script
+
+
+## The whole point of one selection: a mod registering both halves under its own
+## id is one view of one world, and choosing it must reach the fight as well as
+## the map. Two selections is what left every battle in 2D.
+func test_choosing_a_view_by_id_selects_both_surfaces_that_id_registered() -> void:
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	host.register_world_renderer(&"voxel3d", _world_renderer_script(), "Voxel")
+	host.register_battle_renderer(&"voxel3d", _battle_renderer_script(), "Voxel")
+
+	assert_true(host.select_view(&"voxel3d")["ok"])
+	assert_eq(host.selected_view(), &"voxel3d")
+	assert_eq(host.selected_world_renderer(), &"voxel3d")
+	assert_eq(host.selected_battle_renderer(), &"voxel3d")
+
+	assert_true(host.select_view(Gen2ModHost.BUILT_IN_RENDERER)["ok"])
+	assert_eq(host.selected_world_renderer(), Gen2ModHost.BUILT_IN_RENDERER)
+	assert_eq(host.selected_battle_renderer(), Gen2ModHost.BUILT_IN_RENDERER)
+
+
+## A mod that replaces only one surface keeps the cartridge's own view on the
+## other, rather than being refused or blanking it.
+func test_a_view_registering_one_surface_leaves_the_other_built_in() -> void:
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	host.register_battle_renderer(&"arena", _battle_renderer_script(), "Arena")
+
+	assert_true(host.select_view(&"arena")["ok"])
+	assert_eq(host.selected_battle_renderer(), &"arena")
+	assert_eq(
+		host.selected_world_renderer(), Gen2ModHost.BUILT_IN_RENDERER,
+		"the overworld keeps the built-in renderer"
+	)
+	var built_in: Node = host.create_world_renderer()
+	assert_true(built_in is Gen2WorldRenderer)
+	built_in.free()
+
+
+func test_a_view_no_mod_registered_is_refused_and_leaves_the_choice_alone() -> void:
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	var result: Dictionary = host.select_view(&"nothing_registered_this")
+	assert_false(bool(result["ok"]))
+	assert_eq(result["reason"], &"unknown_renderer")
+	assert_eq(host.selected_view(), Gen2ModHost.BUILT_IN_RENDERER)
+
+
+## One entry per view rather than one per surface, built-in first so a player
+## cycling from it reaches the mods in the order they loaded.
+func test_the_view_list_names_each_id_once_with_the_built_in_first() -> void:
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	host.register_world_renderer(&"voxel3d", _world_renderer_script(), "Voxel")
+	host.register_battle_renderer(&"voxel3d", _battle_renderer_script(), "Voxel")
+	host.register_battle_renderer(&"arena", _battle_renderer_script(), "Arena")
+
+	assert_eq(
+		host.view_ids(), [Gen2ModHost.BUILT_IN_RENDERER, &"voxel3d", &"arena"] as Array[StringName]
+	)
+	assert_eq(host.view_label(&"voxel3d"), "Voxel")
+	assert_eq(host.view_surfaces(&"voxel3d"), {"world": true, "battle": true})
+	assert_eq(host.view_surfaces(&"arena"), {"world": false, "battle": true})
+
+
+## The choice is the installation's, so it outlives the host a mod list change
+## throws away. A stored id whose mod is no longer registered draws with the
+## built-in renderer and is not refused: the mod may be reinstalled.
+func test_a_chosen_view_survives_a_reload_and_falls_back_when_its_mod_is_gone() -> void:
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	host.register_world_renderer(&"voxel3d", _world_renderer_script(), "Voxel")
+	assert_true(host.select_view(&"voxel3d")["ok"])
+
+	Gen2ModHost.reset()
+	Gen2ModState.reload()
+	var reloaded: Gen2ModHost = Gen2ModHost.instance()
+	assert_eq(reloaded.selected_view(), &"voxel3d", "the choice is remembered")
+	assert_eq(
+		reloaded.selected_world_renderer(), Gen2ModHost.BUILT_IN_RENDERER,
+		"and falls back while nothing has registered it"
+	)
+	var fallback: Node = reloaded.create_world_renderer()
+	assert_true(fallback is Gen2WorldRenderer)
+	fallback.free()
+
+	reloaded.register_world_renderer(&"voxel3d", _world_renderer_script(), "Voxel")
+	assert_eq(
+		reloaded.selected_world_renderer(), &"voxel3d",
+		"and is picked up again when the mod loads"
+	)

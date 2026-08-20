@@ -117,3 +117,23 @@ func test_uninstalling_forgets_the_off_switch() -> void:
 		Gen2ModState.is_enabled(MOD_ID),
 		"a reinstall must not find itself silently disabled",
 	)
+
+
+## The view is the installation's own choice and lives in the same file as the
+## disabled list, so switching a mod off does not forget which view is on.
+func test_the_selected_view_is_stored_beside_the_disabled_list() -> void:
+	assert_eq(
+		Gen2ModState.selected_view(), Gen2ModHost.BUILT_IN_RENDERER,
+		"a fresh installation is on the built-in view"
+	)
+	assert_true(Gen2ModState.set_selected_view(&"voxel3d"))
+	assert_true(Gen2ModState.set_enabled(MOD_ID, false))
+	Gen2ModState.reload()
+	assert_eq(Gen2ModState.selected_view(), &"voxel3d")
+	assert_false(Gen2ModState.is_enabled(MOD_ID))
+
+
+func test_an_empty_view_id_is_refused_rather_than_stored() -> void:
+	assert_true(Gen2ModState.set_selected_view(&"voxel3d"))
+	assert_false(Gen2ModState.set_selected_view(&""))
+	assert_eq(Gen2ModState.selected_view(), &"voxel3d")

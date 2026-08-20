@@ -181,7 +181,7 @@ Development shortcuts are debug-build only, along with the map and cell readout:
 | `game/render/pic_viewer.tscn` | left/right species, `S` shiny, `B` front/back, `T` trainer classes |
 | `game/render/text_viewer.tscn` | Space advances, `F` cycles borders, `C` shows every glyph |
 | `game/battle/battle_screen.tscn` | `T` turn, A advances, `Y` switch, `R` run, `[`/`]` matchup, `G`/`H` damage; in wild battles B opens the ball selector |
-| `game/world/world_screen.tscn` | `F` fishes with an owned rod, `1`/`2`/`3` pick a rod, `P` opens the phone, `V` cycles renderers, F5 writes a snapshot |
+| `game/world/world_screen.tscn` | `F` fishes with an owned rod, `1`/`2`/`3` pick a rod, `P` opens the phone, `V` cycles views, F5 writes a snapshot |
 
 A release export offers the eight buttons and nothing else. The method behind
 each shortcut stays public, which is how `tools/preview_*.gd` drives them.

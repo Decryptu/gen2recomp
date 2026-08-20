@@ -20,6 +20,9 @@ var _body: VBoxContainer = null
 var _status: Label = null
 var _row: Dictionary = {}
 
+## The view switch's node name. See [method _view_field].
+const VIEW_SWITCH_NAME: StringName = &"ViewSwitch"
+
 
 static func create(palette: Gen2LauncherTheme) -> Gen2ModDetailPage:
 	var page := Gen2ModDetailPage.new()
@@ -78,6 +81,16 @@ func set_row(row: Dictionary) -> void:
 	if not description.is_empty():
 		var detail: Label = Gen2LauncherUI.muted(_theme, description)
 		_body.add_child(detail)
+
+	if bool(row["installed"]):
+		var view: Control = _view_field(mod_id())
+		if view != null:
+			_body.add_child(Gen2LauncherUI.caption(_theme, "View"))
+			var view_panel: Gen2LauncherCard = Gen2LauncherCard.create(
+				_theme, Gen2LauncherTheme.RADIUS_MD, 18
+			)
+			view_panel.add_child(view)
+			_body.add_child(view_panel)
 
 	var options: Array = Gen2ModHost.instance().options(mod_id())
 	if bool(row["installed"]) and not options.is_empty():
@@ -159,6 +172,40 @@ static func _download_label(row: Dictionary) -> String:
 		&"update":
 			return "Update to %s" % row["listed_version"]
 	return "Reinstall"
+
+
+## The switch that turns a mod's renderers on, or null for a mod that registered
+## none. One choice covers both surfaces, so this is a switch and not a pair:
+## see [method Gen2ModHost.select_view]. Turning it off returns to the built-in
+## view, and turning one mod's on takes it off whichever mod had it.
+##
+## A mod is only listed here once it has registered, which is at load: an
+## installed mod switched off, or one the running cartridge is not for, has no
+## renderers to offer and no row.
+func _view_field(id: StringName) -> Control:
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	var surfaces: Dictionary = host.view_surfaces(id)
+	var world: bool = bool(surfaces["world"])
+	var battle: bool = bool(surfaces["battle"])
+	if not world and not battle:
+		return null
+	var covers: String = "Overworld and battle"
+	if not battle:
+		covers = "Overworld only"
+	elif not world:
+		covers = "Battle only"
+	var switch: Gen2LauncherToggle = Gen2LauncherToggle.create(
+		_theme, host.selected_view() == id
+	)
+	## Named so it can be found in the tree: the enable switch above it is the
+	## other toggle on this page and the two are not interchangeable.
+	switch.name = VIEW_SWITCH_NAME
+	switch.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	switch.toggled.connect(func(on: bool) -> void:
+		_report(host.select_view(id if on else Gen2ModHost.BUILT_IN_RENDERER))
+		set_row(_row)
+	)
+	return Gen2LauncherUI.field(_theme, covers, switch)
 
 
 func _option_field(id: StringName, option: Dictionary) -> Control:

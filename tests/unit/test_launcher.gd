@@ -6,10 +6,15 @@ extends GutTest
 var _launcher: Control = null
 var _scratch_path: String = "user://launcher-test-small.gbc"
 var _mod_archive: String = "user://launcher-test-mod.zip"
+var _view_archive: String = "user://launcher-test-view-mod.zip"
 
 ## The launcher installs into the real user://mods, so a mod test cleans up
 ## after itself whether or not it got that far.
 const PROBE_MOD_ID: StringName = &"launcher_probe"
+## The renderer-registering probe has an id of its own because Godot caches a
+## loaded script by path: two mods sharing a directory would have the first
+## one's entry script run for the second.
+const VIEW_MOD_ID: StringName = &"launcher_view_probe"
 
 
 func after_each() -> void:
@@ -22,7 +27,9 @@ func after_each() -> void:
 	await get_tree().process_frame
 	DirAccess.remove_absolute(_scratch_path)
 	DirAccess.remove_absolute(_mod_archive)
+	DirAccess.remove_absolute(_view_archive)
 	Gen2ModInstaller.uninstall(PROBE_MOD_ID)
+	Gen2ModInstaller.uninstall(VIEW_MOD_ID)
 
 
 ## The mods page on its own, which is what every mod workflow but the file
@@ -329,3 +336,112 @@ func test_every_cache_state_says_something_different() -> void:
 			main.cache_state_text(state).contains("Import the cartridge again"),
 			"%s asks for the dump" % state
 		)
+
+
+## A mod archive whose entry registers a renderer of each kind, for the view
+## switch below: the same id on both is what says the two are one view.
+func _write_view_mod_zip() -> void:
+	var packer := ZIPPacker.new()
+	assert_eq(packer.open(_view_archive), OK)
+	var files: Dictionary = {
+		"%s/mod.json" % VIEW_MOD_ID: JSON.stringify({
+			"id": String(VIEW_MOD_ID), "name": "Launcher View Probe", "version": "1.0.0",
+			"api_version": Gen2ModManifest.API_VERSION, "entry": "mod.gd",
+		}),
+		"%s/world.gd" % VIEW_MOD_ID: """extends Node2D
+func set_world(_world, _animation = null) -> void:
+	pass
+func set_time_of_day(_time_of_day: int) -> void:
+	pass
+func refresh() -> void:
+	pass
+func refresh_animation() -> void:
+	pass
+""",
+		"%s/battle.gd" % VIEW_MOD_ID: """extends Node2D
+func set_battle_data(_data) -> bool:
+	return true
+func set_view(_view: Dictionary) -> void:
+	pass
+func refresh() -> void:
+	pass
+""",
+		"%s/mod.gd" % VIEW_MOD_ID: """extends RefCounted
+
+func register(host, manifest) -> void:
+	host.register_world_renderer(
+		manifest.id, load("%s/world.gd" % manifest.directory), "Probe"
+	)
+	host.register_battle_renderer(
+		manifest.id, load("%s/battle.gd" % manifest.directory), "Probe"
+	)
+""",
+	}
+	for entry: String in files:
+		packer.start_file(entry)
+		packer.write_file(String(files[entry]).to_utf8_buffer())
+		packer.close_file()
+	packer.close()
+
+
+## The view is chosen from the mod's own page, which is the whole point of the
+## row: a release build has no debug keys, so `V` cannot be the only way in.
+## One switch covers both surfaces and turning it off returns to the built-in
+## view.
+func test_a_mod_registering_renderers_is_switched_on_from_its_own_page() -> void:
+	_write_view_mod_zip()
+	assert_true(bool(Gen2ModInstaller.install_zip(_view_archive).get("ok", false)))
+	Gen2ModHost.reset()
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	host.discover()
+	assert_true(host.load_discovered().has(VIEW_MOD_ID))
+
+	var page: Gen2ModsPage = _mods_page()
+	var row: Dictionary = page._row_for(VIEW_MOD_ID)
+	assert_false(row.is_empty(), "the installed mod is in the catalogue")
+	var detail: Gen2ModDetailPage = Gen2ModDetailPage.create(Gen2LauncherTheme.active())
+	add_child_autofree(detail)
+	detail.set_row(row)
+
+	var switch: Gen2LauncherToggle = detail.find_child(
+		String(Gen2ModDetailPage.VIEW_SWITCH_NAME), true, false
+	)
+	assert_not_null(switch, "a mod that registered a renderer gets a view switch")
+	assert_false(switch.button_pressed, "and starts on the built-in view")
+
+	switch.button_pressed = true
+	assert_eq(host.selected_view(), VIEW_MOD_ID)
+	assert_eq(host.selected_world_renderer(), VIEW_MOD_ID)
+	assert_eq(host.selected_battle_renderer(), VIEW_MOD_ID)
+	assert_eq(
+		Gen2ModState.selected_view(), VIEW_MOD_ID, "and the choice is on disk"
+	)
+
+	## set_row rebuilt the card, so the switch that is up now is a new node.
+	var again: Gen2LauncherToggle = detail.find_child(
+		String(Gen2ModDetailPage.VIEW_SWITCH_NAME), true, false
+	)
+	assert_true(again.button_pressed, "the rebuilt row shows the view as on")
+	again.button_pressed = false
+	assert_eq(host.selected_view(), Gen2ModHost.BUILT_IN_RENDERER)
+
+	Gen2ModHost.reset()
+	DirAccess.remove_absolute(Gen2ModState.PATH)
+	Gen2ModState.reload()
+
+
+## A mod that replaces nothing about how the game is drawn gets no row at all,
+## rather than a switch that would do nothing.
+func test_a_mod_with_no_renderer_has_no_view_switch() -> void:
+	_write_probe_mod_zip()
+	assert_true(bool(Gen2ModInstaller.install_zip(_mod_archive).get("ok", false)))
+	Gen2ModHost.reset()
+	Gen2ModHost.instance().discover()
+	Gen2ModHost.instance().load_discovered()
+
+	var page: Gen2ModsPage = _mods_page()
+	var detail: Gen2ModDetailPage = Gen2ModDetailPage.create(Gen2LauncherTheme.active())
+	add_child_autofree(detail)
+	detail.set_row(page._row_for(PROBE_MOD_ID))
+	assert_null(detail.find_child(String(Gen2ModDetailPage.VIEW_SWITCH_NAME), true, false))
+	Gen2ModHost.reset()

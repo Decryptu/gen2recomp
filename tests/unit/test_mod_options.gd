@@ -14,6 +14,7 @@ var _heard: Array = []
 
 
 func before_each() -> void:
+	_forget_view()
 	Gen2ModHost.reset()
 	DirAccess.remove_absolute(Gen2ModOptions.PATH)
 	Gen2ModOptions.reload()
@@ -21,9 +22,17 @@ func before_each() -> void:
 
 
 func after_each() -> void:
+	_forget_view()
 	Gen2ModHost.reset()
 	DirAccess.remove_absolute(Gen2ModOptions.PATH)
 	Gen2ModOptions.reload()
+
+
+## Choosing a view writes the installation's own file, so a test that chooses one
+## puts it back rather than leaving the player on a renderer a test registered.
+func _forget_view() -> void:
+	DirAccess.remove_absolute(Gen2ModState.PATH)
+	Gen2ModState.reload()
 
 
 func _distance(host: Gen2ModHost) -> Dictionary:
@@ -183,7 +192,7 @@ func test_the_shipped_example_registers_the_setting_its_renderer_reads() -> void
 	var host: Gen2ModHost = Gen2ModHost.instance()
 	assert_true(bool(host.load_mod(manifest["manifest"]).get("ok", false)))
 
-	assert_true(bool(host.select_world_renderer(manifest["manifest"].id).get("ok", false)))
+	assert_true(bool(host.select_view(manifest["manifest"].id).get("ok", false)))
 	var renderer: Node = host.create_world_renderer()
 	assert_eq(renderer.get_script().resource_path, "res://mods/examples/voxel_preview/renderer.gd")
 	assert_eq(host.option(renderer.MOD_ID, renderer.OPTION_PITCH), renderer.camera_pitch())

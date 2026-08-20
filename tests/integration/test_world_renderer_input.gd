@@ -35,6 +35,7 @@ var _world_screen: Gen2WorldScreen = null
 
 
 func before_each() -> void:
+	_forget_view()
 	_data = Fixture.build()
 	_data = GameData.open_directory(Fixture.directory())
 	Gen2ModHost.reset()
@@ -45,7 +46,15 @@ func after_each() -> void:
 		_world_screen.free()
 		_world_screen = null
 	Gen2ModHost.reset()
+	_forget_view()
 	RomCache.clear(Fixture.directory())
+
+
+## Choosing a view writes the installation's own file, so a test that chooses one
+## puts it back rather than leaving the player on a renderer a test registered.
+func _forget_view() -> void:
+	DirAccess.remove_absolute(Gen2ModState.PATH)
+	Gen2ModState.reload()
 
 
 func _open_world_with_renderer() -> Node:
@@ -53,7 +62,7 @@ func _open_world_with_renderer() -> Node:
 	script.source_code = RENDERER_SOURCE
 	script.reload()
 	assert_true(Gen2ModHost.instance().register_world_renderer(&"camera", script)["ok"])
-	assert_true(Gen2ModHost.instance().select_world_renderer(&"camera")["ok"])
+	assert_true(Gen2ModHost.instance().select_view(&"camera")["ok"])
 	var packed: PackedScene = load("res://game/world/world_screen.tscn")
 	_world_screen = packed.instantiate() as Gen2WorldScreen
 	_world_screen.map_group = Fixture.MAP_GROUP
