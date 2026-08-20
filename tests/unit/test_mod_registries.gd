@@ -292,6 +292,15 @@ func test_the_shipped_example_mod_registers_everything_it_documents() -> void:
 	assert_true(Gen2MoveEffect.sequence_for(int(move["effect"])).has(
 		Gen2EffectCommands.RECOIL
 	))
+	# 8: its stats page is registered and builds off the snapshot's own DV word.
+	var pages: Array = host.stats_pages()
+	assert_eq(pages.size(), 1)
+	var placements: Array = (pages[0]["build"] as Callable).call(
+		{"dvs": Gen2Stats.pack_dvs(15, 9, 7, 12), "stat_exp": {"attack": 25600}}
+	)
+	assert_true(placements.has({"text": "15", "at": Vector2i(8, 11)}), "the ATTACK DV")
+	assert_true(placements.has({"text": "25600", "at": Vector2i(14, 11)}), "its stat exp")
+
 	# And its patch reaches a cartridge row without replacing the rest of it.
 	var pikachu: Dictionary = overlay.resolve(
 		Gen2ContentOverlay.KIND_SPECIES, 25,
@@ -361,12 +370,46 @@ func test_every_refusal_reason_the_mod_layer_produces_has_player_wording() -> vo
 		&"not_a_zip", &"unsafe_archive_entry", &"unsupported_api_version",
 		&"unsupported_index_schema", &"already_installed", &"duplicate_renderer",
 		&"duplicate_content", &"reserved_effect_command", &"missing_entry_script",
+		&"duplicate_party_menu_entry", &"party_menu_entry_missing_callable",
+		&"invalid_party_menu_entry", &"duplicate_stats_page",
+		&"stats_page_missing_callable", &"stats_pages_full",
 	]:
 		var text: String = Gen2ModRefusal.text({"reason": reason, "detail": "x/y.zip"})
 		assert_false(text.begins_with(String(reason)), "worded: %s" % reason)
 		assert_false(text.is_empty())
 	# An unworded reason still names something a search finds.
 	assert_string_contains(Gen2ModRefusal.text({"reason": &"brand_new"}), "brand_new")
+
+
+## `register_stats_page` refuses what it cannot draw, and refuses a sixth page:
+## the indicator run is centred against the right arrow and one more block than
+## [constant Gen2StatsScreenPage.MAX_PAGES] stands on the front pic.
+func test_the_stats_screen_refuses_a_page_it_cannot_draw_or_indicate() -> void:
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	var build := func(_page: Dictionary) -> Array: return []
+	assert_eq(
+		StringName(host.register_stats_page(&"", {"build": build})["reason"]),
+		&"invalid_stats_page"
+	)
+	assert_eq(
+		StringName(host.register_stats_page(MOD, {})["reason"]),
+		&"stats_page_missing_callable"
+	)
+	assert_true(bool(host.register_stats_page(MOD, {"build": build})["ok"]))
+	assert_eq(
+		StringName(host.register_stats_page(MOD, {"build": build})["reason"]),
+		&"duplicate_stats_page"
+	)
+	var room: int = Gen2StatsScreenPage.MAX_PAGES - Gen2StatsScreenPage.NUM_PAGES - 1
+	for index: int in room:
+		assert_true(bool(host.register_stats_page(
+			StringName("filler%d" % index), {"build": build}
+		)["ok"]))
+	assert_eq(
+		StringName(host.register_stats_page(&"toomany", {"build": build})["reason"]),
+		&"stats_pages_full"
+	)
+	assert_eq(Gen2StatsScreenPage.page_count(), Gen2StatsScreenPage.MAX_PAGES)
 
 
 ## The eight steps the last row of the effects table added are engine steps like

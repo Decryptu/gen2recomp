@@ -188,6 +188,9 @@ var _menu_entries: Dictionary = {}
 ## The rows mods add to a party member's own submenu, in registration order. See
 ## [method register_party_member_menu].
 var _party_member_entries: Array = []
+## `{kind, build}` per registered stats-screen page, in registration order. See
+## [method register_stats_page].
+var _stats_pages: Array = []
 ## `{manifest, provider}` per mod told which save is being played, in
 ## registration order. See [method register_save_lifecycle].
 var _save_providers: Array = []
@@ -548,6 +551,41 @@ func party_member_entries(slot: int, in_battle: bool = false) -> Array:
 			continue
 		out.append({"kind": entry["kind"], "label": label, "handler": entry["handler"]})
 	return out
+
+
+## Adds one page to the stats screen, after the cartridge's pink, green and blue.
+##
+## [param entry] carries a `build(page)` Callable taking [method
+## Gen2MonStatsScreen.snapshot] and answering placements on the screen's own tile
+## grid: `{"text": String, "at": Vector2i}` for a string and `{"divider": int}`
+## for a vertical divider down that column of the lower half. The mod says where
+## its strings go and the host writes them with the screen's own font, so a page
+## needs no renderer, no node and no picture of its own.
+##
+## The ceiling is [constant Gen2StatsScreenPage.MAX_PAGES]: the page indicators
+## are centred between the two arrows and the left arrow moves with them, and one
+## more block than that reaches the front pic.
+func register_stats_page(id: StringName, entry: Dictionary) -> Dictionary:
+	if String(id).is_empty():
+		return {"ok": false, "reason": &"invalid_stats_page"}
+	var build: Variant = entry.get("build", null)
+	if not build is Callable or not (build as Callable).is_valid():
+		return {
+			"ok": false, "reason": &"stats_page_missing_callable", "detail": String(id),
+		}
+	for existing: Dictionary in _stats_pages:
+		if StringName(existing["kind"]) == id:
+			return {"ok": false, "reason": &"duplicate_stats_page", "detail": String(id)}
+	if Gen2StatsScreenPage.NUM_PAGES + _stats_pages.size() + 1 > Gen2StatsScreenPage.MAX_PAGES:
+		return {"ok": false, "reason": &"stats_pages_full", "detail": String(id)}
+	_stats_pages.append({"kind": id, "build": build})
+	return {"ok": true, "id": id}
+
+
+## The registered stats pages, in registration order, which is the order they are
+## turned to after the blue page.
+func stats_pages() -> Array:
+	return _stats_pages.duplicate()
 
 
 ## Every entry registered for [param menu], in registration order. The callers

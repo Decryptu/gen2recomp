@@ -38,6 +38,7 @@ func register(host: Gen2ModHost, manifest: Gen2ModManifest) -> void:
 	_add_a_control(host, manifest.id)
 	_populate_the_map(host, manifest.id)
 	_walk_something_behind_the_player(host, manifest.id)
+	_add_a_stats_page(host, manifest.id)
 	_rebalance(host, manifest.id)
 	_watch(host, manifest.id)
 
@@ -210,6 +211,51 @@ func _populate_the_map(host: Gen2ModHost, id: StringName) -> void:
 ## and a `sprites()` entry's `emote` are the optional three that make it a pet.
 func _walk_something_behind_the_player(host: Gen2ModHost, id: StringName) -> void:
 	host.register_world_actor(id, Pet.new())
+
+
+## A fourth page on a Pokémon's stats screen (`api_version` 8).
+##
+## The mod answers WHERE its strings go and the host writes them with the
+## screen's own font, so a page needs no node, no renderer and no art of its own.
+## The lower half is rows 8 to 17 and a placement outside it is dropped, which is
+## what keeps a page off the name, the level and the front pic. The snapshot is
+## the same one the cartridge pages are drawn from, plus the two halves of a
+## Pokémon none of them prints: the packed DV word and the stat experience.
+func _add_a_stats_page(host: Gen2ModHost, id: StringName) -> void:
+	host.register_stats_page(id, {"build": _build_stats_page})
+
+
+func _build_stats_page(page: Dictionary) -> Array:
+	var dvs: int = int(page.get("dvs", 0))
+	var trained: Dictionary = page.get("stat_exp", {})
+	var out: Array = [
+		## The pink and blue pages' own divider, so the columns line up when a
+		## player turns between them.
+		{"divider": 10},
+		{"text": "DV", "at": Vector2i(8, 8)},
+		{"text": "STAT EXP", "at": Vector2i(11, 8)},
+	]
+	## HP's DV is derived from the low bit of the other four rather than stored,
+	## and both special stats read one stat-experience counter, so five rows is
+	## what the hardware has to say.
+	var rows: Array = [
+		["HP", Gen2Stats.hp_dv(dvs), "hp"],
+		["ATTACK", Gen2Stats.attack_dv(dvs), "attack"],
+		["DEFENSE", Gen2Stats.defense_dv(dvs), "defense"],
+		["SPECIAL", Gen2Stats.special_dv(dvs), "special"],
+		["SPEED", Gen2Stats.speed_dv(dvs), "speed"],
+	]
+	for index: int in rows.size():
+		## `wListMovesLineSpacing`'s two rows, which every list on this screen
+		## steps.
+		var row: int = 9 + index * 2
+		out.append({"text": String(rows[index][0]), "at": Vector2i(0, row)})
+		out.append({"text": str(int(rows[index][1])).lpad(2), "at": Vector2i(8, row)})
+		out.append({
+			"text": str(int(trained.get(String(rows[index][2]), 0))).lpad(5),
+			"at": Vector2i(14, row),
+		})
+	return out
 
 
 ## Rewriting how an event is PRESENTED, without changing what happened

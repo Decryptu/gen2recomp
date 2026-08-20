@@ -36,6 +36,7 @@ func before_each() -> void:
 
 func after_each() -> void:
 	RomCache.clear(_directory)
+	Gen2ModHost.reset()
 
 
 func _write_cache() -> void:
@@ -459,6 +460,64 @@ func test_every_page_indicator_is_a_two_by_two_block() -> void:
 		_ink_in_tile(image, Gen2StatsScreenPage.PAGE_INDICATORS[0].x - 1, 5), 0,
 		"and nothing beside the first of them"
 	)
+
+
+## A fourth page's block has nowhere to go beside the source's three, so the run
+## is centred against the right arrow instead and the left arrow moves to meet
+## it. Rows 5 and 6 are clear from column 8 out and the front pic ends at column
+## 6, so nothing on the upper half moves and five pages is the ceiling.
+func test_a_fourth_page_grows_the_indicator_run_leftward_and_moves_the_arrow() -> void:
+	assert_true(bool(Gen2ModHost.instance().register_stats_page(
+		&"testmod", {"build": func(_page: Dictionary) -> Array: return []}
+	)["ok"]))
+	assert_eq(
+		Gen2StatsScreenPage.page_indicators(4),
+		[Vector2i(11, 5), Vector2i(13, 5), Vector2i(15, 5), Vector2i(17, 5)] as Array[Vector2i]
+	)
+	assert_eq(Gen2StatsScreenPage.page_left_arrow(4), Vector2i(10, 6))
+	assert_eq(
+		Gen2StatsScreenPage.page_indicators(Gen2StatsScreenPage.NUM_PAGES),
+		Gen2StatsScreenPage.PAGE_INDICATORS, "and three is where the source put them"
+	)
+	var image: Image = _stats_image(_stats_snapshot(Gen2StatsScreenPage.PINK_PAGE))
+	for quadrant: int in 4:
+		@warning_ignore("integer_division")
+		assert_ne(
+			_ink_in_tile(image, 11 + quadrant % 2, 5 + quadrant / 2), 0,
+			"the fourth block"
+		)
+	assert_ne(_ink_in_tile(image, 10, 6), 0, "the arrow beside it")
+	assert_eq(_ink_in_tile(image, 9, 6), 0, "and nothing left of it")
+	## The fifth is the last that fits: its own arrow lands on column 8, one clear
+	## of the front pic's seven-tile cell.
+	assert_eq(
+		Gen2StatsScreenPage.page_left_arrow(Gen2StatsScreenPage.MAX_PAGES).x,
+		Gen2StatsScreenPage.PIC_TILES + 1
+	)
+
+
+## A registered page draws with the screen's own font and divider, and only into
+## the ten rows under the divider: a placement above it is dropped rather than
+## reaching the name, the level or the front pic.
+func test_a_registered_page_draws_its_placements_and_only_the_lower_half() -> void:
+	assert_true(bool(Gen2ModHost.instance().register_stats_page(&"testmod", {
+		"build": func(page: Dictionary) -> Array:
+			return [
+				{"divider": 10},
+				{"text": str(int(page.get("level", 0))), "at": Vector2i(0, 9)},
+				{"text": "OFF", "at": Vector2i(0, 3)},
+				{"text": "OFF", "at": Vector2i(0, 18)},
+			],
+	})["ok"]))
+	var image: Image = _stats_image(
+		_stats_snapshot(Gen2StatsScreenPage.BLUE_PAGE + 1)
+	)
+	assert_ne(_ink_in_tile(image, 0, 9), 0, "the page's own row, off the snapshot")
+	for row: int in [
+		Gen2StatsScreenPage.LOWER_FIRST_ROW, Gen2StatsScreenPage.ROWS - 1,
+	]:
+		assert_ne(_ink_in_tile(image, 10, row), 0, "the divider down column 10")
+	assert_eq(_ink_in_tile(image, 0, 3), 0, "and nothing above the divider")
 
 
 ## Each page fills the ten rows under the divider and nothing above it, which is

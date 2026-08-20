@@ -36,7 +36,7 @@ user://mods/<id>/
 | `id` | Lowercase `[a-z0-9][a-z0-9_-]*`; addresses the directory and registry keys |
 | `name` | Shown to the player |
 | `version` | The mod's own version, not the host's |
-| `api_version` | Between `Gen2ModManifest.MIN_API_VERSION` and `API_VERSION`. Declare the oldest host you need: 7 for an actor's `interact`, `emote` and outbox and for hidden-item requests, 6 for `occupied` in the visible-encounter context, 5 for the run's rules, 4 for types, matchups, mod art and event mutators, 3 for mart rows and named axes, 2 for visible encounters, 1 for everything else |
+| `api_version` | Between `Gen2ModManifest.MIN_API_VERSION` and `API_VERSION`. Declare the oldest host you need: 8 for a stats-screen page, 7 for an actor's `interact`, `emote` and outbox and for hidden-item requests, 6 for `occupied` in the visible-encounter context, 5 for the run's rules, 4 for types, matchups, mod art and event mutators, 3 for mart rows and named axes, 2 for visible encounters, 1 for everything else |
 | `entry` | A `.gd` path inside the mod directory, or inside the pack when there is one |
 | `pack` | Optional `.pck` or `.zip` beside `mod.json`, holding the mod's files |
 | `description` | Optional |
@@ -202,12 +202,13 @@ belongs to the first one followed, so it is on screen once.
 ## Adding content
 
 `mods/examples/new_content/` is every non-renderer surface of the contract in one
-file, `api_version` 6: it registers a type and two chart exceptions, a species
+file, `api_version` 8: it registers a type and two chart exceptions, a species
 with its own decoded art, a move and its effect, an item with a pack pocket and a
-mart shelf, a named control axis and a visible-encounter population that reads
-the run's rules and refuses a cell something is standing on, patches two cartridge rows, watches both event channels and
-rewrites the world channel's presentation. Copy it and read it beside this
-section.
+mart shelf, a named control axis, a world actor that walks behind the player, a
+fourth page on the stats screen and a visible-encounter population that reads the
+run's rules and refuses a cell something is standing on, patches two cartridge
+rows, watches both event channels and rewrites the world channel's presentation.
+Copy it and read it beside this section.
 
 A content number is per kind and starts at `Gen2ContentOverlay.FIRST_MOD_NUMBER`,
 which is 256. Every cartridge number fits in a byte, so a number that does not is
@@ -1074,6 +1075,43 @@ the handler and closes the menu, the way a field move does.
 Not offered for an egg, and not offered inside a battle: a battle's party list is
 a switch, and a row running a mod's action in the middle of a turn would be world
 state changing while the turn owns it.
+
+## Adding a page to the stats screen
+
+`register_stats_page(id, {"build": Callable})` adds a page after the cartridge's
+pink, green and blue. `build` takes the screen's snapshot and answers placements
+on its own 20x18 tile grid; the host writes them with the screen's font, so the
+page needs no node, no renderer and no art:
+
+```gdscript
+host.register_stats_page(manifest.id, {
+	"build": func(page: Dictionary) -> Array:
+		return [
+			{"divider": 10},
+			{"text": "DV", "at": Vector2i(7, 8)},
+			{"text": str(Gen2Stats.attack_dv(int(page["dvs"]))), "at": Vector2i(7, 9)},
+		],
+})
+```
+
+| Placement | Draws |
+|---|---|
+| `{"text": String, "at": Vector2i}` | the string at that tile |
+| `{"divider": int}` | the pink and blue pages' own vertical divider down that column |
+
+The lower half is rows 8 to 17 and a placement outside it is dropped, which is
+what keeps a page off the upper half's name, level and front pic. The snapshot is
+`Gen2MonStatsScreen.snapshot`, which carries `dvs` (the packed word,
+`Gen2Stats.attack_dv` and friends read it) and `stat_exp` (keyed `hp`, `attack`,
+`defense`, `speed`, `special`) beside everything the cartridge pages print.
+
+Pages turn with LEFT and RIGHT and wrap, A on the last page leaves the screen,
+and the 2x2 page indicators are centred against the right arrow with the left
+arrow moving to meet them. Five pages is the ceiling
+(`Gen2StatsScreenPage.MAX_PAGES`): a sixth block reaches the front pic. Past it
+registration is refused with `stats_pages_full`, and a second mod claiming one id
+with `duplicate_stats_page`. An egg has no pages at all, so a registered one is
+not reached for it, the way the cartridge's own are not.
 
 ## Holding a run rather than an installation
 

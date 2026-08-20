@@ -135,6 +135,7 @@ func _process(_delta: float) -> bool:
 	_screen._process(FRAME)
 	_trace.append(_sample())
 	if _frames == _capture_frame and not _output_path.is_empty():
+		RenderingServer.force_draw()
 		root.get_texture().get_image().save_png(_output_path)
 		print("Wrote %s at frame %d" % [_output_path, _frames])
 	if _frames < maxi(TRACE_FRAMES, _capture_frame):

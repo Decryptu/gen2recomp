@@ -59,6 +59,7 @@ func _process(_delta: float) -> bool:
 		_screen.preview_fishing()
 	if _frames < 18:
 		return false
+	RenderingServer.force_draw()
 	var image: Image = root.get_texture().get_image()
 	var error: Error = image.save_png(_output_path)
 	if error != OK:
