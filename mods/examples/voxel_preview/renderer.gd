@@ -223,8 +223,8 @@ func _cell_center(cell: Vector2i) -> Vector3:
 ## The committed cell plus its in-flight step, so the box and camera ease into a
 ## new cell instead of snapping. Gen2WorldAPI composes the two.
 func _player_position() -> Vector3:
-	var position: Vector2 = _world.player_position_cells()
-	return Vector3(position.x * CELL_SIZE, 0.0, position.y * CELL_SIZE)
+	var cell_position: Vector2 = _world.player_position_cells()
+	return Vector3(cell_position.x * CELL_SIZE, 0.0, cell_position.y * CELL_SIZE)
 
 
 ## The ledge hop's own arc, in cells: the host gives it in world pixels, and a
@@ -240,12 +240,12 @@ func _player_height() -> float:
 func _rebuild_terrain() -> void:
 	if _world == null or _world.current_map == null or _terrain == null:
 		return
-	var size: Vector2i = _world.map_size_cells()
+	var map_size: Vector2i = _world.map_size_cells()
 	var surface := SurfaceTool.new()
 	surface.begin(Mesh.PRIMITIVE_TRIANGLES)
 	surface.set_smooth_group(-1)
-	for y: int in size.y:
-		for x: int in size.x:
+	for y: int in map_size.y:
+		for x: int in map_size.x:
 			var cell := Vector2i(x, y)
 			var permission: int = _world.collision_permission_at(cell)
 			var height: float = WALL_HEIGHT if permission == Gen2WorldCollision.WALL_TILE \
@@ -253,10 +253,10 @@ func _rebuild_terrain() -> void:
 			_add_cell(surface, cell, height, _cell_color(cell, permission))
 	surface.generate_normals()
 	_terrain.mesh = surface.commit()
-	var material := StandardMaterial3D.new()
-	material.vertex_color_use_as_albedo = true
-	material.roughness = 0.9
-	_terrain.material_override = material
+	var ground := StandardMaterial3D.new()
+	ground.vertex_color_use_as_albedo = true
+	ground.roughness = 0.9
+	_terrain.material_override = ground
 
 
 ## The colour the 2D view would draw this cell's top-left tile in. Sampling the
@@ -346,7 +346,7 @@ func _rebuild_objects() -> void:
 
 
 func _material(color: Color) -> StandardMaterial3D:
-	var material := StandardMaterial3D.new()
-	material.albedo_color = color
-	material.roughness = 0.8
-	return material
+	var made := StandardMaterial3D.new()
+	made.albedo_color = color
+	made.roughness = 0.8
+	return made
