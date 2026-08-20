@@ -165,6 +165,15 @@ static func frontpic_pad_columns(width: int, mirrored: bool = false) -> int:
 	return FRONTPIC_TILES - 1 - width if mirrored else 1
 
 
+## The same pad above the pic, in tiles. `PadFrontpic` writes its blank tiles in
+## front of each column, so a shorter pic is bottom-aligned in the box whichever
+## way `wBoxAlignment` runs its columns.
+static func frontpic_pad_rows(height: int) -> int:
+	if height >= FRONTPIC_TILES or height <= 0:
+		return 0
+	return FRONTPIC_TILES - height
+
+
 ## The same mirror on an index buffer, for a caller that will recolour it.
 static func x_flipped_indices(indices: PackedByteArray, width: int) -> PackedByteArray:
 	if width <= 0:

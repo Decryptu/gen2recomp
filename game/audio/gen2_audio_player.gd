@@ -217,6 +217,9 @@ func audio_status() -> Dictionary:
 		"volume": _engine.volume,
 		"sound_output": _engine.sound_output,
 		"registered_banks": _engine.registered_bank_count(),
+		# The bank and address of the piece the driver is on, which is the same
+		# key a second request for it is continued by. Empty when nothing is.
+		"music_key": _music_key,
 	}
 
 

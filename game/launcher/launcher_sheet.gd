@@ -104,7 +104,7 @@ func close() -> void:
 	if _restore_focus != null and is_instance_valid(_restore_focus):
 		_restore_focus.grab_focus()
 	closed.emit()
-	queue_free()
+	Gen2Screen.drop(self)
 
 
 ## Unhandled rather than [method Control._gui_input], which only ever reaches the

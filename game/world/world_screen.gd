@@ -346,7 +346,7 @@ func _build_renderer() -> void:
 		if _screen.native_size_changed.is_connected(_on_native_size_changed):
 			_screen.native_size_changed.disconnect(_on_native_size_changed)
 		_renderer.get_parent().remove_child(_renderer)
-		_renderer.queue_free()
+		Gen2Screen.drop(_renderer)
 	_renderer = Gen2ModHost.instance().create_world_renderer()
 	if Gen2ModHost.renderer_uses_hardware_viewport(_renderer):
 		_screen.display_content(_renderer)
@@ -2109,13 +2109,13 @@ func _handle_fishing_result(result: Dictionary) -> void:
 
 
 ## `StartBattle`: the transition first, and the battle screen only once it has
-## finished. `PlayBattleMusic` opens with `PlayMusic MUSIC_NONE`, so the map's
-## own track stops here rather than when the fight is built.
+## finished. `PlayBattleMusic` runs in front of `DoBattleTransition`, so the
+## map's track stops and the battle's own starts here, 170 frames before the
+## fight is built, and the animation is played under it rather than in silence.
 func _start_battle_request(request: Dictionary) -> void:
 	if _battle_host != null or _battle_transition != null or _data == null:
 		return
-	if _audio_player != null:
-		_audio_player.stop_all()
+	_play_battle_music(request)
 	_battle_transition_request = request.duplicate(true)
 	_battle_transition = _build_battle_transition(request)
 	if _battle_transition == null:
@@ -2234,6 +2234,25 @@ func _apply_battle_transition() -> void:
 	)
 
 
+## `PlayBattleMusic`, resolved from the request rather than from a fight that
+## does not exist yet. Asking twice for the same track is what the driver
+## continues, so the transition and the battle screen behind it never restart the
+## piece between them.
+func _play_battle_music(request: Dictionary) -> void:
+	if _audio_player == null or _data == null:
+		return
+	var landmark: int = _world.landmark() if _world != null \
+		else Gen2WorldRadio.LANDMARK_SPECIAL
+	var track: int = Gen2WorldBattleAdapter.music_for(
+		request, landmark, time_of_day, Gen2WorldState.is_crystal_profile(_data)
+	)
+	var record: Dictionary = _data.world_audio(&"music", track)
+	if record.is_empty():
+		_audio_player.stop_all()
+		return
+	_audio_player.play_record(record, &"map_music", _audio_assets())
+
+
 func _open_battle_host(request: Dictionary) -> void:
 	if _battle_host != null or _data == null:
 		return
@@ -2245,6 +2264,7 @@ func _open_battle_host(request: Dictionary) -> void:
 	_battles_fought += 1
 	var host: Gen2BattleScreen = BATTLE_SCENE.instantiate() as Gen2BattleScreen
 	host.set_data(_data)
+	host.set_audio_player(_audio_player)
 	host.set_rules(_world.rules if _world != null else null)
 	## Drawn from the world's own generator, so the fight's own decisions are part
 	## of the run's seeded chain and a replay reproduces them without recording
@@ -2273,11 +2293,10 @@ func _open_battle_host(request: Dictionary) -> void:
 	## deferred call: `startbattle` is a script command, so the fight belongs to
 	## the frame the encounter fired on, and a run driven frame by frame (a check,
 	## a replay) never reaches a deferred call at all.
-	## `PlayBattleMusic` opens with `PlayMusic MUSIC_NONE`, which is one driver
-	## silencing itself. The battle runs its own [Gen2AudioPlayer], so the map's
-	## has to be the thing that stops, or both pieces play at once.
-	if _audio_player != null:
-		_audio_player.stop_all()
+	## `PlayBattleMusic` has already run, either in front of the transition or
+	## here for a request that had none, and the fight is handed this screen's own
+	## driver, so its first cry takes the channels the track is holding.
+	_play_battle_music(request)
 	host.start_world_battle(request.duplicate(true), save, badges)
 	## After the fight exists, because starting one clears whatever capture action
 	## was staged: the bag belongs to this battle rather than to the last one.
@@ -2357,7 +2376,7 @@ func _on_battle_finished(result: Dictionary) -> void:
 	var host: Gen2BattleScreen = _battle_host
 	_battle_host = null
 	if host != null:
-		host.queue_free()
+		Gen2Screen.drop(host)
 	if not String(_battle_encounter_id).is_empty():
 		var fought: StringName = _battle_encounter_id
 		_battle_encounter_id = &""
@@ -2574,7 +2593,7 @@ func _open_service_host() -> void:
 	var save: Gen2SaveData = _injected_save if _injected_save != null else _selected_runtime_save()
 	var persist: bool = save != null and _injected_save == null
 	if not host.open_pending(_world, _data, save, persist):
-		host.queue_free()
+		Gen2Screen.drop(host)
 		_script_prompt = "Service request unavailable"
 		_refresh_labels()
 		return
@@ -2625,7 +2644,7 @@ func _on_hall_of_fame_closed() -> void:
 	var host: Gen2HallOfFameScreen = _hall_of_fame_host
 	_hall_of_fame_host = null
 	if host != null:
-		host.queue_free()
+		Gen2Screen.drop(host)
 	var written: Dictionary = persist_world_snapshot()
 	_script_prompt = "Hall of Fame recorded" if bool(written.get("ok", false)) \
 		else "Hall of Fame not saved: %s" % String(written.get("reason", "unknown"))
@@ -2676,7 +2695,7 @@ func _on_credits_closed() -> void:
 	var host: Gen2CreditsScreen = _credits_host
 	_credits_host = null
 	if host != null:
-		host.queue_free()
+		Gen2Screen.drop(host)
 	_play_current_map_music()
 	if _renderer != null:
 		_renderer.refresh()
@@ -2742,7 +2761,7 @@ func _open_start_menu_host(entry: Callable) -> void:
 	if not host.open(
 		_world, _data, Callable(self, "persist_world_snapshot"), _start_menu_cursor
 	):
-		host.queue_free()
+		Gen2Screen.drop(host)
 		_script_prompt = "Start menu unavailable"
 		_refresh_labels()
 		return
@@ -2776,7 +2795,7 @@ func _on_start_menu_action(kind: StringName) -> void:
 	_start_menu_host = null
 	if host != null:
 		_start_menu_cursor = host.cursor()
-		host.queue_free()
+		Gen2Screen.drop(host)
 	_reopen_start_menu = kind in [
 		Gen2WorldStartMenu.ITEM_POKEMON, Gen2WorldStartMenu.ITEM_POKEGEAR,
 		Gen2WorldStartMenu.ITEM_PLAYER, Gen2WorldStartMenu.ITEM_POKEDEX,
@@ -2838,7 +2857,7 @@ func _on_pokedex_closed() -> void:
 	_pokedex_host = null
 	if host != null:
 		_pokedex_prev_entry = host.previous_entry()
-		host.queue_free()
+		Gen2Screen.drop(host)
 	_script_prompt = "Pokedex closed"
 	_reopen_start_menu_if_due()
 	_refresh_labels()
@@ -2936,7 +2955,7 @@ func _on_trainer_card_closed() -> void:
 	var host: Gen2TrainerCardScreen = _trainer_card_host
 	_trainer_card_host = null
 	if host != null:
-		host.queue_free()
+		Gen2Screen.drop(host)
 	_script_prompt = "Trainer card closed"
 	_reopen_start_menu_if_due()
 	_refresh_labels()
@@ -2947,7 +2966,7 @@ func _on_start_menu_closed() -> void:
 	_start_menu_host = null
 	if host != null:
 		_start_menu_cursor = host.cursor()
-		host.queue_free()
+		Gen2Screen.drop(host)
 	_script_prompt = "Start menu closed"
 	_refresh_labels()
 
@@ -2961,7 +2980,7 @@ func _on_field_item_used(request: Dictionary) -> void:
 	_start_menu_host = null
 	if host != null:
 		_start_menu_cursor = host.cursor()
-		host.queue_free()
+		Gen2Screen.drop(host)
 	## `.Field` reaches `ExitAllMenus`, so nothing reopens behind the effect.
 	_reopen_start_menu = false
 	if _world == null:
@@ -3049,7 +3068,7 @@ func _open_embedded_party() -> void:
 		return
 	var save: Gen2SaveData = _embedded_party_save()
 	if save == null:
-		host.queue_free()
+		Gen2Screen.drop(host)
 		_script_prompt = "Party requires a validated save"
 		_refresh_labels()
 		return
@@ -3073,7 +3092,7 @@ func _on_party_closed(_result: Dictionary) -> void:
 	var host: Gen2PartyScreen = _party_host
 	_party_host = null
 	if host != null:
-		host.queue_free()
+		Gen2Screen.drop(host)
 	_script_prompt = "Party closed"
 	_reopen_start_menu_if_due()
 	_refresh_labels()
@@ -3089,7 +3108,7 @@ func _on_party_action(action: Dictionary) -> void:
 	var host: Gen2PartyScreen = _party_host
 	_party_host = null
 	if host != null:
-		host.queue_free()
+		Gen2Screen.drop(host)
 	# `PokemonActionSubmenu`'s `.quit` reaches `ExitAllMenus`, so a field move
 	# leaves the overworld rather than reopening the menu behind it.
 	_reopen_start_menu = false
@@ -3517,7 +3536,7 @@ func _open_service_overlay(kind: StringName) -> void:
 	var opened: bool = host.open_pokegear(_world, _data, save, persist) if kind == &"pokegear" \
 		else host.open_phone_list(_world, _data, save, persist)
 	if not opened:
-		host.queue_free()
+		Gen2Screen.drop(host)
 		_script_prompt = "%s unavailable" % label
 		_refresh_labels()
 		return
@@ -3545,7 +3564,7 @@ func _open_fly_map(request: Dictionary) -> void:
 	var save: Gen2SaveData = _injected_save if _injected_save != null \
 		else _selected_runtime_save()
 	if not host.open_fly_map(_world, _data, save, request):
-		host.queue_free()
+		Gen2Screen.drop(host)
 		_script_prompt = "Region map unavailable"
 		_refresh_labels()
 		return
@@ -3577,7 +3596,7 @@ func _on_service_completed(results: Array) -> void:
 	var host: Gen2WorldServiceScreen = _service_host
 	_service_host = null
 	if host != null:
-		host.queue_free()
+		Gen2Screen.drop(host)
 	if _apply_fly_choice(results):
 		return
 	# `ExitPokegearRadio_HandleMusic`: only the radio card takes the music off the
@@ -3974,7 +3993,7 @@ func _hide_map_name_sign() -> void:
 	_map_name_sign_frames = 0
 	if _map_name_sign == null:
 		return
-	_map_name_sign.queue_free()
+	Gen2Screen.drop(_map_name_sign)
 	_map_name_sign = null
 
 
@@ -4006,7 +4025,7 @@ func _open_unown_wall(word: String) -> bool:
 func _close_unown_wall() -> void:
 	if _unown_wall_box == null:
 		return
-	_unown_wall_box.queue_free()
+	Gen2Screen.drop(_unown_wall_box)
 	_unown_wall_box = null
 	_play_sfx(Gen2BattleSwitchMenu.SFX_READ_TEXT_2)
 	## The wait behind the box is the staged text the special left, so the script
@@ -4016,7 +4035,7 @@ func _close_unown_wall() -> void:
 
 func _hide_story_picture() -> void:
 	if _story_picture != null:
-		_story_picture.queue_free()
+		Gen2Screen.drop(_story_picture)
 		_story_picture = null
 
 

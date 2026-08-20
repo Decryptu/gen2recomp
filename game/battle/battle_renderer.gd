@@ -261,15 +261,15 @@ func _ensure_pixels() -> void:
 	]
 	if enemy_key != _enemy_pixels_key:
 		if int(enemy_key[3]) > 0:
-			_enemy_pixels = _padded_pic(
+			_enemy_pixels = padded_pic(_data,
 				_data.trainer_pic(int(enemy_key[3])), Gen2BattleScreenMap.ENEMY_SIDE
 			)
 		elif bool(enemy_key[1]):
 			_enemy_pixels = _substitute_pic(false)
 		else:
-			_enemy_pixels = _padded_pic(
+			_enemy_pixels = padded_pic(_data,
 				_battler_pic(int(enemy_key[0]), int(enemy_key[2]), false),
-				Gen2BattleScreenMap.ENEMY_SIDE
+				Gen2BattleScreenMap.ENEMY_SIDE, true
 			)
 		_enemy_pixels_key = enemy_key
 	var player_key: Array = [
@@ -278,14 +278,14 @@ func _ensure_pixels() -> void:
 	]
 	if player_key != _player_pixels_key:
 		if not String(player_key[3]).is_empty():
-			_player_pixels = _padded_pic(
+			_player_pixels = padded_pic(_data,
 				_data.player_backpic(String(player_key[3])),
 				Gen2BattleScreenMap.PLAYER_SIDE
 			)
 		elif bool(player_key[1]):
 			_player_pixels = _substitute_pic(true)
 		else:
-			_player_pixels = _padded_pic(
+			_player_pixels = padded_pic(_data,
 				_battler_pic(int(player_key[0]), int(player_key[2]), true),
 				Gen2BattleScreenMap.PLAYER_SIDE
 			)
@@ -338,7 +338,13 @@ static func substitute_pixels(strip: PackedByteArray, player_side: bool) -> Pack
 	return out
 
 
-func _padded_pic(pic: Dictionary, side: int) -> PackedByteArray:
+## [param front] is whether `PadFrontpic` runs over this one: a back pic fills
+## its own box and a trainer's is already the whole 7x7, so neither is padded.
+## Static because the placement is the whole of the picture and takes no screen:
+## a check sweeping three caches builds the box the way the renderer does.
+static func padded_pic(
+	data: GameData, pic: Dictionary, side: int, front: bool = false
+) -> PackedByteArray:
 	var box: int = side * TILE
 	var out: PackedByteArray = PackedByteArray()
 	out.resize(box * box)
@@ -347,7 +353,7 @@ func _padded_pic(pic: Dictionary, side: int) -> PackedByteArray:
 
 	var atlas_name: String = String(pic.get("atlas", ""))
 	var cell: Dictionary = Gen2PicImage.atlas_cell(
-		_data.atlas_indices(atlas_name), _data.atlas(atlas_name), pic
+		data.atlas_indices(atlas_name), data.atlas(atlas_name), pic
 	)
 	if cell.is_empty():
 		return out
@@ -356,9 +362,21 @@ func _padded_pic(pic: Dictionary, side: int) -> PackedByteArray:
 	var width: int = mini(int(cell["width"]), box)
 	var height: int = mini(int(cell["height"]), box)
 	var stride: int = int(cell["width"])
-	for y: int in height:
-		for x: int in width:
-			out[y * box + x] = indices[y * stride + x]
+	## `PadFrontpic` does not centre a pic smaller than the 7x7 block: it lays one
+	## blank tile column in front of it and blank tiles above each column, so the
+	## pic is bottom-aligned one column in. The tile numbers `PlaceGraphic` writes
+	## count over the padded block, so a pic left at the corner here is drawn a
+	## column left and a row or two high of where the cartridge draws it.
+	var pad_x: int = 0
+	var pad_y: int = 0
+	if front:
+		@warning_ignore("integer_division")
+		pad_x = Gen2PicImage.frontpic_pad_columns(width / TILE) * TILE
+		@warning_ignore("integer_division")
+		pad_y = Gen2PicImage.frontpic_pad_rows(height / TILE) * TILE
+	for y: int in mini(height, box - pad_y):
+		for x: int in mini(width, box - pad_x):
+			out[(y + pad_y) * box + x + pad_x] = indices[y * stride + x]
 	return out
 
 

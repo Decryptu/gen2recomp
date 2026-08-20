@@ -65,8 +65,34 @@ func native_size() -> Vector2i:
 func clear() -> void:
 	for parent: Node in [_viewport, _native]:
 		for child: Node in parent.get_children():
-			parent.remove_child(child)
-			child.queue_free()
+			drop(child)
+
+
+## Takes a node off the screen now and frees it at the end of the frame.
+##
+## `queue_free` on its own only does the second half: the node stays in the tree,
+## and drawn, until the frame it was dropped on is served. A replacement added on
+## the same frame is then composited over its predecessor rather than instead of
+## it, which is a stale panel showing under the live one for exactly the frame a
+## screenshot catches; inside a [Container] the two are laid out side by side.
+##
+## Static, and the one way a screen drops a child it is replacing.
+static func drop(node: Node) -> void:
+	if node == null or not is_instance_valid(node):
+		return
+	var parent: Node = node.get_parent()
+	if parent != null:
+		parent.remove_child(node)
+	node.queue_free()
+
+
+## The same for every child of [param parent], which is what a row list being
+## rebuilt in place wants.
+static func drop_children(parent: Node) -> void:
+	if parent == null:
+		return
+	for child: Node in parent.get_children():
+		drop(child)
 
 
 ## The viewport itself, for a caller that needs to read the drawn frame.

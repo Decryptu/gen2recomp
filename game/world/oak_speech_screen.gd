@@ -403,7 +403,7 @@ func _show_name_choices() -> void:
 
 
 func _on_name_choice(chosen: String) -> void:
-	_name_menu.queue_free()
+	Gen2Screen.drop(_name_menu)
 	_name_menu = null
 	if chosen == "":
 		_open_naming()
@@ -439,7 +439,7 @@ func _on_named(entered: String) -> void:
 
 
 func _after_naming_fade() -> void:
-	_naming.queue_free()
+	Gen2Screen.drop(_naming)
 	_naming = null
 	_hide_speech(false)
 	if _text_box != null:

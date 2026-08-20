@@ -92,6 +92,29 @@ static func prepare(
 	}
 
 
+## `PlayBattleMusic`'s track, off the request alone.
+##
+## `FindFirstAliveMonAndStartBattle` runs `PlayBattleMusic` in front of
+## `DoBattleTransition`, so the piece starts before the fight is built: the
+## world screen asks here when the transition opens and the battle screen asks
+## again for the same track, which the driver continues rather than restarts.
+## Both read the one request, so neither can pick a different piece.
+static func music_for(
+	request: Dictionary, landmark_id: int, day_period: int, crystal: bool = true
+) -> int:
+	var raw: Variant = request.get("values", request)
+	if not raw is Dictionary:
+		return Gen2Battle.MUSIC_NONE
+	var values: Dictionary = raw as Dictionary
+	var trainer: bool = StringName(values.get("kind", &"")) == &"trainer"
+	return Gen2Battle.battle_music(
+		int(values.get("battle_type", Gen2Battle.BATTLETYPE_NORMAL)),
+		int(values.get("trainer_group", 0)) if trainer else 0,
+		int(values.get("trainer_id", 0)) if trainer else 0,
+		landmark_id, day_period, crystal,
+	)
+
+
 static func fallback_party(
 	data: GameData, first_species: int = 155, level: int = 5, size: int = 2
 ) -> Gen2Party:

@@ -626,7 +626,7 @@ func _leave_mart() -> void:
 
 func _close_mart() -> void:
 	if _mart_hardware != null:
-		_mart_hardware.queue_free()
+		Gen2Screen.drop(_mart_hardware)
 		_mart_hardware = null
 		_mart_view = null
 	_panel.visible = true
@@ -998,7 +998,7 @@ func _open_boxes() -> void:
 ## script with; nothing is waiting here, because the PC's request is still open.
 func _on_boxes_closed(_result: Dictionary) -> void:
 	if _boxes != null:
-		_boxes.queue_free()
+		Gen2Screen.drop(_boxes)
 		_boxes = null
 	_panel.visible = true
 	_service_hardware.visible = true
@@ -1180,7 +1180,7 @@ func _on_card_closed() -> void:
 func _close_card() -> void:
 	if _pokegear == null:
 		return
-	_pokegear.queue_free()
+	Gen2Screen.drop(_pokegear)
 	_pokegear = null
 
 
@@ -1260,7 +1260,7 @@ func _open_town_map(from_request: bool) -> void:
 func _on_town_map_closed() -> void:
 	var chosen: int = _town_map.chosen_spawn() if _town_map != null else -1
 	if _town_map != null:
-		_town_map.queue_free()
+		Gen2Screen.drop(_town_map)
 		_town_map = null
 	_panel.visible = true
 	_service_hardware.visible = true
@@ -1395,8 +1395,7 @@ func _finish(results: Array) -> void:
 func _render_options(override: Array = []) -> void:
 	if _options == null:
 		return
-	for child: Node in _options.get_children():
-		child.queue_free()
+	Gen2Screen.drop_children(_options)
 	var parent: Container = _options
 	if _mode == MODE.MENU and _menu != null and _menu.kind == &"2d":
 		var grid := GridContainer.new()

@@ -1082,6 +1082,48 @@ func test_a_trainer_battle_opens_on_the_track_its_class_names() -> void:
 	)
 
 
+## `PlayBattleMusic` runs on frame 791 of the cartridge trace and
+## `DoBattleTransition` on 793, so the fight's own track is chosen and started
+## before the animation rather than 170 frames after it. The two screens share
+## one driver, the way the cartridge has one APU, and both read the one request,
+## so the battle screen asks for a piece already playing and the driver continues
+## it instead of restarting it.
+func test_the_battle_track_is_chosen_before_the_transition_on_one_driver() -> void:
+	await _open_world()
+	await _walk_one(Vector2i.RIGHT)
+	for _frame: int in 400:
+		_world_screen.advance_frame()
+		if _world_screen.battle_transition_running():
+			break
+		var pending: Dictionary = _world_screen._world.pending_script_input()
+		if StringName(pending.get("type", &"")) in [&"text", &"button"]:
+			_world_screen._advance_script_input()
+	assert_true(_world_screen.battle_transition_running())
+	var chosen: int = Gen2WorldBattleAdapter.music_for(
+		_world_screen._battle_transition_request,
+		_world_screen._world.landmark(),
+		_world_screen.time_of_day,
+		Gen2WorldState.is_crystal_profile(_world_screen._data)
+	)
+	assert_eq(chosen, Gen2Battle.MUSIC_JOHTO_GYM_LEADER_BATTLE)
+	var driver: Gen2AudioPlayer = _world_screen._audio_player
+	assert_not_null(driver)
+
+	## The transition is already running, so the overlay is what the rest of its
+	## frames build rather than another encounter.
+	for _frame: int in 600:
+		if _battle_child() != null:
+			break
+		_world_screen.advance_frame()
+	await get_tree().process_frame
+	var host: Gen2BattleScreen = _battle_child()
+	assert_not_null(host)
+	assert_same(host._audio_player, driver, "one driver, the way there is one APU")
+	assert_eq(host.battle_music(), chosen, "and the same piece either side")
+	## The driver is the world's child, so the fight leaving cannot take it.
+	assert_eq(driver.get_parent(), _world_screen)
+
+
 ## `StartBattle`: `DoBattleTransition` owns every frame between the encounter
 ## resolving and the battle screen existing, and the map is what it draws over.
 func test_a_battle_runs_its_transition_before_the_overlay_exists() -> void:

@@ -65,9 +65,7 @@ static func row(separation: int = GAP_MD) -> HBoxContainer:
 static func clear(container: Node) -> void:
 	if container == null:
 		return
-	for child: Node in container.get_children():
-		container.remove_child(child)
-		child.queue_free()
+	Gen2Screen.drop_children(container)
 
 
 static func spacer() -> Control:

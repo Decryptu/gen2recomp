@@ -1951,7 +1951,7 @@ func set_screen(screen: Gen2Screen) -> void:
 ## Frees the overlay, since it lives in a screen this node does not own.
 func _exit_tree() -> void:
 	if _view != null:
-		_view.queue_free()
+		Gen2Screen.drop(_view)
 		_view = null
 
 
@@ -2106,8 +2106,7 @@ func _render_options(values: Array, cursor_index: int, label_for: Callable) -> v
 		_pack_view.visible = false
 	if _options == null:
 		return
-	for child: Node in _options.get_children():
-		child.queue_free()
+	Gen2Screen.drop_children(_options)
 	for index: int in values.size():
 		var label := Label.new()
 		var option_text: String = label_for.call(values[index])

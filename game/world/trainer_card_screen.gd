@@ -179,7 +179,7 @@ func _image_from(indices: PackedByteArray, attributes: PackedInt32Array) -> Imag
 ## shared counter is on.
 func _refresh_badges() -> void:
 	for node: Node in _badges:
-		node.queue_free()
+		Gen2Screen.drop(node)
 	_badges = []
 	if _page == Gen2TrainerCard.PAGE_1 or _data == null:
 		return

@@ -143,7 +143,7 @@ func _start() -> void:
 
 
 func _on_splash_finished() -> void:
-	_splash.queue_free()
+	Gen2Screen.drop(_splash)
 	_splash = null
 	_start_profile_setup()
 
@@ -164,7 +164,7 @@ func _start_profile_setup() -> void:
 
 func _on_gender_chosen(chosen: int) -> void:
 	_gender = chosen
-	_gender_screen.queue_free()
+	Gen2Screen.drop(_gender_screen)
 	_gender_screen = null
 	_start_clock()
 
@@ -184,7 +184,7 @@ func _start_clock() -> void:
 
 func _on_clock_set(day: int, hour: int, minute: int) -> void:
 	_clock = {"day": day, "hour": hour, "minute": minute}
-	_clock_screen.queue_free()
+	Gen2Screen.drop(_clock_screen)
 	_clock_screen = null
 	_start_speech()
 

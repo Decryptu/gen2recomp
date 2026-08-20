@@ -185,3 +185,50 @@ func test_a_wild_request_carries_its_own_dvs_into_the_battle() -> void:
 	assert_eq(
 		(rolled["battle"] as Gen2Battle).enemy.dvs, Gen2BattleMon.PERFECT_DVS
 	)
+
+
+## `PlayBattleMusic` runs in front of `DoBattleTransition`, so the track has to
+## be answerable from the request alone, before a battle exists to read. It is
+## the same answer `Gen2Battle.battle_music` gives the prepared fight, which is
+## what lets the driver continue the piece rather than restart it behind the
+## transition.
+func test_the_battle_track_is_answerable_from_the_request_alone() -> void:
+	var wild: Dictionary = {"values": {"kind": &"wild", "pokemon": SPECIES_TWO, "level": 5}}
+	assert_eq(
+		Gen2WorldBattleAdapter.music_for(wild, Gen2Battle.LANDMARK_NONE, Gen2WorldPalette.TIME_DAY),
+		Gen2Battle.battle_music(
+			Gen2Battle.BATTLETYPE_NORMAL, 0, 0,
+			Gen2Battle.LANDMARK_NONE, Gen2WorldPalette.TIME_DAY
+		)
+	)
+	## A trainer's own two numbers are the request's, and a wild request holding
+	## neither must not be read as trainer class 0's row by accident.
+	var leader: Dictionary = {"values": {
+		"kind": &"trainer",
+		"trainer_group": Gen2Battle.TRAINER_CLASS_CHAMPION,
+		"trainer_id": 1,
+	}}
+	assert_eq(
+		Gen2WorldBattleAdapter.music_for(
+			leader, Gen2Battle.LANDMARK_NONE, Gen2WorldPalette.TIME_DAY
+		),
+		Gen2Battle.MUSIC_CHAMPION_BATTLE
+	)
+	## `BATTLETYPE_SUICUNE` sits in front of both compares, so it wins over the
+	## class the request also carries.
+	var roaming: Dictionary = {"values": {
+		"kind": &"wild", "pokemon": SPECIES_TWO, "level": 5,
+		"battle_type": Gen2Battle.BATTLETYPE_ROAMING,
+	}}
+	assert_eq(
+		Gen2WorldBattleAdapter.music_for(
+			roaming, Gen2Battle.LANDMARK_NONE, Gen2WorldPalette.TIME_NIGHT
+		),
+		Gen2Battle.MUSIC_SUICUNE_BATTLE
+	)
+	assert_eq(
+		Gen2WorldBattleAdapter.music_for(
+			{"values": 5}, Gen2Battle.LANDMARK_NONE, Gen2WorldPalette.TIME_DAY
+		),
+		Gen2Battle.MUSIC_NONE
+	)
