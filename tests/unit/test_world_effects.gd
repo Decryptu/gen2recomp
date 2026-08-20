@@ -355,3 +355,114 @@ func test_the_heal_machine_draws_nothing_for_an_empty_party() -> void:
 	var effects := Gen2WorldEffects.new()
 	effects.start_heal_machine(0, 0)
 	assert_false(effects.sprites_active())
+
+
+## The optional half of an actor's contract: an actor that defines neither is
+## offered neither, which is what keeps every actor already written working.
+class TestPetActor extends TestActor:
+	var pressed: Array = []
+	var answer: bool = true
+	var outbox: Array = []
+
+	func interact(cell: Vector2i, facing: int) -> bool:
+		pressed.append({"cell": cell, "facing": facing})
+		return answer
+
+	func take_requests() -> Array:
+		var taken: Array = outbox
+		outbox = []
+		return taken
+
+
+func test_an_actor_without_the_optional_methods_is_offered_neither() -> void:
+	var world: Gen2WorldAPI = _actor_world()
+	var actors := Gen2WorldActors.new()
+	actors.set_actors([TestActor.new()])
+	actors.set_world(world)
+	assert_false(actors.interact(Vector2i(4, 3), Gen2WorldSprite.FACING_UP))
+	assert_eq(actors.take_requests(), [])
+	RomCache.clear(ActorFixture.directory())
+
+
+func test_the_first_actor_answering_a_press_consumes_it() -> void:
+	var world: Gen2WorldAPI = _actor_world()
+	var first := TestPetActor.new()
+	first.answer = false
+	var second := TestPetActor.new()
+	var third := TestPetActor.new()
+	var actors := Gen2WorldActors.new()
+	actors.set_actors([first, second, third])
+	actors.set_world(world)
+	assert_true(actors.interact(Vector2i(4, 3), Gen2WorldSprite.FACING_UP))
+	assert_eq(first.pressed.size(), 1, "Registration order, and the refusal moves on.")
+	assert_eq(second.pressed[0]["cell"], Vector2i(4, 3))
+	assert_eq(int(second.pressed[0]["facing"]), Gen2WorldSprite.FACING_UP)
+	assert_eq(third.pressed.size(), 0, "The first true consumes the press.")
+	RomCache.clear(ActorFixture.directory())
+
+
+## A pose the press changed is on screen on the frame it was pressed, rather
+## than waiting for the next advance.
+func test_a_consumed_press_recollects_the_sprites() -> void:
+	var world: Gen2WorldAPI = _actor_world()
+	var actor := TestPetActor.new()
+	actor.out = [{"icon": 1, "position_cells": Vector2(4, 4)}]
+	var actors := Gen2WorldActors.new()
+	actors.set_actors([actor])
+	actors.set_world(world)
+	assert_eq(int(actors.sprites()[0]["emote"]), Gen2WorldActors.EMOTE_NONE)
+	actor.out = [{
+		"icon": 1, "position_cells": Vector2(4, 4), "emote": Gen2WorldActors.EMOTE_HEART,
+	}]
+	actors.interact(Vector2i(4, 3), Gen2WorldSprite.FACING_UP)
+	assert_eq(int(actors.sprites()[0]["emote"]), Gen2WorldActors.EMOTE_HEART)
+	RomCache.clear(ActorFixture.directory())
+
+
+## An index outside `RomLayout.EMOTE_NAMES` is no emote rather than a wrong
+## sheet, the way art the cache does not carry is dropped.
+func test_an_out_of_range_emote_is_no_emote() -> void:
+	var world: Gen2WorldAPI = _actor_world()
+	var actor := TestActor.new()
+	actor.out = [{"icon": 1, "position_cells": Vector2.ZERO, "emote": RomLayout.EMOTE_COUNT}]
+	var actors := Gen2WorldActors.new()
+	actors.set_actors([actor])
+	actors.set_world(world)
+	assert_eq(int(actors.sprites()[0]["emote"]), Gen2WorldActors.EMOTE_NONE)
+	RomCache.clear(ActorFixture.directory())
+
+
+## An emote is state, so putting one up is a change the screen redraws for.
+func test_raising_an_emote_is_a_change_the_frame_reports() -> void:
+	var world: Gen2WorldAPI = _actor_world()
+	var actor := TestActor.new()
+	actor.out = [{"icon": 2, "position_cells": Vector2.ZERO}]
+	var actors := Gen2WorldActors.new()
+	actors.set_actors([actor])
+	actors.set_world(world)
+	assert_false(actors.advance_frame(), "A standing sprite is not a change.")
+	actor.out = [{
+		"icon": 2, "position_cells": Vector2.ZERO, "emote": Gen2WorldActors.EMOTE_HEART,
+	}]
+	assert_true(actors.advance_frame())
+	RomCache.clear(ActorFixture.directory())
+
+
+func test_the_outbox_passes_a_cry_and_drops_everything_else() -> void:
+	var world: Gen2WorldAPI = _actor_world()
+	var actor := TestPetActor.new()
+	actor.outbox = [
+		{"kind": &"cry", "species": 155},
+		{"kind": &"cry", "species": 0},
+		{"kind": &"warp", "map": Vector2i(1, 1)},
+		"not a dictionary",
+	]
+	var actors := Gen2WorldActors.new()
+	actors.set_actors([actor])
+	actors.set_world(world)
+	var taken: Array = actors.take_requests()
+	assert_eq(taken.size(), 1, "A zero species, an unknown kind and a non-entry are dropped.")
+	assert_eq(StringName(taken[0]["kind"]), Gen2WorldActors.REQUEST_CRY)
+	assert_eq(int(taken[0]["species"]), 155)
+	assert_eq(actors.take_requests(), [], "The drain empties the outbox.")
+	RomCache.clear(ActorFixture.directory())

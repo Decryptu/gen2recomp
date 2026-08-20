@@ -29,6 +29,8 @@ extends SceneTree
 ## (`BuyMenu`, talked open from the cell in front of a shop's counter, as
 ## `crystal 1 8 ... mart 3 3`), `pokepic`
 ## (`Script_pokepic`'s box over the map, holding Chikorita),
+## `pet_actor` (a mod's world actor one cell in front of the player, pressed with
+## A so it wears the heart `showemote` puts over a map object),
 ## `warp` (`MapSetupScript_Door` at its whitest: the player is walked up onto the
 ## warp tile named by the two numbers below it, and the picture is
 ## `FadeOutToWhite`'s last order, which is the frame the new map is loaded on:

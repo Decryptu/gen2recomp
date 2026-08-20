@@ -576,3 +576,137 @@ func test_the_grass_over_a_sprite_leaves_the_transition_s_own_cells_to_it() -> v
 		"a rectangle straddling the grid is split on it, not dropped whole"
 	)
 	renderer.free()
+
+
+## The optional half of the actor contract, through the production path: the
+## press only the actors are offered, the emote a renderer reads off the same
+## resolved list, and the cry the host plays because a mod may not.
+const PET_ACTOR_SOURCE: String = """extends RefCounted
+
+var world = null
+var petted: bool = false
+var pressed: Array = []
+var cries: Array = []
+
+func set_world(value) -> void:
+	world = value
+
+func advance_frame() -> void:
+	pass
+
+func sprites() -> Array:
+	var entry: Dictionary = {"icon": 1, "position_cells": Vector2(7, 7)}
+	if petted:
+		entry["emote"] = 4
+	return entry_list(entry)
+
+func entry_list(entry: Dictionary) -> Array:
+	return [entry]
+
+func interact(cell: Vector2i, facing: int) -> bool:
+	pressed.append(cell)
+	if cell != Vector2i(7, 7):
+		return false
+	petted = true
+	cries.append({"kind": &"cry", "species": 155})
+	return true
+
+func take_requests() -> Array:
+	var out: Array = cries
+	cries = []
+	return out
+"""
+
+
+func test_an_actor_is_offered_the_press_and_the_host_spends_its_cry() -> void:
+	var actor: Object = _script(PET_ACTOR_SOURCE).new()
+	assert_true(Gen2ModHost.instance().register_world_actor(&"pet", actor)["ok"])
+	var packed: PackedScene = load("res://game/world/world_screen.tscn")
+	_world_screen = packed.instantiate() as Gen2WorldScreen
+	_world_screen.map_group = Fixture.MAP_GROUP
+	_world_screen.map_number = Fixture.MAP_NUMBER
+	_world_screen.start_cell = Vector2i(7, 6)
+	_world_screen.set_data(_data)
+	add_child(_world_screen)
+	await get_tree().process_frame
+	_world_screen.set_process(false)
+	_world_screen._world.player_facing = Gen2WorldSprite.FACING_DOWN
+
+	assert_true(_world_screen.interact(), "The faced cell is the actor's own.")
+	assert_eq(actor.get("pressed"), [Vector2i(7, 7)], "facing_cell(), not the player's")
+	assert_eq(
+		int(_world_screen._actors.sprites()[0]["emote"]), Gen2WorldActors.EMOTE_HEART,
+		"The pose the press changed is drawn on the frame it was pressed."
+	)
+	## The outbox is drained by the world frame, not by the press.
+	assert_eq((actor.get("cries") as Array).size(), 1)
+	_world_screen.advance_frames(1)
+	assert_eq((actor.get("cries") as Array).size(), 0, "One drain empties it.")
+
+
+## An actor may never shadow a cartridge interaction: the press reaches it only
+## when `Gen2WorldAPI.interact()` answered nothing at all.
+func test_an_actor_is_not_offered_a_press_a_cartridge_object_answered() -> void:
+	var actor: Object = _script(PET_ACTOR_SOURCE).new()
+	assert_true(Gen2ModHost.instance().register_world_actor(&"pet", actor)["ok"])
+	var packed: PackedScene = load("res://game/world/world_screen.tscn")
+	_world_screen = packed.instantiate() as Gen2WorldScreen
+	_world_screen.map_group = Fixture.MAP_GROUP
+	_world_screen.map_number = Fixture.MAP_NUMBER
+	_world_screen.start_cell = Vector2i(7, 6)
+	_world_screen.set_data(_data)
+	add_child(_world_screen)
+	await get_tree().process_frame
+	_world_screen.set_process(false)
+	var world: Gen2WorldAPI = _world_screen._world
+	var object: Gen2WorldObject = world.objects[0]
+	object.active = true
+	object.cell = Vector2i(7, 7)
+	world.player_facing = Gen2WorldSprite.FACING_DOWN
+
+	assert_true(_world_screen.interact())
+	assert_eq(actor.get("pressed"), [], "The object answered, so nothing was offered.")
+
+
+## R27's bargain: the mod names a cell and the HOST runs the map's own script, so
+## the bag, the event flag, the text box and the fanfare stay the world's.
+func test_a_mods_hidden_item_request_runs_the_maps_own_script_when_the_world_is_idle() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(Fixture.directory()))
+	scripts["48:6300"] = [40, 0, 3, Gen2WorldScript.END]
+	RomCache.write_json(RomCache.world_scripts_path(Fixture.directory()), scripts)
+	_data = GameData.open_directory(Fixture.directory())
+	var packed: PackedScene = load("res://game/world/world_screen.tscn")
+	_world_screen = packed.instantiate() as Gen2WorldScreen
+	_world_screen.map_group = Fixture.MAP_GROUP
+	_world_screen.map_number = Fixture.MAP_NUMBER
+	_world_screen.start_cell = Vector2i(7, 6)
+	_world_screen.set_data(_data)
+	add_child(_world_screen)
+	await get_tree().process_frame
+	_world_screen.set_process(false)
+	var world: Gen2WorldAPI = _world_screen._world
+	world.current_map.events["bg_events"] = [
+		{"x": 2, "y": 3, "type": Gen2WorldAPI.BGEVENT_ITEM, "script": 0x6300},
+	]
+
+	var listed: Array = world.hidden_items()
+	assert_eq(listed.size(), 1, JSON.stringify(listed))
+	assert_eq(listed[0]["cell"], Vector2i(2, 3))
+	assert_false(bool(listed[0]["taken"]))
+
+	## Nowhere near the player and never faced: naming the cell is the whole ask.
+	Gen2ModHost.instance().request_hidden_item(Vector2i(2, 3))
+	_world_screen.advance_frames(1)
+	assert_true(world.script_busy(), "The map's own script is running, in the world's own box.")
+	assert_true(_world_screen._text_box.visible)
+	assert_true(
+		("Found" in _world_screen._text_box.text_lines()[0]),
+		"`verbosegiveitem`'s own FOUND text, in the world's own box."
+	)
+	## What the script does from there is the world's, and is covered where the
+	## `hiddenitem` path is owned (`test_world_api.gd`). What is this layer's is
+	## that the ask was spent exactly once: the queue is empty, and the following
+	## frames do not run it again while its own box is still up.
+	assert_eq(Gen2ModHost.instance().take_hidden_item_requests(), [])
+	_world_screen.advance_frames(3)
+	assert_eq(world.state.items().get(3, 0), 0, "The receipt has not been pressed past.")

@@ -424,9 +424,10 @@ func _draw() -> void:
 	var battlers_only: bool = _transition_sprites == Gen2BattleTransition.SPRITES_BATTLERS
 	## A mod's actors are drawn in the same pass and sorted into the same rows:
 	## a follower one cell below an NPC has to be drawn over it, and one cell
-	## above it under it. They carry no emote, no effect sprite and no grass of
-	## their own beyond the tuft the map draws over anything standing in it, and
-	## they are map objects here, so the respawn takes them with the rest.
+	## above it under it. They carry no effect sprite and no grass of their own
+	## beyond the tuft the map draws over anything standing in it, an emote only
+	## when the entry asked for one, and they are map objects here, so the
+	## respawn takes them with the rest.
 	var drawn: Array = []
 	for object: Gen2WorldObject in objects:
 		if battlers_only and object.index != _transition_opponent:
@@ -570,6 +571,12 @@ func _draw_actor(
 	draw_texture(texture, pixel)
 	if _in_grass(Vector2i(roundi(cell_position.x), roundi(cell_position.y))):
 		_draw_grass_over(pixel, page, palettes, tile_origin, tile_offset, window_size)
+	## The same bubble a map object's `showemote` puts up, over an actor that
+	## asked for one. Drawn after the grass, as an object's is: `SpawnEmote` is
+	## its own OAM and stands over the tuft rather than behind it.
+	var emote: int = int(sprite.get("emote", Gen2WorldActors.EMOTE_NONE))
+	if emote != Gen2WorldActors.EMOTE_NONE:
+		_draw_emote(emote, pixel)
 
 
 ## The object pass's own order, with a mod's actors sorted into it: the row a

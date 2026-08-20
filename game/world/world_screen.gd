@@ -529,6 +529,8 @@ func advance_frame() -> void:
 			_renderer.refresh()
 	if _actors != null and _actors.advance_frame() and _renderer != null:
 		_renderer.refresh()
+	_spend_actor_requests()
+	_spend_hidden_item_requests()
 	_advance_forced_movement()
 	_advance_held_direction()
 	if _objects_may_move() and _world.advance_object_steps_frame(_object_random) \
@@ -1283,7 +1285,12 @@ func interact() -> bool:
 		return false
 	var results: Array = _world.interact()
 	if results.is_empty():
-		return false
+		## Only here, after every cartridge branch `PlayerEvents` tries answered
+		## nothing: an actor can never shadow an object, a background event or a
+		## tile branch. Its own pose is all it changes, so no player event is
+		## spent and the sign timer stands.
+		return _actors != null \
+			and _actors.interact(_world.facing_cell(), _world.player_facing)
 	## `OWPlayerInput`, the last branch `PlayerEvents` tries, and a player event
 	## like the rest of them.
 	_zero_map_name_sign_timer()
@@ -1519,6 +1526,68 @@ class PreviewEncounters extends RefCounted:
 
 	func battle_finished(_id: StringName, _result: Variant) -> void:
 		pass
+
+
+## Public screenshot driver for the actor seam's optional half, which otherwise
+## needs a mod: a Pokemon one cell behind the player, pressed with A so it is
+## drawn wearing the heart the press put up. The press and the cry go through
+## the host's own path; only the actor is synthetic.
+func preview_pet_actor() -> void:
+	if _world == null or _actors == null or _renderer == null:
+		return
+	## Faced up so the bubble, which `MovementFunction_Emote` puts two rows above
+	## the sprite, is clear of the player rather than behind them.
+	_world.player_facing = Gen2WorldSprite.FACING_UP
+	_actors.set_actors([PreviewPet.new(_world)])
+	interact()
+	advance_frames(1)
+	_script_prompt = "Debug pet actor preview"
+	_renderer.refresh()
+	_refresh_labels()
+
+
+## What a mod's actor is, in the fewest lines that exercise the optional half.
+class PreviewPet extends RefCounted:
+	const CYNDAQUIL: int = 155
+
+	var _world: Gen2WorldAPI = null
+	var _petted: bool = false
+	var _cried: bool = false
+
+	func _init(world: Gen2WorldAPI) -> void:
+		_world = world
+
+	func set_world(world: Gen2WorldAPI) -> void:
+		_world = world
+
+	func advance_frame() -> void:
+		pass
+
+	func sprites() -> Array:
+		var entry: Dictionary = {
+			"icon": _world.data.mon_menu_icon(CYNDAQUIL),
+			"facing": _world.player_facing,
+			"position_cells": Vector2(_cell()),
+		}
+		if _petted:
+			entry["emote"] = Gen2WorldActors.EMOTE_HEART
+		return [entry]
+
+	func interact(cell: Vector2i, _facing: int) -> bool:
+		if cell != _cell():
+			return false
+		_petted = true
+		return true
+
+	func take_requests() -> Array:
+		if not _petted or _cried:
+			return []
+		_cried = true
+		return [{"kind": Gen2WorldActors.REQUEST_CRY, "species": CYNDAQUIL}]
+
+	## The faced cell, so a press with nothing in front of the player reaches it.
+	func _cell() -> Vector2i:
+		return _world.facing_cell()
 
 
 ## Public screenshot driver for `Script_pokepic`'s box. The scripts that run one
@@ -2840,15 +2909,10 @@ func _open_pokedex() -> void:
 	_refresh_labels()
 
 
-## The entry screen's CRY button. `PlayCry` is an effect, not music, so it goes
-## through the same player a script's `cry` command does.
+## The entry screen's CRY button, which is one caller of [method
+## _play_species_cry] rather than a path of its own.
 func _on_pokedex_cry_requested(species: int) -> void:
-	if _audio_player == null or _data == null:
-		return
-	var record: Dictionary = _data.species_cry(species)
-	if record.is_empty():
-		return
-	_audio_player.play_record(record, &"cry", _audio_assets())
+	_play_species_cry(species)
 
 
 func _on_pokedex_closed() -> void:
@@ -4149,6 +4213,61 @@ func _play_current_map_music() -> void:
 	if record.is_empty():
 		return
 	_audio_player.play_record(record, &"map_music", _audio_assets())
+
+
+## An actor's one-shot outbox, drained once a world frame. A mod may not play a
+## sound, so it asks for one and the host spends it: the same bargain the shiny
+## pulse already has, with no dedup window needed since the mod asks once.
+func _spend_actor_requests() -> void:
+	if _actors == null:
+		return
+	for request: Dictionary in _actors.take_requests():
+		if StringName(request["kind"]) == Gen2WorldActors.REQUEST_CRY:
+			_play_species_cry(int(request["species"]))
+
+
+## A mod's hidden-item asks, spent on the first world frame nothing else owns.
+## The map's own script runs through the ordinary path, so the box, the fanfare
+## and the pacing are the world screen's exactly as they are for a player walking
+## onto the cell; the mod named a cell and nothing else.
+##
+## Only one is spent per frame, since the first one's script owns the world until
+## its box is pressed past, and the rest wait in the host's queue.
+func _spend_hidden_item_requests() -> void:
+	if _world == null or not _world_idle_for_mod_request():
+		return
+	var requests: Array[Vector2i] = Gen2ModHost.instance().take_hidden_item_requests()
+	for index: int in requests.size():
+		var results: Array = _world.take_hidden_item(requests[index])
+		if results.is_empty():
+			continue
+		_zero_map_name_sign_timer()
+		_show_script_results(results)
+		## What is left goes back, in order, rather than being dropped on the
+		## floor by the drain that could only spend one of them.
+		Gen2ModHost.instance().requeue_hidden_items(requests.slice(index + 1))
+		return
+
+
+## Nothing of the world's own is running, which is the gate [method interact]
+## applies plus a box or a script still holding the screen: a request may not
+## open a text box over one that is already up.
+func _world_idle_for_mod_request() -> bool:
+	return not _overlay_open() and not _field_move_text \
+		and _oak_pc_pages.is_empty() and not _world.phone_ring_active() \
+		and not _world.fishing_busy() and not _world.script_busy() \
+		and (_text_box == null or not _text_box.visible)
+
+
+## `Script_cry`'s own path and the Pokedex CRY button's: `PlayCry` is an effect
+## and not music, so it goes through the player a script's `cry` command uses.
+func _play_species_cry(species: int) -> void:
+	if _audio_player == null or _data == null:
+		return
+	var record: Dictionary = _data.species_cry(species)
+	if record.is_empty():
+		return
+	_audio_player.play_record(record, &"cry", _audio_assets())
 
 
 func _play_ledge_hop_sfx() -> void:
