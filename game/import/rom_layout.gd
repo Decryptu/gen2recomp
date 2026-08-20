@@ -1919,6 +1919,11 @@ const GOLD_SILVER: Dictionary = {
 	"headbutt_tree_gfx": 0x8CB0B,
 	"cut_tree_gfx": 0x8CC04,
 	"cut_grass_gfx": 0x8CC44,
+	## `HealMachineAnim.HealMachineGFX` and the palette `.LoadPalettes` copies
+	## into wOBPals2's PAL_OW_TREE slot. Neither has a table either: both are
+	## located by their own bytes, which occur once per dump.
+	"heal_machine_gfx": 0x127D5,
+	"heal_machine_palette": 0x12828,
 	"mart_table": 0x162FE,
 	"default_mart": 0x16469,
 	"bargain_mart": 0x15EDA,
@@ -2311,6 +2316,8 @@ const CRYSTAL: Dictionary = {
 	"headbutt_tree_gfx": 0x8C893,
 	"cut_tree_gfx": 0x8C98C,
 	"cut_grass_gfx": 0x8C9CC,
+	"heal_machine_gfx": 0x123FC,
+	"heal_machine_palette": 0x12451,
 	"mart_table": 0x160A9,
 	"default_mart": 0x16214,
 	"bargain_mart": 0x15C51,

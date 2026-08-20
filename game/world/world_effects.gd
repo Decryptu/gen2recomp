@@ -25,6 +25,45 @@ const SPRITE_HEADBUTT_TREE: StringName = &"headbutt_tree"
 const SPRITE_CUT_TREE: StringName = &"cut_tree"
 const SPRITE_CUT_LEAF: StringName = &"cut_grass"
 const SPRITE_SHADOW: StringName = &"shadow"
+const SPRITE_HEAL_MACHINE: StringName = &"heal_machine"
+
+## `HealMachineAnim`'s two OAM tables, as (screen pixel, tile, flip). An OAM byte
+## pair is (y + 16, x + 8), so each `dbsprite` is read back to the pixel the
+## renderer draws at. `.PC_ElmsLab_OAM` starts with the two `$7c` halves of the
+## machine itself, which `.PC_LoadBallsOntoMachine` places before the party loop
+## and `.HOF_LoadBallsOntoMachine` does not; the six behind them are the balls,
+## one a party member.
+const HEAL_MACHINE_BAR: Array = [
+	[Vector2i(26, 16), 0, false],
+	[Vector2i(30, 16), 0, false],
+]
+const HEAL_MACHINE_BALLS: Array = [
+	[Vector2i(24, 22), 1, false],
+	[Vector2i(32, 22), 1, true],
+	[Vector2i(24, 27), 1, false],
+	[Vector2i(32, 27), 1, true],
+	[Vector2i(24, 32), 1, false],
+	[Vector2i(32, 32), 1, true],
+]
+## `.HOF_OAM`, whose six balls are a ring rather than two columns.
+const HEAL_MACHINE_HOF_BALLS: Array = [
+	[Vector2i(73, 44), 1, false],
+	[Vector2i(78, 44), 1, false],
+	[Vector2i(69, 43), 1, false],
+	[Vector2i(82, 43), 1, false],
+	[Vector2i(65, 41), 1, false],
+	[Vector2i(85, 41), 1, false],
+]
+## `.PlaceHealingMachineTile`'s `bcpixel 2, 4`, added to every entry of the table
+## on Elm's Lab alone; the other two machine types add nothing.
+const HEAL_MACHINE_ELMS_LAB_OFFSET := Vector2i(16, 32)
+const HEAL_MACHINE_ELMS_LAB: int = 1
+const HEAL_MACHINE_HALL_OF_FAME: int = 2
+## `.LoadBallsOntoMachine`'s `ld c, 30 / call DelayFrames` and
+## `.FlashPalettes8Times`' eight rounds of ten, which is what the script waits.
+const HEAL_MACHINE_BALL_FRAMES: int = 30
+const HEAL_MACHINE_FLASH_INTERVAL: int = 10
+const HEAL_MACHINE_FLASHES: int = 8
 
 ## constants/sprite_data_constants.asm. Every emote-object spawn names its
 ## palette: PAL_OW_EMOTE for the dust and the emote bubbles, PAL_OW_TREE for the
@@ -203,6 +242,30 @@ func start_boulder_dust(object_index: int, cell: Vector2i, direction: Vector2i, 
 	})
 
 
+## `HealMachineAnim`, which is neither a map object nor an object-tracking
+## sprite: its OAM is written at fixed screen pixels while the script waits, and
+## it wears `gfx/overworld/heal_machine.pal` over `wOBPals2`' PAL_OW_TREE slot
+## rather than an overworld palette, which is what `palette: -1` says here.
+##
+## [param balls] is `wPartyCount`; the source returns before writing anything
+## when it is zero.
+func start_heal_machine(machine_type: int, balls: int) -> void:
+	if balls <= 0:
+		return
+	_sprites.append({
+		"kind": SPRITE_HEAL_MACHINE,
+		"cell": Vector2i.ZERO,
+		"object_index": -1,
+		"screen": true,
+		"palette": -1,
+		"frame": 0,
+		"duration": balls * HEAL_MACHINE_BALL_FRAMES
+			+ HEAL_MACHINE_FLASHES * HEAL_MACHINE_FLASH_INTERVAL,
+		"machine_type": clampi(machine_type, 0, HEAL_MACHINE_HALL_OF_FAME),
+		"balls": mini(balls, HEAL_MACHINE_BALLS.size()),
+	})
+
+
 func advance_frame() -> bool:
 	var moved: bool = false
 	var running: Array = []
@@ -255,7 +318,9 @@ func sprites() -> Array:
 			"kind": sprite["kind"],
 			"cell": sprite["cell"],
 			"object_index": int(sprite["object_index"]),
+			"screen": bool(sprite.get("screen", false)),
 			"palette": int(sprite["palette"]),
+			"rotation": _palette_rotation(sprite),
 			"frame": int(sprite["frame"]),
 			"tiles": _tiles_for(sprite),
 		})
@@ -358,6 +423,33 @@ func _tiles_for(sprite: Dictionary) -> Array:
 				{"offset": at, "tile": 0, "flip_x": false},
 				{"offset": at + Vector2i(8, 0), "tile": 0, "flip_x": true},
 			]
+		SPRITE_HEAL_MACHINE:
+			## One ball a party member, thirty frames apart, and the machine's
+			## own two tiles under them for every type but the Hall of Fame.
+			## Nothing is taken away again: the flashes run over the finished
+			## picture.
+			var machine_type: int = int(sprite["machine_type"])
+			var shown: int = clampi(
+				int(float(frame) / float(HEAL_MACHINE_BALL_FRAMES)) + 1,
+				0, int(sprite["balls"])
+			)
+			var entries: Array = []
+			if machine_type != HEAL_MACHINE_HALL_OF_FAME:
+				entries.append_array(HEAL_MACHINE_BAR)
+				entries.append_array(HEAL_MACHINE_BALLS.slice(0, shown))
+			else:
+				entries.append_array(HEAL_MACHINE_HOF_BALLS.slice(0, shown))
+			var shift := Vector2i.ZERO
+			if machine_type == HEAL_MACHINE_ELMS_LAB:
+				shift = HEAL_MACHINE_ELMS_LAB_OFFSET
+			var machine: Array = []
+			for entry: Array in entries:
+				machine.append({
+					"offset": (entry[0] as Vector2i) + shift,
+					"tile": int(entry[1]),
+					"flip_x": bool(entry[2]),
+				})
+			return machine
 		SPRITE_BOULDER_DUST:
 			## `SetFacingBoulderDust` swaps FACING_BOULDER_DUST_1 and _2 on bit 1
 			## of the step frame, and each draws its one tile four times in a
@@ -373,6 +465,20 @@ func _tiles_for(sprite: Dictionary) -> Array:
 				})
 			return dust
 	return []
+
+
+## `.FlashPalettes` rotates the four colours of the palette left by one and
+## `.FlashPalettes8Times` calls it once every ten frames, so a sprite wearing its
+## own palette reports which rotation is up. Eight rotations of four leave the
+## palette where it started, which is why the animation needs no restore.
+func _palette_rotation(sprite: Dictionary) -> int:
+	if StringName(sprite["kind"]) != SPRITE_HEAL_MACHINE:
+		return 0
+	var flashes_at: int = int(sprite["balls"]) * HEAL_MACHINE_BALL_FRAMES
+	var frame: int = int(sprite["frame"])
+	if frame < flashes_at:
+		return 0
+	return (int(float(frame - flashes_at) / float(HEAL_MACHINE_FLASH_INTERVAL)) + 1) & 3
 
 
 ## `BattleAnim_Sine` and `..._Cosine` over `BattleAnimSineWave`, which is what
