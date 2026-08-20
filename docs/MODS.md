@@ -36,7 +36,7 @@ user://mods/<id>/
 | `id` | Lowercase `[a-z0-9][a-z0-9_-]*`; addresses the directory and registry keys |
 | `name` | Shown to the player |
 | `version` | The mod's own version, not the host's |
-| `api_version` | Between `Gen2ModManifest.MIN_API_VERSION` and `API_VERSION`. Declare the oldest host you need: 5 for the run's rules, 4 for types, matchups, mod art and event mutators, 3 for mart rows and named axes, 2 for visible encounters, 1 for everything else |
+| `api_version` | Between `Gen2ModManifest.MIN_API_VERSION` and `API_VERSION`. Declare the oldest host you need: 6 for `occupied` in the visible-encounter context, 5 for the run's rules, 4 for types, matchups, mod art and event mutators, 3 for mart rows and named axes, 2 for visible encounters, 1 for everything else |
 | `entry` | A `.gd` path inside the mod directory, or inside the pack when there is one |
 | `pack` | Optional `.pck` or `.zip` beside `mod.json`, holding the mod's files |
 | `description` | Optional |
@@ -202,10 +202,10 @@ belongs to the first one followed, so it is on screen once.
 ## Adding content
 
 `mods/examples/new_content/` is every non-renderer surface of the contract in one
-file, `api_version` 5: it registers a type and two chart exceptions, a species
+file, `api_version` 6: it registers a type and two chart exceptions, a species
 with its own decoded art, a move and its effect, an item with a pack pocket and a
 mart shelf, a named control axis and a visible-encounter population that reads
-the run's rules, patches two cartridge rows, watches both event channels and
+the run's rules and refuses a cell something is standing on, patches two cartridge rows, watches both event channels and
 rewrites the world channel's presentation. Copy it and read it beside this
 section.
 
@@ -865,6 +865,7 @@ The context is a snapshot, never a live handle:
 |---|---|
 | `map` | `Vector2i(group, number)` |
 | `eligible` | `{grass, surf}` to `PackedVector2Array` of cells a wild may stand on. `CanEncounterWildMon` per cell: the grass test, the cave and dungeon branch that skips it, and the ice refusal |
+| `occupied` | `PackedVector2Array` of the walk cells the map's own objects hold this frame: NPCs, item balls and every other map object, all four cells of a big one, and both cells an object mid-step is drawn across. Refreshed with `player`, not with `map`. Deliberately apart from `eligible`, which is a cartridge rule and never moves: an entry outside `eligible` is dropped, so folding the two together would delete a wild an NPC walks over. Refusing an occupied cell is the provider's own choice. The player's cell is not in it; `player` is where that is |
 | `tables` | `{grass, surf}` to `{source, slots}`, the table a roll would read right now, with the swarm's and the Bug Contest's substitutions already made and the time of day already picked. A slot is `{species, min_level, max_level}` |
 | `player` | `{cell, facing}` |
 | `run_seed` | The run's own seed, so a population is reproducible |

@@ -18,7 +18,9 @@ const FILENAME: String = "mod.json"
 ## 4 added types, type matchups and mod-supplied art as content, and
 ## [method Gen2ModHost.register_event_mutator].
 ## 5 added [member Gen2WorldAPI.rules], the run's own divergence flags.
-const API_VERSION: int = 5
+## 6 added `occupied` to the visible-encounter context, which is the only way a
+## provider can tell that a cell has an NPC or an item ball standing on it.
+const API_VERSION: int = 6
 ## The oldest contract this host still answers. See [constant API_VERSION].
 const MIN_API_VERSION: int = 1
 ## Ids address directories and registry keys, so they stay to a plain lowercase

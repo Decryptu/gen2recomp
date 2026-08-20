@@ -85,17 +85,6 @@ const TEXT_FALLBACKS: Dictionary = {
 	TEXT_TOSS_THREW: "Threw away\n<RAM_>(S).",
 }
 
-const PANEL: Color = Color("#14233a")
-const BORDER: Color = Color("#4f6f9e")
-const SCRIM: Color = Color(0.02, 0.04, 0.08, 0.78)
-const TEXT: Color = Color("#f4f7fb")
-const MUTED: Color = Color("#9eacc0")
-const ACCENT: Color = Color("#f3c969")
-const SUCCESS: Color = Color("#7bd89a")
-const ERROR: Color = Color("#ef8a8a")
-
-## How many window pixels a hardware pixel is drawn as inside the panel.
-const PACK_VIEW_SCALE: int = 2
 
 ## The pack's submenus, all `MENU_BACKUP_TILES` boxes over the pack's own screen.
 ##
@@ -139,7 +128,6 @@ var _pack_result: String = ""
 var _pack_scroll: Array[int] = [0, 0, 0, 0]
 var _pack_cursors: Array[int] = [0, 0, 0, 0]
 var _pack_page: Gen2PackPage = null
-var _pack_view: TextureRect = null
 var _pack_result_ok: bool = false
 ## `PrintText` waits per page, so a result longer than the box's two rows is
 ## pressed through rather than cut off at the frame.
@@ -176,6 +164,8 @@ var _pending_entry: Callable = Callable()
 ## because the second teach_tm_hm() call has to name the same Pokémon the first
 ## one refused.
 var _forget_moves: Array = []
+## `MoveCantForgetHMText` while the list it was refused on is still open.
+var _forget_refusal: String = ""
 var _forget_cursor: int = 0
 var _forget_party_index: int = -1
 var _forget_confirm_cursor: int = 0
@@ -213,20 +203,12 @@ var _target_page: Gen2PartyMenuPage = null
 ## Leftover of a hardware frame the target list's icons have not counted yet.
 var _target_elapsed: float = 0.0
 ## The panel's own two roots, hidden whenever a cartridge screen is up.
-var _scrim: ColorRect = null
-var _center: CenterContainer = null
 
-var _title: Label = null
-var _summary: Label = null
-var _options: VBoxContainer = null
-var _status: Label = null
-var _footer: Label = null
 
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_build_ui()
 	if _menu != null:
 		_open_list_mode()
 	if _pending_entry.is_valid():
@@ -241,8 +223,8 @@ func _ready() -> void:
 ## to know how a snapshot is written or where saves live.
 ##
 ## Mirrors Gen2BoxScreen.set_context(): open() may be called before or after this
-## node enters the tree, so building the option list defers to _ready() until
-## _title/_options exist, and runs immediately here otherwise.
+## node enters the tree, so opening the list defers to _ready() until it is in
+## one, and runs immediately here otherwise.
 func open(world: Gen2WorldAPI, data: GameData, save_action: Callable, previous_cursor: int = 0) -> bool:
 	_world = world
 	_data = data
@@ -250,7 +232,7 @@ func open(world: Gen2WorldAPI, data: GameData, save_action: Callable, previous_c
 	if _world == null or _data == null:
 		return false
 	_menu = Gen2WorldStartMenu.from_world(_world, previous_cursor)
-	if is_inside_tree() and _options != null:
+	if is_inside_tree():
 		_open_list_mode()
 	return true
 
@@ -302,11 +284,11 @@ func open_registered_item() -> void:
 	_confirm_use()
 
 
-## Holds an entry point until the panel exists, the way [method open] holds the
-## list. A caller that opens this screen before adding it to the tree is a
-## preview or a test; the overworld adds it first.
+## Holds an entry point until this screen is in the tree, the way [method open]
+## holds the list. A caller that opens this screen before adding it to the tree
+## is a preview or a test; the overworld adds it first.
 func _defer_entry(entry: Callable) -> bool:
-	if is_inside_tree() and _options != null:
+	if is_inside_tree():
 		return false
 	_pending_entry = entry
 	return true
@@ -381,6 +363,7 @@ func _move(direction: Vector2i) -> void:
 				_forget_cursor = wrapi(
 					_forget_cursor + signi(direction.y), 0, _forget_moves.size()
 				)
+				_forget_refusal = ""
 				_render_forget_list()
 		Mode.PACK_STOP_LEARNING:
 			if direction.y != 0 or direction.x != 0:
@@ -546,8 +529,6 @@ func _confirm_list() -> void:
 	if _menu == null or _menu.size() == 0:
 		return
 	if not _menu.selected_available():
-		_status.text = "%s is not available yet." % String(_menu.selected_item().get("label", ""))
-		_status.add_theme_color_override("font_color", MUTED)
 		return
 	match _menu.selected_kind():
 		Gen2WorldStartMenu.ITEM_PACK:
@@ -573,28 +554,13 @@ func _confirm_list() -> void:
 
 func _open_list_mode() -> void:
 	_mode = Mode.LIST
-	_title.text = "MENU"
-	_summary.text = ""
-	_status.text = ""
-	_footer.text = "D-pad: move    A: choose    B: close"
 	_render_list()
 
 
 func _render_list() -> void:
 	if _menu == null:
 		return
-	## `.PrintMenuAccount`: the highlighted entry's own line, under the list,
-	## only while MENU ACCOUNT is on. `.IsMenuAccountOn` is read on every cursor
-	## move, so turning it off in OPTION takes the box away at once.
-	if Gen2OptionsStore.current().menu_account:
-		_status.text = _menu.selected_description()
-		_status.add_theme_color_override("font_color", MUTED)
-	else:
-		_status.text = ""
-	_render_options(_menu.items(), _menu.cursor, func(entry: Dictionary) -> String:
-		var label: String = String(entry.get("label", ""))
-		return label if bool(entry.get("available", false)) else "%s (unavailable)" % label
-	)
+	_render_hardware()
 
 
 ## `StartMenu_Option`'s `farcall Option`. The model edits the shared
@@ -604,10 +570,6 @@ func _render_list() -> void:
 func _open_options_mode() -> void:
 	_mode = Mode.OPTIONS
 	_options_menu = Gen2WorldOptionsMenu.build(Gen2OptionsStore.current())
-	_title.text = "OPTION"
-	_summary.text = ""
-	_status.text = ""
-	_footer.text = "Up and down: move    Left and right: change    B: back"
 	_render_options_menu()
 
 
@@ -616,16 +578,10 @@ func _open_options_mode() -> void:
 func _persist_options() -> void:
 	if Gen2OptionsStore.save(_options_menu.options()):
 		return
-	_status.text = "The options file could not be written."
-	_status.add_theme_color_override("font_color", ERROR)
 
 
 func _render_options_menu() -> void:
-	_render_options(_options_menu.rows(), _options_menu.cursor, func(row: Dictionary) -> String:
-		var value: String = String(row.get("value", ""))
-		var label: String = String(row.get("label", ""))
-		return label if value.is_empty() else "%s    %s" % [label, value]
-	)
+	_render_hardware()
 
 
 ## The MODS entry: the mods that registered a setting, one row each. Only
@@ -635,17 +591,11 @@ func _open_mods_mode() -> void:
 	_mode = Mode.MODS
 	_mod_ids = Gen2ModHost.instance().option_mod_ids()
 	_mod_cursor = clampi(_mod_cursor, 0, maxi(_mod_ids.size() - 1, 0))
-	_title.text = "MODS"
-	_summary.text = ""
-	_status.text = ""
-	_footer.text = "Up and down: move    A: choose    B: back"
 	_render_mods()
 
 
 func _render_mods() -> void:
-	_render_options(_mod_ids, _mod_cursor, func(id: StringName) -> String:
-		return _mod_name(id)
-	)
+	_render_hardware()
 
 
 ## The name the player installed, falling back to the id for a mod registered
@@ -661,10 +611,6 @@ func _open_mod_options_mode(id: StringName) -> void:
 	_mode = Mode.MOD_OPTIONS
 	_mod_id = id
 	_mod_option_cursor = 0
-	_title.text = _mod_name(id).to_upper()
-	_summary.text = ""
-	_status.text = ""
-	_footer.text = "Up and down: move    Left and right: change    B: back"
 	_render_mod_options()
 
 
@@ -675,19 +621,7 @@ func _mod_options() -> Array:
 
 
 func _render_mod_options() -> void:
-	_render_options(_mod_options(), _mod_option_cursor, func(row: Dictionary) -> String:
-		match StringName(row.get("kind", Gen2ModHost.OPTION_LADDER)):
-			Gen2ModHost.OPTION_BUTTON:
-				return "%s    %s" % [
-					String(row.get("label", "")), String(row.get("press_label", "Go"))
-				]
-			Gen2ModHost.OPTION_NUMBER:
-				return "%s    %d" % [String(row.get("label", "")), int(row.get("value", 0))]
-		return "%s    %s" % [
-			String(row.get("label", "")),
-			String((row.get("labels", []) as Array)[int(row.get("index", 0))]),
-		]
-	)
+	_render_hardware()
 
 
 ## A button row acts on the press and stores nothing. A ladder row ignores A.
@@ -698,12 +632,9 @@ func _press_mod_option() -> void:
 	var row: Dictionary = rows[_mod_option_cursor]
 	if StringName(row.get("kind", Gen2ModHost.OPTION_LADDER)) != Gen2ModHost.OPTION_BUTTON:
 		return
-	var result: Dictionary = Gen2ModHost.instance().press_option(
-		_mod_id, StringName(row.get("key", &""))
-	)
-	if not bool(result.get("ok", false)):
-		_status.text = Gen2ModRefusal.text(result)
-		_status.add_theme_color_override("font_color", ERROR)
+	## Both of `press_option`'s refusals are ruled out by the two checks above,
+	## and this screen has no cartridge box to print one in either way.
+	Gen2ModHost.instance().press_option(_mod_id, StringName(row.get("key", &"")))
 
 
 ## One step either way: a rung, wrapping the way the cartridge's own value rows
@@ -718,10 +649,7 @@ func _adjust_mod_option(rows: Array, delta: int) -> void:
 		_mod_id, StringName(row.get("key", &"")), delta
 	)
 	if not bool(result.get("ok", false)):
-		_status.text = Gen2ModRefusal.text(result)
-		_status.add_theme_color_override("font_color", ERROR)
 		return
-	_status.text = ""
 	_render_mod_options()
 
 
@@ -743,10 +671,6 @@ func _open_pack_mode(reset: bool = true) -> void:
 	## The CANCEL row is always there, so an emptied pocket puts the cursor on it
 	## rather than on an item that is gone.
 	_pack_cursor = clampi(_pack_cursor, 0, _current_pocket_items().size())
-	_status.text = ""
-	_footer.text = "Left and right: pocket    Up and down: move    A: %s    B: back" % (
-		"give" if _give_target >= 0 else "choose"
-	)
 	_render_pack()
 
 
@@ -798,13 +722,7 @@ func _pack_cursor_on_cancel() -> bool:
 
 func _render_pack() -> void:
 	var pocket: Dictionary = _current_pocket()
-	_title.text = "GIVE" if _give_target >= 0 else "PACK"
-	_summary.text = String(pocket.get("name", ""))
-	_status.text = ""
-	_render_options([], -1, func(_entry: Variant) -> String: return "")
-	if _pack_view != null:
-		_pack_view.visible = _view == null or not _view.visible
-		_pack_view.texture = ImageTexture.create_from_image(_pack_image())
+	_render_hardware()
 
 
 ## The five rows `ScrollingMenu_UpdateDisplay` writes, out of the pocket's own
@@ -971,17 +889,11 @@ func _open_item_mode() -> void:
 	_giving = false
 	_item_actions = Gen2WorldPack.item_submenu(_data, int(item.get("item", 0)))
 	_item_cursor = 0
-	_status.text = ""
-	_summary.text = String(item.get("name", ""))
-	_footer.text = "Up and down: move    A: choose    B: back"
 	_render_item_menu()
 
 
 func _render_item_menu() -> void:
-	_title.text = "PACK"
-	_render_options(_item_actions, _item_cursor,
-		func(entry: Dictionary) -> String: return String(entry.get("label", ""))
-	)
+	_render_hardware()
 
 
 func _confirm_item_action() -> void:
@@ -1090,17 +1002,11 @@ func _open_give_swap(party_index: int, held_name: String) -> void:
 	_swap_cursor = 0
 	_swap_target = party_index
 	_swap_question = Gen2WorldPack.ask_swap_text(_target_name(party_index), held_name)
-	_status.text = ""
-	_footer.text = "Up and down: move    A: choose    B: back"
 	_render_give_swap()
 
 
 func _render_give_swap() -> void:
-	_title.text = "GIVE"
-	_summary.text = _swap_question
-	_render_options([{"label": "YES"}, {"label": "NO"}], _swap_cursor,
-		func(entry: Dictionary) -> String: return String(entry.get("label", ""))
-	)
+	_render_hardware()
 
 
 ## The answer to `PokemonAskSwapItemText`. Its no is `.abort`, which leaves both
@@ -1288,17 +1194,11 @@ func _open_teach_mode(item: int) -> void:
 	_teaching = false
 	_teach_cursor = 0
 	_mode = Mode.PACK_TEACH
-	_status.text = ""
-	_footer.text = "Up and down: move    A: choose    B: back"
 	_render_teach()
 
 
 func _render_teach() -> void:
-	_title.text = "TEACH"
-	_summary.text = String(_teach_prompt.get("text", ""))
-	_render_options([{"label": "YES"}, {"label": "NO"}], _teach_cursor,
-		func(entry: Dictionary) -> String: return String(entry.get("label", ""))
-	)
+	_render_hardware()
 
 
 ## The yes/no answer. Yes reaches ChooseMonToLearnTMHM, which is the same party
@@ -1345,19 +1245,11 @@ func _teach_selected_item(party_index: int) -> void:
 func _open_forget_ask() -> void:
 	_mode = Mode.PACK_FORGET_ASK
 	_forget_confirm_cursor = 0
-	_status.text = ""
-	_footer.text = "Up and down: move    A: choose    B: back"
 	_render_forget_ask()
 
 
 func _render_forget_ask() -> void:
-	_title.text = "TEACH"
-	_summary.text = Gen2MoveForget.ask_text(
-		_target_name(_forget_party_index), String(_teach_prompt.get("move_name", ""))
-	)
-	_render_options([{"label": "YES"}, {"label": "NO"}], _forget_confirm_cursor,
-		func(entry: Dictionary) -> String: return String(entry.get("label", ""))
-	)
+	_render_hardware()
 
 
 func _confirm_forget_ask() -> void:
@@ -1372,18 +1264,16 @@ func _confirm_forget_ask() -> void:
 ## on confirm, the way .hmmove does.
 func _open_forget_list() -> void:
 	_mode = Mode.PACK_FORGET
+	_forget_refusal = ""
 	_forget_cursor = 0
-	_status.text = ""
-	_footer.text = "Up and down: move    A: forget    B: back"
 	_render_forget_list()
 
 
+## The list's own box carries `MoveCantForgetHMText` while it stands, since
+## `.hmmove` prints it and is `jr .loop` rather than a cancel. Any move of the
+## cursor puts `ListMoves`' own question back.
 func _render_forget_list() -> void:
-	_title.text = "FORGET"
-	_summary.text = Gen2MoveForget.which_text()
-	_render_options(_forget_moves, _forget_cursor,
-		func(entry: Dictionary) -> String: return String(entry.get("name", ""))
-	)
+	_render_hardware()
 
 
 ## The answer TeachTMHM is called a second time with. An HM keeps the list open
@@ -1393,8 +1283,8 @@ func _confirm_forget() -> void:
 		return
 	var entry: Dictionary = _forget_moves[_forget_cursor]
 	if not bool(entry.get("forgettable", false)):
-		_status.text = Gen2MoveForget.cant_forget_hm_text()
-		_status.add_theme_color_override("font_color", ERROR)
+		_forget_refusal = Gen2MoveForget.cant_forget_hm_text()
+		_render_forget_list()
 		return
 	var result: Dictionary = Gen2WorldPartyHost.teach_tm_hm(
 		_world, _pack_save, int(_teach_prompt.get("item", 0)), _forget_party_index,
@@ -1416,17 +1306,11 @@ func _confirm_forget() -> void:
 func _open_stop_learning() -> void:
 	_mode = Mode.PACK_STOP_LEARNING
 	_forget_confirm_cursor = 0
-	_status.text = ""
-	_footer.text = "Up and down: move    A: choose    B: back"
 	_render_stop_learning()
 
 
 func _render_stop_learning() -> void:
-	_title.text = "TEACH"
-	_summary.text = Gen2MoveForget.stop_text(String(_teach_prompt.get("move_name", "")))
-	_render_options([{"label": "YES"}, {"label": "NO"}], _forget_confirm_cursor,
-		func(entry: Dictionary) -> String: return String(entry.get("label", ""))
-	)
+	_render_hardware()
 
 
 ## Yes ends the offer with DidNotLearnMoveText; no is `jp .loop`, which reaches
@@ -1477,8 +1361,6 @@ func _open_target_mode() -> void:
 	## is opened, which is what puts the icons on the page at all.
 	if _party_menu_page() != null:
 		_target_page.reset(_party_targets())
-	_status.text = ""
-	_footer.text = "Up and down: move    A: %s    B: back" % ("give" if _giving else "use")
 	_target_elapsed = 0.0
 	_render_targets()
 	## `InitPartyMenuGFX` opens every struct on frame -1, so the icons are blank
@@ -1488,23 +1370,11 @@ func _open_target_mode() -> void:
 
 
 func _render_targets() -> void:
-	_title.text = "GIVE TO" if _giving else "USE ON"
-	_summary.text = String(_selected_item().get("name", ""))
 	## The panel fallback carries the same CANCEL row the hardware page draws, so
 	## the cursor means one thing whichever of the two is up.
 	var rows: Array = _party_targets()
 	rows.append({"cancel": true})
-	_render_options(rows, _target_cursor,
-		func(entry: Dictionary) -> String:
-			if bool(entry.get("cancel", false)):
-				return Gen2BattleSwitchMenu.cancel_label()
-			if bool(entry.get("egg", false)):
-				return "%s    EGG" % String(entry.get("name", ""))
-			return "%s    %d/%d HP" % [
-				String(entry.get("name", "")), int(entry.get("hp", 0)),
-				int(entry.get("max_hp", 0)),
-			]
-	)
+	_render_hardware()
 
 
 func _use_selected_item(party_index: int) -> void:
@@ -1566,19 +1436,11 @@ func _open_toss_quantity() -> void:
 		return
 	_mode = Mode.PACK_TOSS_QUANTITY
 	_toss_prompt = Gen2WorldQuantityPrompt.open(int(item.get("quantity", 1)))
-	_footer.text = "Up and down: one    Left and right: ten    A: choose    B: back"
 	_render_toss_quantity()
 
 
 func _render_toss_quantity() -> void:
-	_title.text = "TOSS"
-	_summary.text = String(_selected_item().get("name", ""))
-	_status.text = _pack_text(TEXT_TOSS_ASK)
-	_status.add_theme_color_override("font_color", TEXT)
-	_render_options(
-		[_toss_prompt.value if _toss_prompt != null else 1], 0,
-		func(value: Variant) -> String: return "x%d" % int(value)
-	)
+	_render_hardware()
 
 
 ## `AskQuantityThrowAwayText` and the `YesNoBox` behind it.
@@ -1587,21 +1449,11 @@ func _open_toss_confirm() -> void:
 		return
 	_mode = Mode.PACK_TOSS_CONFIRM
 	_toss_confirm_cursor = 0
-	_footer.text = "Up and down: move    A: choose    B: back"
 	_render_toss_confirm()
 
 
 func _render_toss_confirm() -> void:
-	_title.text = "TOSS"
-	_summary.text = _fill_item_text(
-		_pack_text(TEXT_TOSS_ASK_QUANTITY),
-		String(_selected_item().get("name", "")),
-		_toss_prompt.value if _toss_prompt != null else 1
-	)
-	_status.text = ""
-	_render_options([{"label": "YES"}, {"label": "NO"}], _toss_confirm_cursor,
-		func(entry: Dictionary) -> String: return String(entry.get("label", ""))
-	)
+	_render_hardware()
 
 
 ## `TossItem` and `ThrewAwayText`. The bag host owns the transaction; a refusal
@@ -1624,7 +1476,6 @@ func _confirm_toss() -> void:
 		return
 	## The result box keeps whatever summary the mode before it left, and the
 	## question is not it: `ThrewAwayText` is printed under the item's own name.
-	_summary.text = String(result.get("name", ""))
 	_show_pack_result(
 		_fill_item_text(_pack_text(TEXT_TOSS_THREW), String(result.get("name", ""))), true
 	)
@@ -1696,7 +1547,6 @@ func _show_pack_result(message: String, ok: bool) -> void:
 		message, Gen2PackPage.TEXTBOX_COLUMNS - 2, Gen2PackPage.TEXTBOX_ROWS_OF_TEXT
 	)
 	_pack_result_page = 0
-	_footer.text = "A: continue"
 	_render_pack_result()
 
 
@@ -1711,10 +1561,7 @@ func _pack_result_advanced() -> bool:
 
 
 func _render_pack_result() -> void:
-	_title.text = "PACK"
-	_status.text = _pack_result
-	_status.add_theme_color_override("font_color", SUCCESS if _pack_result_ok else MUTED)
-	_render_options(["Continue"], 0, func(entry: Variant) -> String: return str(entry))
+	_render_hardware()
 
 
 ## `SaveMenu`'s first question. `LoadStandardMenuHeader` and
@@ -1732,11 +1579,6 @@ func _enter_save_mode(mode: Mode, lines: Array, cursor_index: int) -> void:
 	_save_line = 0
 	_save_cursor = cursor_index
 	_save_frames = 0
-	_title.text = "SAVE"
-	_summary.text = " ".join(_save_lines)
-	_status.text = ""
-	_footer.text = "D-pad: choose    A: confirm    B: cancel" if cursor_index >= 0 \
-		else "A: continue"
 	_render_save()
 
 
@@ -1872,70 +1714,12 @@ func _save_state() -> Dictionary:
 
 
 func _render_save() -> void:
-	_render_options(
-		["Yes", "No"] if _save_cursor >= 0 else [], _save_cursor,
-		func(entry: Variant) -> String: return str(entry)
-	)
-
-
-func _build_ui() -> void:
-	var scrim := ColorRect.new()
-	scrim.color = SCRIM
-	scrim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	scrim.mouse_filter = Control.MOUSE_FILTER_STOP
-	add_child(scrim)
-	_scrim = scrim
-
-	var center := CenterContainer.new()
-	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	add_child(center)
-	_center = center
-	var panel := PanelContainer.new()
-	panel.custom_minimum_size = Vector2(420, 320)
-	panel.add_theme_stylebox_override("panel", _panel_style())
-	center.add_child(panel)
-	var margin := MarginContainer.new()
-	margin.add_theme_constant_override("margin_left", 24)
-	margin.add_theme_constant_override("margin_top", 20)
-	margin.add_theme_constant_override("margin_right", 24)
-	margin.add_theme_constant_override("margin_bottom", 20)
-	panel.add_child(margin)
-	var content := VBoxContainer.new()
-	content.add_theme_constant_override("separation", 10)
-	margin.add_child(content)
-	_title = Label.new()
-	_title.add_theme_color_override("font_color", TEXT)
-	_title.add_theme_font_size_override("font_size", 24)
-	content.add_child(_title)
-	_summary = Label.new()
-	_summary.add_theme_color_override("font_color", MUTED)
-	_summary.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	content.add_child(_summary)
-	_options = VBoxContainer.new()
-	_options.add_theme_constant_override("separation", 4)
-	_options.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	content.add_child(_options)
-	## Fallback for a caller that did not hand this host the world's Gen2Screen.
-	_pack_view = TextureRect.new()
-	_pack_view.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-	_pack_view.custom_minimum_size = Vector2(
-		Gen2Screen.WIDTH * PACK_VIEW_SCALE, Gen2Screen.HEIGHT * PACK_VIEW_SCALE
-	)
-	_pack_view.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	_pack_view.visible = false
-	content.add_child(_pack_view)
-	_status = Label.new()
-	_status.add_theme_color_override("font_color", MUTED)
-	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	content.add_child(_status)
-	_footer = Label.new()
-	_footer.add_theme_color_override("font_color", ACCENT)
-	content.add_child(_footer)
+	_render_hardware()
 
 
 ## The screen `StartMenu`'s own box is drawn into. The world hands over the one
 ## the map is already in, so the box stands over it the way the map name sign
-## does; a caller that hands over none keeps the panel.
+## does.
 func set_screen(screen: Gen2Screen) -> void:
 	_screen = screen
 	if _screen == null or _view != null:
@@ -1955,20 +1739,49 @@ func _exit_tree() -> void:
 		_view = null
 
 
-## Whichever of the cartridge's screens this mode is, or nothing for a mode that
-## is still the panel.
+## Whichever of the cartridge's screens this mode is. `_hardware_image()` answers
+## every one of them, so there is no window-resolution fallback behind it.
 func _render_hardware() -> void:
 	if _view == null:
 		return
 	var image: Image = _hardware_image()
 	_view.visible = image != null
-	if _scrim != null:
-		_scrim.visible = image == null
-	if _center != null:
-		_center.visible = image == null
 	if image == null:
 		return
 	_view.texture = ImageTexture.create_from_image(image)
+
+
+## The words this mode's own box prints, which is what [method _hardware_image]
+## hands the page. One reading, so a caller can have the box without the pixels.
+func box_text() -> String:
+	match _mode:
+		Mode.PACK_ITEM:
+			return _pack_description()
+		Mode.PACK_TEACH:
+			return String(_teach_prompt.get("text", ""))
+		Mode.PACK_FORGET_ASK:
+			return Gen2MoveForget.ask_text(
+				_target_name(_forget_party_index),
+				String(_teach_prompt.get("move_name", ""))
+			)
+		Mode.PACK_STOP_LEARNING:
+			return Gen2MoveForget.stop_text(String(_teach_prompt.get("move_name", "")))
+		Mode.PACK_TOSS_CONFIRM:
+			return _fill_item_text(
+				_pack_text(TEXT_TOSS_ASK_QUANTITY),
+				String(_selected_item().get("name", "")),
+				_toss_prompt.value if _toss_prompt != null else 1
+			)
+		Mode.PACK_GIVE_SWAP:
+			return _swap_question
+		Mode.PACK_TOSS_QUANTITY:
+			return _pack_text(TEXT_TOSS_ASK)
+		Mode.PACK_FORGET:
+			return _forget_refusal if not _forget_refusal.is_empty() \
+				else Gen2MoveForget.which_text()
+		Mode.PACK_RESULT:
+			return _pack_result_text()
+	return ""
 
 
 func _hardware_image() -> Image:
@@ -2006,30 +1819,21 @@ func _hardware_image() -> Image:
 			var labels: Array = []
 			for entry: Dictionary in _item_actions:
 				labels.append(String(entry.get("label", "")))
-			return _pack_overlay(_pack_description(), func(map: PackedInt32Array) -> void:
+			return _pack_overlay(box_text(), func(map: PackedInt32Array) -> void:
 				_pack_page.draw_menu(map, _item_menu_box(labels.size()), labels, _item_cursor)
 			)
 		Mode.PACK_TEACH:
-			return _pack_yes_no(String(_teach_prompt.get("text", "")), _teach_cursor)
+			return _pack_yes_no(box_text(), _teach_cursor)
 		Mode.PACK_FORGET_ASK:
-			return _pack_yes_no(Gen2MoveForget.ask_text(
-				_target_name(_forget_party_index),
-				String(_teach_prompt.get("move_name", ""))
-			), _forget_confirm_cursor)
+			return _pack_yes_no(box_text(), _forget_confirm_cursor)
 		Mode.PACK_STOP_LEARNING:
-			return _pack_yes_no(Gen2MoveForget.stop_text(
-				String(_teach_prompt.get("move_name", ""))
-			), _forget_confirm_cursor)
+			return _pack_yes_no(box_text(), _forget_confirm_cursor)
 		Mode.PACK_TOSS_CONFIRM:
-			return _pack_yes_no(_fill_item_text(
-				_pack_text(TEXT_TOSS_ASK_QUANTITY),
-				String(_selected_item().get("name", "")),
-				_toss_prompt.value if _toss_prompt != null else 1
-			), _toss_confirm_cursor)
+			return _pack_yes_no(box_text(), _toss_confirm_cursor)
 		Mode.PACK_GIVE_SWAP:
-			return _pack_yes_no(_swap_question, _swap_cursor)
+			return _pack_yes_no(box_text(), _swap_cursor)
 		Mode.PACK_TOSS_QUANTITY:
-			return _pack_overlay(_pack_text(TEXT_TOSS_ASK), func(map: PackedInt32Array) -> void:
+			return _pack_overlay(box_text(), func(map: PackedInt32Array) -> void:
 				_pack_page.draw_quantity(
 					map,
 					Gen2MenuBox.from_coords(
@@ -2044,11 +1848,11 @@ func _hardware_image() -> Image:
 			for entry: Dictionary in _forget_moves:
 				moves.append(String(entry.get("name", "")))
 			return _pack_overlay(
-				Gen2MoveForget.which_text(), func(map: PackedInt32Array) -> void:
+				box_text(), func(map: PackedInt32Array) -> void:
 					_pack_page.draw_move_list(map, moves, _forget_cursor)
 			)
 		Mode.PACK_RESULT:
-			return _pack_overlay(_pack_result_text(), Callable())
+			return _pack_overlay(box_text(), Callable())
 		Mode.PACK_TARGET:
 			if _party_menu_page() == null:
 				return null
@@ -2098,28 +1902,3 @@ func _option_window(
 		"rows": rows.slice(first, last),
 		"cursor": cursor_index - first if cursor_index >= 0 else -1,
 	}
-
-
-func _render_options(values: Array, cursor_index: int, label_for: Callable) -> void:
-	_render_hardware()
-	if _pack_view != null:
-		_pack_view.visible = false
-	if _options == null:
-		return
-	Gen2Screen.drop_children(_options)
-	for index: int in values.size():
-		var label := Label.new()
-		var option_text: String = label_for.call(values[index])
-		label.text = ("> " if index == cursor_index else "  ") + option_text
-		label.add_theme_color_override("font_color", ACCENT if index == cursor_index else TEXT)
-		label.add_theme_font_size_override("font_size", 18)
-		_options.add_child(label)
-
-
-func _panel_style() -> StyleBoxFlat:
-	var style := StyleBoxFlat.new()
-	style.bg_color = PANEL
-	style.border_color = BORDER
-	style.set_border_width_all(2)
-	style.set_corner_radius_all(8)
-	return style

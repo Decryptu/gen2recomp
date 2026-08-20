@@ -14,6 +14,8 @@ func before_each() -> void:
 	_clear()
 	DirAccess.make_dir_recursive_absolute(_directory)
 	Gen2ModHost.reset()
+	DirAccess.remove_absolute(Gen2ModOptions.PATH)
+	Gen2ModOptions.reload()
 
 
 func after_each() -> void:
