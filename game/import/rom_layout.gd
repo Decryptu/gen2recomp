@@ -19,6 +19,9 @@ extends RefCounted
 ## of the code beside it. Tighten the wording, never delete the derivation.
 
 const SPECIES_COUNT: int = 251
+## `GetMonFramesPointer`'s `cp JOHTO_POKEMON`: the frame data below this species
+## is in `KantoFrames`' bank and from it in `JohtoFrames`'.
+const JOHTO_SPECIES: int = 152
 const NAME_LENGTH: int = 10
 const BASE_STATS_SIZE: int = 32
 const PIC_POINTER_SIZE: int = 3
@@ -1603,6 +1606,10 @@ const GOLD_SILVER: Dictionary = {
 	"base_stats": 0x51B0B,
 	"pic_pointers": 0x48000,
 	"unown_pic_pointers": 0x7C000,
+	# pokegold has no `pic_animation.asm`, no `anim.asm`, no bitmasks and no
+	# frames: both of its send-outs reach `PlayStereoCry` directly, which is
+	# Crystal's own `.cry_no_anim` branch. See [constant CRYSTAL].
+	"pic_anim": {},
 	"palettes": 0xAD3D,
 	"move_names": 0x1B1574,
 	"item_names": 0x1B0000,
@@ -2063,6 +2070,31 @@ const CRYSTAL: Dictionary = {
 	"base_stats": 0x51424,
 	"pic_pointers": 0x120000,
 	"unown_pic_pointers": 0x124000,
+	# `AnimateFrontpic`'s five tables, Crystal's alone: pokegold ships no
+	# `pic_animation.asm`, no `anim.asm`, no bitmasks and no frames, and both of
+	# its send-outs reach `PlayStereoCry` directly. Every address here is
+	# rgblink's own, from a `pokecrystal11.gbc` byte identical to the dump.
+	#
+	# A script pointer and a bitmask pointer are read in the table's own bank; a
+	# frames pointer is read in the bank its *data* lives in, which is
+	# `KantoFrames` below species [constant JOHTO_SPECIES] and `JohtoFrames`
+	# from it (`GetMonFramesPointer`).
+	"pic_anim": {
+		"scripts": 0xD0695,
+		"idle_scripts": 0xD16A3,
+		"bitmask_pointers": 0xD24EF,
+		"frame_pointers": 0xD4000,
+		"script_bank": 0x34,
+		"bitmask_bank": 0x34,
+		"frame_pointer_bank": 0x35,
+		"kanto_frame_bank": 0x35,
+		"johto_frame_bank": 0x36,
+		"unown_scripts": 0xD2229,
+		"unown_idle_scripts": 0xD23D1,
+		"unown_bitmask_pointers": 0xD3AD3,
+		"unown_frame_pointers": 0xD99A9,
+		"unown_frame_bank": 0x36,
+	},
 	"palettes": 0xA8CE,
 	"move_names": 0x1C9F29,
 	"item_names": 0x1C8000,
@@ -2630,6 +2662,44 @@ static func palette_offset(layout: Dictionary, species: int) -> int:
 
 
 ## Pointers come in pairs, front then back.
+## `AnimateFrontpic`'s tables, or empty for a game that has no pic animation at
+## all. Only Crystal does; see the `pic_anim` block in [constant CRYSTAL].
+static func pic_anim(layout: Dictionary) -> Dictionary:
+	var value: Variant = layout.get("pic_anim", {})
+	return value if value is Dictionary else {}
+
+
+## `PokeAnim_CopyBitmaskToBuffer.GetSize`: how many bytes one bitmask is, for a
+## pic [param height] tiles tall. `.Sizes: db 4, 5, 7`, indexed by `height - 5`.
+static func pic_anim_bitmask_bytes(height: int) -> int:
+	match height:
+		5:
+			return 4
+		6:
+			return 5
+		7:
+			return 7
+	return 0
+
+
+## `.GetTilemap`: an animation frame names a tile in the pic's own `w * h` run,
+## and `PokeAnim_PlaceGraphic` fills a 7x7 box. A tile inside the pic is
+## remapped through `poke_anim_box`, which is `PadFrontpic`'s own alignment
+## again, and one past it takes the box's own 49 tiles as its offset.
+static func pic_anim_box_tile(tile: int, height: int) -> int:
+	if height >= FRONTPIC_MAX_TILES or height <= 0:
+		return tile
+	var square: int = height * height
+	if tile >= square:
+		return tile + FRONTPIC_MAX_TILES * FRONTPIC_MAX_TILES - square
+	# `poke_anim_box`'s row is the pic's column and its column the pic's row,
+	# which is `PlaceGraphic`'s column-major box read the other way up.
+	@warning_ignore("integer_division")
+	var column: int = tile / height
+	var row: int = tile % height
+	return (column + 1) * FRONTPIC_MAX_TILES + row + FRONTPIC_MAX_TILES - height
+
+
 static func pic_pointer_offset(layout: Dictionary, species: int, back: bool) -> int:
 	var pair: int = (species - 1) * 2 + (1 if back else 0)
 	return int(layout["pic_pointers"]) + pair * PIC_POINTER_SIZE

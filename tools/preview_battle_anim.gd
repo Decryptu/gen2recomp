@@ -22,7 +22,12 @@ extends SceneTree
 ## cartridge waits on a person there and nothing here can.
 ## `scene_off` clears the OPTION menu's battle-scene row first, which is what
 ## `CheckBattleScene` reads, and the capture should then show the field
-## untouched.
+## untouched. `with_intro` counts `<frames>` from the battle screen's own first
+## frame instead, so `BattleIntroSlidingPics` is inside the range rather than
+## spent before it; a cartridge trace is aligned to the slide's end, so use it
+## for a recording and not for a diff.
+##
+## Both flags may be given, in either order.
 
 const WINDOW_SIZE := Vector2i(1152, 648)
 ## Enough frames for the scene to lay out before anything is driven, and enough
@@ -49,6 +54,7 @@ var _settle: int = 0
 var _held: int = 0
 var _last_trace: String = ""
 var _scene_off: bool = false
+var _with_intro: bool = false
 var _frames: int = 0
 
 
@@ -70,7 +76,16 @@ func _initialize() -> void:
 		_frames_in = _range_hi
 	else:
 		_frames_in = int(args[4])
-	_scene_off = args.size() > 5 and args[5] == "scene_off"
+	for flag: String in args.slice(5):
+		match flag:
+			"scene_off":
+				_scene_off = true
+			"with_intro":
+				_with_intro = true
+			_:
+				push_error("Unknown flag %s" % flag)
+				quit(1)
+				return
 
 	var data: GameData = GameData.open(StringName(args[0]))
 	if data == null:
@@ -109,6 +124,7 @@ func _process(_delta: float) -> bool:
 	if _frames < SETTLE_FRAMES + DRAW_FRAMES:
 		return false
 
+	RenderingServer.force_draw()
 	var image: Image = root.get_texture().get_image()
 	var error: Error = image.save_png(_output_path)
 	if error != OK:
@@ -136,11 +152,23 @@ func _shoot_range() -> bool:
 	if _settle > 0:
 		_settle -= 1
 		return false
-	if _cursor > _range_hi:
-		print("Wrote %d frames to %s_f*.png" % [_range_hi - _range_lo + 1, _prefix()])
+	# `DoBattle`'s first `BattleMenu` is the end of the opening, so a range that
+	# runs past it stops there rather than writing the menu over and over.
+	var done: bool = _cursor > _range_lo and not _screen.entrance_running() \
+		and not _screen.intro_running() and not _screen.frames_running() \
+		and not bool(_screen.battle_snapshot()["awaits_press"])
+	if _cursor > _range_hi or done:
+		print("Wrote %d frames to %s_f*.png" % [
+			mini(_cursor, _range_hi + 1) - _range_lo, _prefix()
+		])
 		quit(0)
 		return true
 	if _cursor >= _range_lo:
+		# The window is not guaranteed to have been composited between two of
+		# this driver's frames, and an uncomposited one hands back the last
+		# picture that was: a whole capture can come out as one frame repeated.
+		# Drawing on demand is what makes a run of this tool reproducible.
+		RenderingServer.force_draw()
 		var image: Image = root.get_texture().get_image()
 		var error: Error = image.save_png("%s_f%d.png" % [_prefix(), _cursor])
 		if error != OK:
@@ -204,10 +232,16 @@ func _drive_entrance() -> bool:
 		_screen.show_trainer(1, 0)
 	else:
 		_screen.show_matchup(16, 155, 20, 20)
+	if _range_lo >= 0:
+		# `InitBattleDisplay` and `BattleIntroSlidingPics` are frames of the
+		# opening like any other; a diff against the cartridge trace wants them
+		# spent first, and a recording wants them in the picture.
+		if not _with_intro:
+			while _screen.intro_running():
+				_screen.advance_frame()
+		return true
 	while _screen.intro_running():
 		_screen.advance_frame()
-	if _range_lo >= 0:
-		return true
 	for _frame: int in _frames_in:
 		if not _screen.frames_running() and _screen.entrance_running():
 			_screen.finish()

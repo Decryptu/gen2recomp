@@ -3765,6 +3765,13 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		result["message"] = "Could not decode pics."
 		return result
 
+	# Crystal's alone; Gold and Silver have no pic animation, so an empty answer
+	# is the honest one rather than a failure.
+	var pic_anims: Dictionary = _import_pic_anims(rom, layout, species)
+	if pic_anims.is_empty() and not RomLayout.pic_anim(layout).is_empty():
+		result["message"] = "Could not decode pic animations."
+		return result
+
 	var tiles: Dictionary = _import_tiles(rom, layout, on_progress)
 	if tiles.is_empty():
 		result["message"] = "Could not write the font."
@@ -3820,6 +3827,12 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 
 	if not RomCache.write_json(RomCache.species_path(directory), species):
 		result["message"] = "Could not write species data."
+		return result
+	if not pic_anims.is_empty() and not RomCache.write_section(
+		RomCache.pic_anims_path(directory),
+		RomCache.blob_path(RomCache.pic_anims_path(directory)), pic_anims
+	):
+		result["message"] = "Could not write pic animation data."
 		return result
 	if not RomCache.write_json(RomCache.moves_path(directory), moves):
 		result["message"] = "Could not write move data."
@@ -5622,6 +5635,15 @@ func _import_pics(
 	var front: Dictionary = _new_atlas(RomLayout.FRONTPIC_MAX_TILES, RomLayout.SPECIES_COUNT)
 	var back: Dictionary = _new_atlas(RomLayout.BACKPIC_TILES, RomLayout.SPECIES_COUNT)
 	var unown_front: Dictionary = _new_atlas(RomLayout.FRONTPIC_MAX_TILES, RomLayout.UNOWN_FORMS)
+	# `GetAnimatedEnemyFrontpic` loads the tiles past the pic's own `w * h` out
+	# of the same decompressed run, into VRAM behind the padded 7x7 block. They
+	# are frames, not a picture, so they get an atlas rather than a slot in the
+	# one beside them.
+	var animated: bool = not RomLayout.pic_anim(layout).is_empty()
+	var front_anim: Dictionary = _new_atlas(RomLayout.FRONTPIC_MAX_TILES, RomLayout.SPECIES_COUNT)
+	var unown_front_anim: Dictionary = _new_atlas(
+		RomLayout.FRONTPIC_MAX_TILES, RomLayout.UNOWN_FORMS
+	)
 	var unown_back: Dictionary = _new_atlas(RomLayout.BACKPIC_TILES, RomLayout.UNOWN_FORMS)
 	var trainer_classes: int = RomLayout.trainer_class_count(layout)
 	var trainers: Dictionary = _new_atlas(RomLayout.TRAINER_PIC_TILES, trainer_classes)
@@ -5663,6 +5685,11 @@ func _import_pics(
 					rom, layout, RomLayout.unown_pic_pointer_offset(layout, form, false),
 					tiles[0], tiles[1], unown_front, form
 				)
+				if animated:
+					_decode_into(
+						rom, layout, RomLayout.unown_pic_pointer_offset(layout, form, false),
+						tiles[0], tiles[1], unown_front_anim, form, tiles[0] * tiles[1]
+					)
 				_decode_into(
 					rom, layout, RomLayout.unown_pic_pointer_offset(layout, form, true),
 					RomLayout.BACKPIC_TILES, RomLayout.BACKPIC_TILES, unown_back, form
@@ -5680,6 +5707,11 @@ func _import_pics(
 				rom, layout, RomLayout.pic_pointer_offset(layout, source, false),
 				tiles[0], tiles[1], front, slot
 			)
+			if animated:
+				_decode_into(
+					rom, layout, RomLayout.pic_pointer_offset(layout, source, false),
+					tiles[0], tiles[1], front_anim, slot, tiles[0] * tiles[1]
+				)
 			_decode_into(
 				rom, layout, RomLayout.pic_pointer_offset(layout, source, true),
 				RomLayout.BACKPIC_TILES, RomLayout.BACKPIC_TILES, back, slot
@@ -5704,6 +5736,11 @@ func _import_pics(
 		"front": front, "back": back, "unown_front": unown_front, "unown_back": unown_back,
 		"trainers": trainers, "player_back": player_back,
 	}
+	# `AnimateFrontpic` is Crystal's alone, so the two atlases behind the front
+	# pics are written only where something reads them.
+	if animated:
+		atlases["front_anim"] = front_anim
+		atlases["unown_front_anim"] = unown_front_anim
 	var written: Dictionary = {}
 	for name: String in atlases:
 		var atlas: Dictionary = atlases[name]
@@ -5746,6 +5783,9 @@ func _decode_lz_into(
 	return true
 
 
+## [param skip_tiles] takes the run past the picture instead of the picture:
+## `GetAnimatedEnemyFrontpic` reads `wDecompressEnemyFrontpic + w * h tiles` for
+## the animation's own frames, which are the same LZ run's tail.
 func _decode_into(
 	rom: RomFile,
 	layout: Dictionary,
@@ -5753,7 +5793,8 @@ func _decode_into(
 	columns: int,
 	rows: int,
 	atlas: Dictionary,
-	slot: int
+	slot: int,
+	skip_tiles: int = 0
 ) -> bool:
 	if columns <= 0 or rows <= 0:
 		return false
@@ -5765,18 +5806,27 @@ func _decode_into(
 		return false
 
 	var raw: PackedByteArray = _lz.decompress(rom.bytes(), start)
-	if _lz.failed or raw.size() < columns * rows * Gen2Tiles.TILE_BYTES:
-		return false
+	if _lz.failed or raw.size() < (skip_tiles + columns * rows) * Gen2Tiles.TILE_BYTES:
+		# The animation's tail is as long as the picture only when every frame
+		# tile is distinct: `front.animated.2bpp` deduplicates them, and
+		# `GetAnimatedEnemyFrontpic` copies `w * h` whatever is there, so the
+		# short ones end in tiles no frame names. Pad rather than refuse.
+		if skip_tiles <= 0 or raw.size() <= skip_tiles * Gen2Tiles.TILE_BYTES:
+			return false
+		raw.resize((skip_tiles + columns * rows) * Gen2Tiles.TILE_BYTES)
 
-	_blit_pic(raw, columns, rows, atlas, slot)
+	_blit_pic(raw, columns, rows, atlas, slot, skip_tiles)
 	return true
 
 
 ## One decompressed pic into its cell of an atlas.
 func _blit_pic(
-	raw: PackedByteArray, columns: int, rows: int, atlas: Dictionary, slot: int
+	raw: PackedByteArray, columns: int, rows: int, atlas: Dictionary, slot: int,
+	skip_tiles: int = 0
 ) -> void:
-	var pixels: PackedByteArray = Gen2Tiles.decode_pic(raw, columns, rows)
+	var pixels: PackedByteArray = Gen2Tiles.decode_pic(
+		raw.slice(skip_tiles * Gen2Tiles.TILE_BYTES) if skip_tiles > 0 else raw, columns, rows
+	)
 	var cell: int = atlas["cell"]
 	Gen2Tiles.blit(
 		pixels, columns * Gen2Tiles.TILE_WIDTH,
@@ -5784,3 +5834,137 @@ func _blit_pic(
 		(slot % ATLAS_COLUMNS) * cell, floori(float(slot) / float(ATLAS_COLUMNS)) * cell
 	)
 	atlas["decoded"] = int(atlas["decoded"]) + 1
+
+
+## `AnimateFrontpic`'s tables: one record per species and one per Unown letter,
+## each carrying the two scripts and the frames they name. Empty for a cartridge
+## with no `pic_anim` pins, which is Gold and Silver: neither ships
+## `pic_animation.asm` and both send-outs reach `PlayStereoCry` directly.
+##
+## A frame is stored as its bitmask followed by its tile numbers, which is what
+## `PokeAnim_GetFrame` reads in that order, so one byte run holds a frame and
+## the bitmask table's own deduplication is resolved here rather than at every
+## draw.
+func _import_pic_anims(rom: RomFile, layout: Dictionary, species: Array) -> Dictionary:
+	var pins: Dictionary = RomLayout.pic_anim(layout)
+	if pins.is_empty():
+		return {}
+
+	var heights: Dictionary = {}
+	for entry: Dictionary in species:
+		heights[int(entry["number"])] = int((entry["front_tiles"] as Array)[1])
+
+	var out: Dictionary = {"species": {}, "unown": []}
+	for number: int in range(1, RomLayout.SPECIES_COUNT + 1):
+		var record: Dictionary = _read_pic_anim(
+			rom, int(heights.get(number, 0)), int(pins["script_bank"]),
+			int(pins["scripts"]) + (number - 1) * 2,
+			int(pins["idle_scripts"]) + (number - 1) * 2,
+			int(pins["bitmask_pointers"]) + (number - 1) * 2, int(pins["bitmask_bank"]),
+			int(pins["frame_pointers"]) + (number - 1) * 2,
+			int(pins["kanto_frame_bank"]) if number < RomLayout.JOHTO_SPECIES \
+				else int(pins["johto_frame_bank"])
+		)
+		if record.is_empty():
+			return {}
+		out["species"][str(number)] = record
+
+	# Unown is one placeholder in the species tables and 26 letters here, the
+	# split `PokeAnim_GetSpeciesOrUnown` makes.
+	var unown_height: int = int(heights.get(RomLayout.UNOWN_SPECIES, 0))
+	for form: int in RomLayout.UNOWN_FORMS:
+		var record: Dictionary = _read_pic_anim(
+			rom, unown_height, int(pins["script_bank"]),
+			int(pins["unown_scripts"]) + form * 2,
+			int(pins["unown_idle_scripts"]) + form * 2,
+			int(pins["unown_bitmask_pointers"]) + form * 2, int(pins["bitmask_bank"]),
+			int(pins["unown_frame_pointers"]) + form * 2, int(pins["unown_frame_bank"])
+		)
+		if record.is_empty():
+			return {}
+		(out["unown"] as Array).append(record)
+	return out
+
+
+## One species' or letter's record. Every pointer here is a plain in-bank word:
+## a script and a bitmask are read in their table's own bank, and a frame in the
+## bank its data lives in rather than its pointer table's.
+func _read_pic_anim(
+	rom: RomFile,
+	height: int,
+	script_bank: int,
+	script_pointer: int,
+	idle_pointer: int,
+	bitmask_pointer: int,
+	bitmask_bank: int,
+	frame_pointer: int,
+	frame_bank: int
+) -> Dictionary:
+	var mask_bytes: int = RomLayout.pic_anim_bitmask_bytes(height)
+	if mask_bytes <= 0:
+		return {}
+	var script: PackedByteArray = _read_pic_anim_script(rom, script_bank, script_pointer)
+	var idle: PackedByteArray = _read_pic_anim_script(rom, script_bank, idle_pointer)
+	if script.is_empty() or idle.is_empty():
+		return {}
+
+	# How many frames the two scripts between them name. Nothing bounds the
+	# table on the cartridge: `PokeAnim_GetBitmaskIndex` indexes it with
+	# `command - 1` and the highest command used is the last entry there is.
+	var count: int = 0
+	for run: PackedByteArray in [script, idle]:
+		for at: int in range(0, run.size(), 2):
+			if run[at] < PIC_ANIM_DOREPEAT:
+				count = maxi(count, int(run[at]))
+	var table: int = RomFile.linear(frame_bank, rom.u16le(frame_pointer))
+	var masks: int = RomFile.linear(bitmask_bank, rom.u16le(bitmask_pointer))
+	if not rom.in_bounds(table, count * 2):
+		return {}
+
+	var frames: Array = []
+	for index: int in count:
+		var frame: int = RomFile.linear(frame_bank, rom.u16le(table + index * 2))
+		if not rom.in_bounds(frame):
+			return {}
+		var mask_at: int = masks + rom.u8(frame) * mask_bytes
+		if not rom.in_bounds(mask_at, mask_bytes):
+			return {}
+		var mask: PackedByteArray = rom.slice(mask_at, mask_bytes)
+		var tiles: int = 0
+		for byte: int in mask:
+			for bit: int in 8:
+				tiles += (byte >> bit) & 1
+		if not rom.in_bounds(frame + 1, tiles):
+			return {}
+		frames.append({"bytes": Array(mask + rom.slice(frame + 1, tiles))})
+
+	return {
+		"height": height,
+		"script": {"bytes": Array(script)},
+		"idle": {"bytes": Array(idle)},
+		"frames": frames,
+	}
+
+
+## `frame`, `setrepeat` and `dorepeat` are all two bytes wide and `endanim` is
+## one, but `PokeAnim_GetPointer` reads a word at every step, so the run is a
+## table of pairs whose terminator's second byte is never looked at.
+const PIC_ANIM_ENDANIM: int = 0xFF
+const PIC_ANIM_SETREPEAT: int = 0xFE
+const PIC_ANIM_DOREPEAT: int = 0xFD
+## `wPokeAnimFrame` is a byte, so a script cannot honestly be longer than this.
+const PIC_ANIM_MAX_COMMANDS: int = 256
+
+
+func _read_pic_anim_script(rom: RomFile, bank: int, pointer: int) -> PackedByteArray:
+	if not rom.in_bounds(pointer, 2):
+		return PackedByteArray()
+	var at: int = RomFile.linear(bank, rom.u16le(pointer))
+	for index: int in PIC_ANIM_MAX_COMMANDS:
+		if not rom.in_bounds(at + index * 2, 2):
+			return PackedByteArray()
+		if rom.u8(at + index * 2) == PIC_ANIM_ENDANIM:
+			# The terminator is kept: an interpreter that walks the run needs an
+			# end to reach, and its second byte is the cartridge's own.
+			return rom.slice(at, (index + 1) * 2)
+	return PackedByteArray()

@@ -104,6 +104,7 @@ var _world_fruit_trees: Array = []
 var _world_spawns: Dictionary = {}
 var _world_audio: Dictionary = {}
 var _battle_anims_section: Dictionary = {}
+var _pic_anims_section: Dictionary = {}
 ## Which of the sections above have been read. A section that is genuinely empty
 ## is indistinguishable from one that has not been read yet, so the answer is
 ## recorded rather than inferred from the value.
@@ -2135,6 +2136,66 @@ func _supplied_pic(art: Variant) -> Dictionary:
 	}
 
 
+## Where a species' animation tiles sit, in [method species_pic]'s shape. The
+## cell is the same square as the front pic's and holds the `w * h` tiles
+## `GetAnimatedEnemyFrontpic` copies out of the run behind the picture. Empty
+## for a cartridge with no pic animation and for a mod's own supplied picture,
+## neither of which has frames to draw.
+func species_pic_animation(number: int, unown_form: int = 0) -> Dictionary:
+	if pic_animation(number, unown_form).is_empty():
+		return {}
+	var pic: Dictionary = species_pic(number, false)
+	if pic.is_empty() or pic.has("indices"):
+		return {}
+	if number == RomLayout.UNOWN_SPECIES and unown_form > 0:
+		pic["atlas"] = "unown_front_anim"
+		pic["slot"] = unown_form - 1
+		return pic
+	pic["atlas"] = "front_anim"
+	return pic
+
+
+## `AnimateFrontpic`'s record for a species, or for one of Unown's letters when
+## [param unown_form] is a letter rather than zero: { height, script, idle,
+## frames }, the scripts and each frame as a [PackedByteArray].
+##
+## Empty for Gold and Silver, which have no pic animation at all, and for an egg:
+## `AnimateMon_CheckIfPokemon` refuses `EGG` before anything is read, so the
+## cartridge's own egg tables are never reached through here.
+func pic_animation(number: int, unown_form: int = 0) -> Dictionary:
+	var section: Dictionary = _pic_anims()
+	if section.is_empty():
+		return {}
+
+	var value: Variant = null
+	if number == RomLayout.UNOWN_SPECIES and unown_form > 0:
+		var letters: Variant = section.get("unown", [])
+		if letters is Array and unown_form - 1 < (letters as Array).size():
+			value = (letters as Array)[unown_form - 1]
+	else:
+		value = (section.get("species", {}) as Dictionary).get(str(number), null)
+	if not value is Dictionary:
+		return {}
+
+	var record: Dictionary = value as Dictionary
+	var blob: PackedByteArray = _blob("pic_anims")
+	var frames: Array = []
+	for frame: Variant in (record.get("frames", []) as Array):
+		frames.append(_payload_bytes(frame, blob))
+	return {
+		"height": int(record.get("height", 0)),
+		"script": _payload_bytes(record.get("script", []), blob),
+		"idle": _payload_bytes(record.get("idle", []), blob),
+		"frames": frames,
+	}
+
+
+func _pic_anims() -> Dictionary:
+	if _claim_section("pic_anims"):
+		_pic_anims_section = _read_section(RomCache.pic_anims_path(directory), false)
+	return _pic_anims_section
+
+
 ## One of Unown's 26 letter forms, which live outside the species tables.
 func unown_pic(form: int, back: bool = false) -> Dictionary:
 	if form < 0 or form >= RomLayout.UNOWN_FORMS:
@@ -2198,6 +2259,8 @@ func _section_json_path(section: String) -> String:
 			return RomCache.world_audio_path(directory)
 		"battle_anims":
 			return RomCache.battle_anims_path(directory)
+		"pic_anims":
+			return RomCache.pic_anims_path(directory)
 		"overworld_effects":
 			return RomCache.overworld_effects_path(directory)
 	return ""

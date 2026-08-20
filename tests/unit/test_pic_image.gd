@@ -163,3 +163,139 @@ func test_frontpic_pad_columns_is_padfrontpics_own_alignment() -> void:
 	assert_eq(Gen2PicImage.frontpic_pad_columns(6, true), 0)
 	assert_eq(Gen2PicImage.frontpic_pad_columns(5, true), 1)
 	assert_eq(Gen2PicImage.frontpic_pad_columns(0), 0, "a pic the cache has no size for")
+
+
+## `AnimateFrontpic`, which draws through the same box these pads describe. The
+## records here are hand-built rather than read from a cache: what a real
+## cartridge holds is swept over the whole corpus by `tools/checks/pic_anim.gd`,
+## and what is asserted here is the interpreter's own arithmetic.
+const ANIM_HEIGHT: int = 5
+const ANIM_MASK_BYTES: int = 4
+
+
+## A record whose [param script] is the pairs given, terminated, and which holds
+## one frame per entry of [param frames]: a bitmask and its tile numbers.
+func _anim_record(script: Array, frames: Array = []) -> Dictionary:
+	var run := PackedByteArray()
+	for pair: Array in script:
+		run.append(int(pair[0]) & 0xFF)
+		run.append(int(pair[1]) & 0xFF)
+	run.append(0xFF)
+	run.append(0x00)
+	var built: Array = []
+	for frame: Array in frames:
+		built.append(PackedByteArray(frame))
+	return {"height": ANIM_HEIGHT, "script": run, "idle": run, "frames": built}
+
+
+## `PokeAnim_PlaceGraphic` fills the 7x7 block column by column, which is the
+## same `column * 7 + row` the enemy's square is stamped with.
+func test_pic_animation_places_the_base_pic_column_major() -> void:
+	var animation := Gen2PicAnimation.new(_anim_record([]))
+	assert_eq(animation.box.size(), 49)
+	assert_eq(int(animation.box[0]), 0)
+	assert_eq(int(animation.box[1]), 1, "the second cell down the first column")
+	assert_eq(int(animation.box[7]), 7, "the top of the second column")
+	assert_eq(int(animation.box[48]), 48)
+
+
+## `.flipped`: `PlaceGraphic` runs its columns back from the block's other end,
+## so the first column's tiles land in the last.
+func test_pic_animation_mirrors_the_whole_block() -> void:
+	var animation := Gen2PicAnimation.new(_anim_record([]), Gen2PicAnimation.ANIM_MON_NORMAL, true)
+	assert_eq(int(animation.box[42]), 0, "the first column at the block's right")
+	assert_eq(int(animation.box[0]), 42)
+
+
+## The frame counts are the source's own arithmetic, not a measurement: a
+## `frame n, d` spends d, `setrepeat`/`dorepeat` spend none of their own except
+## the pass that ends the repeat, `endanim` spends one, and `Setup` and `Finish`
+## each pay for the transfers they add to the loop's.
+func test_pic_animation_spends_the_scripts_own_frames() -> void:
+	# `ANIM_MON_NORMAL` is StereoCry, Setup, Play, Finish.
+	var script: Array = [[0, 2], [0, 3], [0xFE, 2], [0, 4], [0xFD, 3]]
+	var animation := Gen2PicAnimation.new(_anim_record(script))
+	var spent: int = 0
+	var cries: int = 0
+	while not animation.finished() and spent < 200:
+		if animation.advance() != &"":
+			cries += 1
+		spent += 1
+	assert_true(animation.finished(), "the script ended")
+	assert_eq(cries, 1, "`PokeAnim_StereoCry`, once and inside the animation")
+	# 1 cry + 2 setup + (2 + 3 + 4 + 4 + 1 dorepeat + 1 endanim) + 3 finish.
+	assert_eq(spent, 21)
+
+
+## `PokeAnim_GetDuration` is `a * (1 + speed / 16)` through an 8.8 multiply, so
+## `ANIM_MON_SLOW`'s speed of 4 is a quarter longer with the fraction dropped.
+func test_pic_animation_slow_stretches_every_duration() -> void:
+	var script: Array = [[0, 7]]
+	var normal: int = _frames_of(script, Gen2PicAnimation.ANIM_MON_NORMAL)
+	var slow: int = _frames_of(script, Gen2PicAnimation.ANIM_MON_SLOW)
+	assert_eq(slow - normal, 1, "7 becomes 8, not 8.75")
+
+
+func _frames_of(script: Array, kind: int) -> int:
+	var animation := Gen2PicAnimation.new(_anim_record(script), kind)
+	var spent: int = 0
+	while not animation.finished() and spent < 200:
+		animation.advance()
+		spent += 1
+	return spent
+
+
+## `PokeAnim_ConvertAndApplyBitmask` walks the pic's own square column by column,
+## one bit per cell, and `.GetCoord` offsets it by `PadFrontpic`'s own pads.
+func test_pic_animation_applies_a_frames_bitmask_over_the_pad() -> void:
+	# Bit 0 alone: the pic's own cell (0, 0), which is box column 1, row 2.
+	var frame: Array = [1, 0, 0, 0, 30]
+	var animation := Gen2PicAnimation.new(_anim_record([[1, 1]], [frame]))
+	while not animation.finished() and int(animation.box[1 * 7 + 2]) == 1 * 7 + 2:
+		animation.advance()
+	# Tile 30 is past a 5x5's own 25, so `.GetTilemap` takes the block's 49 as
+	# its offset rather than the `poke_anim_box` table.
+	assert_eq(int(animation.box[1 * 7 + 2]), 30 + 49 - 25)
+
+
+## A record the cache has none of animates nothing, which is Gold and Silver's
+## every row and the `.cry_no_anim` branch here.
+func test_pic_animation_without_a_record_is_finished_at_once() -> void:
+	assert_true(Gen2PicAnimation.new({}).finished())
+	assert_eq(Gen2PicAnimation.new({}).advance(), &"")
+
+
+## Why `PokeAnim_SetVBank1` is not decoration. The animation's tiles start at the
+## 7x7 block's own 49, and `$31` is 49: that is `AppearUser`'s first tile for the
+## player's back pic. The two only ever coexist because the enemy's box is put in
+## VRAM bank 1 for as long as the animation runs, so a renderer reading one flat
+## sheet draws the player's picture inside the enemy's square.
+func test_a_pic_animations_tiles_collide_with_the_players_own_run() -> void:
+	assert_eq(
+		Gen2PicImage.FRONTPIC_TILES * Gen2PicImage.FRONTPIC_TILES,
+		Gen2BattleScreenMap.PLAYER_BASE_TILE
+	)
+	assert_eq(RomLayout.pic_anim_box_tile(25, 5), Gen2BattleScreenMap.PLAYER_BASE_TILE)
+
+
+## `PokeAnim_SetVBank1`'s rule, which is what stops the enemy's animation tiles
+## being drawn over the player and the player's back pic over the enemy. The
+## enemy's box is 7x7 and its frames run behind it; the player's is 6x6 from
+## `$31`, which is the enemy block's own 49.
+func test_a_pic_layer_claims_only_its_own_sheets_cells() -> void:
+	var square: int = Gen2PicImage.FRONTPIC_TILES * Gen2PicImage.FRONTPIC_TILES
+	var banked: int = square + 28
+	# Bank 0 is the sheet both pictures share, so neither reaches past its box.
+	assert_true(Gen2BattleRenderer.claims_tile(48, false, true, square, banked))
+	assert_false(
+		Gen2BattleRenderer.claims_tile(49, false, true, square, banked),
+		"the player's first tile is not the enemy's fiftieth"
+	)
+	# Bank 1 is the animated layer's alone, and there its frames are in reach.
+	assert_true(Gen2BattleRenderer.claims_tile(49, true, true, square, banked))
+	assert_false(
+		Gen2BattleRenderer.claims_tile(0, true, false, square, banked),
+		"a layer that owns no bank 1 sheet draws none of its cells"
+	)
+	assert_false(Gen2BattleRenderer.claims_tile(banked, true, true, square, banked))
+	assert_false(Gen2BattleRenderer.claims_tile(-1, false, false, square, banked))

@@ -59,6 +59,7 @@ const WORLD_FRUIT_TREES: String = "world_fruit_trees.json"
 ## two escape moves and a blackout all read both.
 const WORLD_SPAWNS: String = "world_spawns.json"
 const BATTLE_ANIMS: String = "battle_anims.json"
+const PIC_ANIMS: String = "pic_anims.json"
 const BATTLE_ANIM_GFX_DIR: String = "battle_anim_gfx"
 
 ## The key a payload span is stored under, and how many numbers it holds. A
@@ -75,7 +76,7 @@ const BYTES_KEY: String = "bytes"
 ## a dump the owner still has, so re-importing costs a few seconds and a
 ## migration would have to carry every past shape forever. Nothing but the cache
 ## is thrown away, since saves live under their own root.
-const FORMAT_VERSION: int = 70
+const FORMAT_VERSION: int = 71
 
 ## What [method state] answers. A stale cache is told from a missing one because
 ## they need different things said to whoever is looking at it: one is a
@@ -250,6 +251,13 @@ static func battle_anims_path(directory: String) -> String:
 ## JSON for the reason every other tile strip is: it is pixels, not records.
 static func battle_anim_gfx_path(directory: String, number: int) -> String:
 	return "%s/%s/%02d.idx" % [directory, BATTLE_ANIM_GFX_DIR, number]
+
+
+## `AnimateFrontpic`'s scripts, bitmasks and frames, one record per species and
+## per Unown letter; see [Gen2PicAnimation]. Absent for Gold and Silver, which
+## have no pic animation at all.
+static func pic_anims_path(directory: String) -> String:
+	return "%s/%s" % [directory, PIC_ANIMS]
 
 
 static func pic_path(directory: String, name: String) -> String:

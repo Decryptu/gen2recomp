@@ -176,12 +176,18 @@ func _draw_pics() -> void:
 			_data.trainer_palette(enemy_trainer),
 			_palette_map("bg_palette_maps", Gen2BattleAnimBackground.PAL_BG_ENEMY)
 		)
-	var enemy_key: Array = [map_key, enemy, _enemy_pixels_key, enemy_palette, raster]
+	var vbank1: PackedByteArray = _vbank1()
+	var enemy_key: Array = [
+		map_key, enemy, _enemy_pixels_key, enemy_palette, raster, vbank1.duplicate(),
+	]
 	if enemy_key != _enemy_pic_key:
 		_enemy_pic_key = enemy_key
 		_show_layer(
 			_enemy_pic,
-			_pic_layer(map, Gen2BattleScreenMap.ENEMY_BASE_TILE, Gen2BattleScreenMap.ENEMY_SIDE, _enemy_pixels),
+			_pic_layer(
+				map, Gen2BattleScreenMap.ENEMY_BASE_TILE,
+				Gen2BattleScreenMap.ENEMY_SIDE, _enemy_pixels, vbank1, true
+			),
 			enemy_palette
 		)
 	# `InitBattleDisplay` places the player's back pic with `PlaceGraphic` only
@@ -200,17 +206,33 @@ func _draw_pics() -> void:
 				_data.player_palette(String(_view.get("player_backpic_palette", "chris"))),
 				_palette_map("bg_palette_maps", Gen2BattleAnimBackground.PAL_BG_PLAYER)
 			)
-		var player_key: Array = [map_key, player, _player_pixels_key, player_palette, raster]
+		var player_key: Array = [
+			map_key, player, _player_pixels_key, player_palette, raster, vbank1.duplicate(),
+		]
 		if player_key != _player_pic_key:
 			_player_pic_key = player_key
 			_show_layer(
 				_player_pic,
-				_pic_layer(map, Gen2BattleScreenMap.PLAYER_BASE_TILE, Gen2BattleScreenMap.PLAYER_SIDE, _player_pixels),
+				_pic_layer(
+					map, Gen2BattleScreenMap.PLAYER_BASE_TILE,
+					Gen2BattleScreenMap.PLAYER_SIDE, _player_pixels, vbank1
+				),
 				player_palette
 			)
 	else:
 		_player_pic.texture = null
 		_player_pic_key = []
+
+
+## `wAttrmap` bit 3 over the screen, which is the VRAM bank each cell's tile
+## number is read from. Only `PokeAnim_SetVBank1` ever sets it here, so it is
+## empty unless the enemy's picture is being animated.
+func _vbank1() -> PackedByteArray:
+	var supplied: Variant = _view.get("bg_vbank1", null)
+	if supplied is PackedByteArray \
+			and (supplied as PackedByteArray).size() == COLUMNS * ROWS:
+		return supplied
+	return PackedByteArray()
 
 
 ## The tilemap the animation edits, or the plain one both pics sit in when the
@@ -227,27 +249,64 @@ func _bg_map() -> PackedByteArray:
 ## falls inside this pic's own run, drawn from the pic's padded box. A tile is
 ## `base + column * side + row`, which is the column-major order `PlaceGraphic`
 ## walks and `.BGSquares` indexes.
+## [param vbank1] is `wAttrmap` bit 3, which is the VRAM bank each cell's tile
+## number is read from, and [param animated] is whether this layer owns bank 1.
+##
+## `PokeAnim_SetVBank1` is the whole reason both are needed. Bank 0 holds the
+## enemy's padded picture at tiles 0 to 48 and the player's back pic from `$31`,
+## which is 49; bank 1 holds the enemy's picture *and* `AnimateFrontpic`'s frames,
+## which run from that same 49. So the two sheets overlap in tile number and are
+## told apart by the bank alone: on a bank 0 cell this layer sees its own square
+## and nothing behind it, on a bank 1 cell only the layer that owns bank 1 draws
+## at all, and it may reach the frames. Reading one flat sheet instead puts the
+## animation's tiles over the player and the player's over the enemy, which is
+## the same defect from either side.
 func _pic_layer(
-	map: PackedByteArray, base: int, side: int, pixels: PackedByteArray
+	map: PackedByteArray, base: int, side: int, pixels: PackedByteArray,
+	vbank1: PackedByteArray = PackedByteArray(), animated: bool = false
 ) -> PackedByteArray:
 	var out: PackedByteArray = _new_buffer()
 	var box: int = side * TILE
 	if pixels.size() < box * box:
 		return out
+	# The strip is `side` tiles tall and as wide as it has tiles, so a pic
+	# carrying `AnimateFrontpic`'s frames behind its own box is the same buffer
+	# with more columns and the same `column * side + row` addressing.
+	@warning_ignore("integer_division")
+	var strip: int = pixels.size() / box
+	@warning_ignore("integer_division")
+	var banked: int = (strip / TILE) * side
+	var square: int = side * side
+	var banks: bool = vbank1.size() == map.size()
 	for row: int in ROWS:
 		for column: int in COLUMNS:
-			var tile: int = int(map[row * COLUMNS + column]) - base
-			if tile < 0 or tile >= side * side:
+			var at: int = row * COLUMNS + column
+			var bank1: bool = banks and vbank1[at] != 0
+			var tile: int = int(map[at]) - base
+			if not claims_tile(tile, bank1, animated, square, banked):
 				continue
 			@warning_ignore("integer_division")
 			var source_x: int = (tile / side) * TILE
 			var source_y: int = (tile % side) * TILE
 			for line: int in TILE:
-				var from: int = (source_y + line) * box + source_x
+				var from: int = (source_y + line) * strip + source_x
 				var to: int = (row * TILE + line) * Gen2Screen.WIDTH + column * TILE
 				for x: int in TILE:
 					out[to + x] = pixels[from + x]
 	return out
+
+
+## Whether the layer whose first tile is [param tile]'s own base draws this
+## cell. Split out because it is the whole of `PokeAnim_SetVBank1`'s rule and
+## getting it wrong is invisible until two pictures share a tile number: bank 1
+## belongs to the animated layer alone and reaches its frames, [param banked],
+## while bank 0 gives every layer its own [param square] and nothing behind it.
+static func claims_tile(
+	tile: int, bank1: bool, animated: bool, square: int, banked: int
+) -> bool:
+	if bank1 and not animated:
+		return false
+	return tile >= 0 and tile < (banked if bank1 else square)
 
 
 ## The two pics as index buffers padded out to their own boxes, so a tile id
@@ -267,9 +326,12 @@ func _ensure_pixels() -> void:
 		elif bool(enemy_key[1]):
 			_enemy_pixels = _substitute_pic(false)
 		else:
+			# `GetAnimatedFrontpic` is what the enemy's square is loaded with,
+			# so its frames stand behind the picture in the same run.
 			_enemy_pixels = padded_pic(_data,
 				_battler_pic(int(enemy_key[0]), int(enemy_key[2]), false),
-				Gen2BattleScreenMap.ENEMY_SIDE, true
+				Gen2BattleScreenMap.ENEMY_SIDE, true,
+				_data.species_pic_animation(int(enemy_key[0]), int(enemy_key[2]))
 			)
 		_enemy_pixels_key = enemy_key
 	var player_key: Array = [
@@ -342,12 +404,17 @@ static func substitute_pixels(strip: PackedByteArray, player_side: bool) -> Pack
 ## its own box and a trainer's is already the whole 7x7, so neither is padded.
 ## Static because the placement is the whole of the picture and takes no screen:
 ## a check sweeping three caches builds the box the way the renderer does.
+## [param animation] is the same species' `front_anim` cell, which becomes the
+## tile columns behind the box: `GetAnimatedEnemyFrontpic` loads them at
+## `7 * 7 tiles` past the picture and `.GetTilemap` addresses them from there.
 static func padded_pic(
-	data: GameData, pic: Dictionary, side: int, front: bool = false
+	data: GameData, pic: Dictionary, side: int, front: bool = false,
+	animation: Dictionary = {}
 ) -> PackedByteArray:
 	var box: int = side * TILE
+	var extra: int = _animation_columns(animation, side) * TILE
 	var out: PackedByteArray = PackedByteArray()
-	out.resize(box * box)
+	out.resize(box * (box + extra))
 	if pic.is_empty():
 		return out
 
@@ -374,10 +441,60 @@ static func padded_pic(
 		pad_x = Gen2PicImage.frontpic_pad_columns(width / TILE) * TILE
 		@warning_ignore("integer_division")
 		pad_y = Gen2PicImage.frontpic_pad_rows(height / TILE) * TILE
+	var strip: int = box + extra
 	for y: int in mini(height, box - pad_y):
 		for x: int in mini(width, box - pad_x):
-			out[(y + pad_y) * box + x + pad_x] = indices[y * stride + x]
+			out[(y + pad_y) * strip + x + pad_x] = indices[y * stride + x]
+	if extra > 0:
+		_append_animation(data, animation, out, strip, side)
 	return out
+
+
+## How many tile columns of `side` an animation's own `w * h` tiles need. Zero
+## when the cartridge has no animation for this pic, which is every pic on Gold
+## and Silver and every trainer and back pic on Crystal.
+static func _animation_columns(animation: Dictionary, side: int) -> int:
+	if animation.is_empty() or side <= 0:
+		return 0
+	@warning_ignore("integer_division")
+	var tiles: int = (int(animation.get("width", 0)) / TILE) \
+		* (int(animation.get("height", 0)) / TILE)
+	return ceili(float(tiles) / float(side))
+
+
+## The animation's tiles laid into the strip past the box, in the run's own
+## order: tile `side * side + i` is at column `side + i / side`, row `i % side`.
+static func _append_animation(
+	data: GameData, animation: Dictionary, out: PackedByteArray, strip: int, side: int
+) -> void:
+	var name: String = String(animation.get("atlas", ""))
+	var cell: Dictionary = Gen2PicImage.atlas_cell(
+		data.atlas_indices(name), data.atlas(name), animation
+	)
+	if cell.is_empty():
+		return
+	var indices: PackedByteArray = cell["indices"]
+	var source_stride: int = int(cell["width"])
+	@warning_ignore("integer_division")
+	var rows: int = int(cell["height"]) / TILE
+	@warning_ignore("integer_division")
+	var count: int = (source_stride / TILE) * rows
+	for index: int in count:
+		# The atlas cell holds the tiles column major, the way every pic is
+		# stored, and the strip wants them in the run's own order.
+		@warning_ignore("integer_division")
+		var source_x: int = (index / rows) * TILE
+		var source_y: int = (index % rows) * TILE
+		@warning_ignore("integer_division")
+		var target_x: int = (side + index / side) * TILE
+		var target_y: int = (index % side) * TILE
+		for line: int in TILE:
+			var from: int = (source_y + line) * source_stride + source_x
+			var to: int = (target_y + line) * strip + target_x
+			if from + TILE > indices.size() or to + TILE > out.size():
+				continue
+			for x: int in TILE:
+				out[to + x] = indices[from + x]
 
 
 ## A battler pic's own palette, permuted by whatever DMG byte the animation's
