@@ -2445,6 +2445,7 @@ func _open_service_host() -> void:
 		_refresh_labels()
 		return
 	host.completed.connect(_on_service_completed)
+	host.sfx_requested.connect(_play_sfx)
 	_service_host = host
 	_script_prompt = "Service host open"
 	_refresh_labels()
@@ -3387,6 +3388,7 @@ func _open_service_overlay(kind: StringName) -> void:
 		_refresh_labels()
 		return
 	host.completed.connect(_on_service_completed)
+	host.sfx_requested.connect(_play_sfx)
 	_service_host = host
 	_script_prompt = "%s open" % label
 	_refresh_labels()
@@ -3414,6 +3416,7 @@ func _open_fly_map(request: Dictionary) -> void:
 		_refresh_labels()
 		return
 	host.completed.connect(_on_service_completed)
+	host.sfx_requested.connect(_play_sfx)
 	_service_host = host
 	_script_prompt = "Fly: choose a town"
 	_refresh_labels()
@@ -4035,13 +4038,17 @@ func _play_music(index: int) -> void:
 	_audio_player.play_record(record, &"map_music", _audio_assets())
 
 
-func _play_sfx(index: int) -> void:
+## `PlaySFX`. [param waited] is the `WaitSFX` the source spends in front of a
+## few of them; see [signal Gen2WorldServiceScreen.sfx_requested].
+func _play_sfx(index: int, waited: bool = false) -> void:
 	if _audio_player == null or _data == null:
 		return
 	var record: Dictionary = _data.world_audio(&"sfx", index)
 	if record.is_empty():
 		return
-	_audio_player.play_record(record, &"sound", _audio_assets())
+	_audio_player.play_record(
+		record, &"waited_sfx" if waited else &"sound", _audio_assets()
+	)
 
 
 ## The save whose party a queued script's VAR_PARTYCOUNT read and CheckPokerus

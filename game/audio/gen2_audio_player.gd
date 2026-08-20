@@ -93,7 +93,18 @@ func play_record(
 			_engine.cry_tracks = cry_tracks
 			_engine.stereo_panning_mask = 1 if cry_tracks != 0 else 0
 			started = _engine.play_cry(record)
-		&"sound", &"sfx":
+		&"sound", &"sfx", &"waited_sfx":
+			# `WaitPlaySFX` holds until the channels are free, so its sound is
+			# never the one the gate refuses. The wait is not spent here.
+			started = _engine.play_sfx_gated(record, request_kind == &"waited_sfx")
+			if not started:
+				# `PlaySFX` refusing a lower-priority request is the driver
+				# working, not a failure: the effect on the channels keeps them.
+				return {"ok": true, "played": false, "refused": true}
+		&"stereo_sfx":
+			# `PlayStereoSFX`, which the battle animations reach directly: no
+			# `wCurSFX` gate in front of it, so an animation's own sound lands
+			# whatever is still ringing.
 			started = _engine.play_sfx(record)
 		_:
 			started = _engine.play_music(record)
@@ -110,6 +121,12 @@ func play_record(
 		"bank": int(record.get("bank", -1)),
 		"address": int(record.get("address", -1)),
 	}
+
+
+## `SFXChannelsOff`, which the Unown sounds spend in front of their own
+## `PlaySFX` so the one still ringing is cut rather than left to refuse the next.
+func stop_effects() -> void:
+	_engine.sfx_channels_off()
 
 
 ## `FadeMusic`: a frame count per volume step. Zero stops at once, which is what

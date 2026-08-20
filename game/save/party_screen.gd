@@ -24,7 +24,7 @@ signal closed(result: Dictionary)
 signal action_chosen(action: Dictionary)
 ## A sound this screen owes, by `constants/sfx_constants.asm` index. Emitted
 ## rather than played: the audio player belongs to whoever embedded this.
-signal sfx_requested(index: int)
+signal sfx_requested(index: int, waited: bool)
 ## `PlayMonCry2`, which the stats screen this menu opens plays on every mon it
 ## loads. Emitted for the same reason [signal sfx_requested] is.
 signal cry_requested(species: int)
@@ -555,7 +555,8 @@ func _finish_switch() -> void:
 		var held: Gen2SaveMon = _save.party[from]
 		_save.party[from] = _save.party[_member_cursor]
 		_save.party[_member_cursor] = held
-		sfx_requested.emit(SFX_SWITCH_POKEMON)
+		## `SwitchPartyMons` is `WaitPlaySFX`.
+		sfx_requested.emit(SFX_SWITCH_POKEMON, true)
 	_member_cursor = clampi(_member_cursor, 0, _row_count() - 1)
 	## The icons are respawned rather than stepped: `LoadPartyMenuGFX` and
 	## `InitPartyMenuGFX` run again behind the reopened list.

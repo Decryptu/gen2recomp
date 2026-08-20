@@ -1427,7 +1427,9 @@ func test_the_party_submenu_switch_row_moves_a_member() -> void:
 	_world_screen._open_embedded_party()
 	await get_tree().process_frame
 	var party: Gen2PartyScreen = _world_screen._party_host
-	party.sfx_requested.connect(func(index: int) -> void: played.append(index))
+	party.sfx_requested.connect(
+		func(index: int, _waited: bool) -> void: played.append(index)
+	)
 	_choose_submenu(party, Gen2PartyScreen.OPTION_SWITCH)
 
 	var snapshot: Dictionary = party.submenu_snapshot()

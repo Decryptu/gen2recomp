@@ -6,6 +6,20 @@ extends Control
 ## hosts and API.
 
 signal completed(results: Array)
+## The sound this screen asks for, played by whoever owns the driver.
+##
+## Nothing here reaches [Gen2AudioPlayer]: the world screen owns the one player
+## a map's music and its effects share, so a second surface asking for a sound
+## goes through it the way the start menu, the party screen and the move screen
+## already do. [Gen2WorldAudioHost] is an inspection probe that renders no
+## samples and must never stand in for it.
+##
+## [param waited] is `WaitPlaySFX`, or a `WaitSFX` spent in front of the sound
+## by hand: the cartridge holds there until the four effect channels are free,
+## so the request can never be the one `PlaySFX`'s own priority gate refuses.
+## The wait itself is not spent (see `HANDOFF.md`'s `WaitSFX` row); what it
+## carries is that the sound is heard.
+signal sfx_requested(index: int, waited: bool)
 
 const PANEL: Color = Color("#14233a")
 const BORDER: Color = Color("#4f6f9e")
@@ -16,7 +30,7 @@ const SUCCESS: Color = Color("#7bd89a")
 const ERROR: Color = Color("#ef8a8a")
 
 enum MODE {
-	MENU, MART, PHONE, AUDIO, POKEGEAR, TOWN_MAP, CARD,
+	MENU, MART, PHONE, POKEGEAR, TOWN_MAP, CARD,
 	APRICORN, PC, PC_ITEMS, PC_ITEM_LIST, PC_TEXT,
 }
 
@@ -184,9 +198,6 @@ func open_pending(
 			return true
 		&"phone_call_requested", &"special_phone_call_requested":
 			_open_phone(request, resolved.get("data", {}))
-			return true
-		&"audio_requested":
-			_open_audio(request, resolved.get("data", {}).get("audio", {}))
 			return true
 		&"apricorn_selection_requested":
 			_open_apricorns()
@@ -600,7 +611,8 @@ func _buy_mart_selection() -> void:
 		_show_mart_text(_mart_text(slot, {"name": entry.get("name", "")}), MART_LIST)
 		return
 	_mart_purchased = true
-	Gen2WorldAudioHost.play(_data.world_audio(&"sfx", SFX_TRANSACTION), &"sound")
+	## `PlayTransactionSound` is a `WaitSFX` and then the sound.
+	sfx_requested.emit(SFX_TRANSACTION, true)
 	_refresh_mart_entries()
 	_show_mart_text(_mart_text("thanks", {
 		"name": purchase.get("name", ""), "quantity": _mart_quantity,
@@ -955,7 +967,8 @@ func _advance_pc_text() -> void:
 		_show_pc_page()
 		return
 	if _pc_sfx >= 0:
-		Gen2WorldAudioHost.play(_data.world_audio(&"sfx", _pc_sfx), &"sound")
+		## `ProfOaksPCBoot` waits *behind* its sound, not in front of it.
+		sfx_requested.emit(_pc_sfx, false)
 	_pc_sfx = -1
 	if _pc_after == &"close":
 		_finish_runtime({"ok": true, "script_value": 0})
@@ -1264,23 +1277,6 @@ func _on_town_map_closed() -> void:
 	completed.emit([])
 
 
-func _open_audio(request: Dictionary, record: Dictionary) -> void:
-	_mode = MODE.AUDIO
-	_cursor = 0
-	_title.text = "AUDIO HOST"
-	var kind: StringName = StringName(request.get("values", {}).get("kind", &"audio"))
-	var playback: Dictionary = Gen2WorldAudioHost.play(record, kind)
-	_summary.text = "Resolved %s %s:%04X (%d bytes)." % [
-		String(kind), int(record.get("bank", -1)), int(record.get("address", -1)),
-		int(record.get("byte_count", 0)),
-	]
-	_status.text = "Audio resolved for shared runtime: %s" % String(
-		playback.get("backend", "unavailable")
-	)
-	_footer.text = "A: continue    B: stop"
-	_render_options(["Continue"])
-
-
 func _move_cursor(delta: int) -> void:
 	var count: int = _option_count()
 	if count <= 0:
@@ -1340,7 +1336,7 @@ func _confirm() -> void:
 		else:
 			_open_card(chosen)
 		return
-	if _mode in [MODE.PHONE, MODE.AUDIO]:
+	if _mode == MODE.PHONE:
 		_finish_runtime({"ok": true, "script_value": 1})
 
 
@@ -1363,7 +1359,7 @@ func _cancel() -> void:
 	elif _mode == MODE.POKEGEAR:
 		_mode = -1
 		completed.emit([])
-	elif _mode in [MODE.PHONE, MODE.AUDIO]:
+	elif _mode == MODE.PHONE:
 		_finish_runtime({"ok": true, "script_value": 0, "cancelled": true})
 	elif _mode == MODE.TOWN_MAP and _town_map != null:
 		_town_map.close()
@@ -1451,7 +1447,7 @@ func _render_service_page(values: Array) -> void:
 		_service_page = Gen2WorldServicePage.from_data(_data)
 	if _service_page == null:
 		return
-	var page_rows: Array = [] if _mode in [MODE.PHONE, MODE.PC_TEXT, MODE.AUDIO] else values
+	var page_rows: Array = [] if _mode in [MODE.PHONE, MODE.PC_TEXT] else values
 	var labels: Array = []
 	for value: Variant in page_rows:
 		if value is Dictionary:
@@ -1503,7 +1499,7 @@ func _service_box() -> Gen2MenuBox:
 			return _apricorn_quantity_box() if _apricorns != null \
 				and _apricorns.phase == Gen2WorldApricorn.SELECT_QUANTITY \
 				else _apricorn_select_box()
-		MODE.POKEGEAR, MODE.AUDIO:
+		MODE.POKEGEAR:
 			return _dynamic_box(_option_count())
 	return null
 
@@ -1532,9 +1528,8 @@ func _apricorn_quantity_box() -> Gen2MenuBox:
 	return Gen2MenuBox.from_coords(6, 9, 19, 12, 0)
 
 
-## The list box every mode above still leaves to the panel: POKEGEAR's card
-## list, which `HANDOFF.md` already records as staying a panel, and AUDIO,
-## which is a debug host with no cartridge screen of its own.
+## The one list box still left to the panel: POKEGEAR's card list, which
+## `HANDOFF.md` already records as staying a panel.
 func _dynamic_box(count: int) -> Gen2MenuBox:
 	var bottom: int = mini(17, 1 + maxi(count, 1) * 2)
 	return Gen2MenuBox.from_coords(

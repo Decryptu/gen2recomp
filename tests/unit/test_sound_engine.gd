@@ -243,6 +243,36 @@ func test_an_effect_takes_the_music_channel_and_gives_it_back() -> void:
 	assert_true(engine.music_channels_active(), "the music never stopped")
 
 
+## `PlaySFX`'s own gate. The table is ordered highest priority first, so the id
+## still on the channels has to be less than or equal to the new one for it to
+## be taken; the same id restarts, which is `cp e / jr c`.
+func test_a_lower_priority_effect_is_refused_while_one_is_still_playing() -> void:
+	var engine: Gen2SoundEngine = _engine()
+	var first: Dictionary = _record([[4, [
+		0xDF, 0xD8, 0x20, 0xB1, 0xD4, 0x10, 0xFF,
+	]]], 0x3C)
+	first["index"] = 0x01
+	assert_true(engine.play_sfx_gated(first))
+	engine.update_sound()
+	assert_eq(engine.cur_sfx, 0x01)
+
+	var lower: Dictionary = first.duplicate(true)
+	lower["index"] = 0x22
+	assert_false(engine.play_sfx_gated(lower), "a higher id waits its turn")
+	assert_eq(engine.cur_sfx, 0x01, "and does not claim the channels")
+
+	var higher: Dictionary = first.duplicate(true)
+	higher["index"] = 0x00
+	assert_true(engine.play_sfx_gated(higher), "a lower id takes them")
+	assert_eq(engine.cur_sfx, 0x00)
+
+	# Nothing playing, so the gate is not consulted at all.
+	var _drain: Array = _writes(engine, 40)
+	assert_false(engine.sfx_active())
+	assert_true(engine.play_sfx_gated(lower))
+	assert_eq(engine.cur_sfx, 0x22)
+
+
 func test_sfx_priority_rests_the_music_channels_while_an_effect_runs() -> void:
 	var engine: Gen2SoundEngine = _engine()
 	assert_true(engine.play_music(_record([[1, [

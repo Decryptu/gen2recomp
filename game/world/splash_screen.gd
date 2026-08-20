@@ -208,7 +208,9 @@ func _apply(events: Array[Dictionary]) -> void:
 				_finish()
 				return
 			&"play_sfx":
-				_play_sfx(int(event.get("sfx", 0)))
+				_play_sfx(
+					int(event.get("sfx", 0)), bool(event.get("channels_off", false))
+				)
 			&"play_music":
 				_play_music(
 					int(event.get("music", 0)), bool(event.get("restart", true))
@@ -265,11 +267,14 @@ func _ensure_audio() -> void:
 
 ## `PlaySFX`, which the GameFreak animation calls five times on Crystal and once
 ## on Gold and Silver. A cache with no record for one spends its frames anyway,
-## which is what a frame-count test is.
-func _play_sfx(sfx: int) -> void:
+## which is what a frame-count test is. `.PlayUnownSound` is the one caller that
+## spends `SFXChannelsOff` in front of it, which is what `channels_off` carries.
+func _play_sfx(sfx: int, channels_off: bool = false) -> void:
 	_ensure_audio()
 	if _data == null or sfx <= 0:
 		return
+	if channels_off:
+		_audio.stop_effects()
 	_audio.play_record(_data.world_audio(&"sfx", sfx), &"sfx", _audio_assets())
 
 

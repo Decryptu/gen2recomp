@@ -25,7 +25,7 @@ signal closed
 signal field_item_used(request: Dictionary)
 ## `PlaySFX`, which this screen has no driver of its own for: the world that
 ## hosts it owns the player. `SFX_SAVE` is the only one it asks for.
-signal sfx_requested(sfx: int)
+signal sfx_requested(sfx: int, waited: bool)
 
 enum Mode {
 	LIST, PACK, PACK_ITEM, PACK_TEACH, PACK_TARGET,
@@ -1844,7 +1844,8 @@ func _show_save_result() -> void:
 		SAVE_SAVED_LINES[0] % player_name, SAVE_SAVED_LINES[1],
 	], -1)
 	## `WaitSFX` after it is not spent, for the reason the intro cry's is not.
-	sfx_requested.emit(SFX_SAVE)
+	## `SavedTheGame` reaches SFX_SAVE through `WaitPlaySFX`.
+	sfx_requested.emit(SFX_SAVE, true)
 
 
 ## `DisplaySaveInfoOnSave`'s four rows: the same fields [Gen2TrainerCard]'s

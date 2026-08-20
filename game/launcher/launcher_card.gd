@@ -43,8 +43,6 @@ static func selected(
 	return _made(skin, skin.padded(style, padding))
 
 
-## A surface that genuinely floats: sheets, toasts and the bottom dock. Never put
-## one inside a container that clips, because the shadow is drawn outside it.
 ## A solid object laid on the page: filled in [member Gen2LauncherTheme.surface],
 ## which is the opposite side of the page from everything under it. Whatever goes
 ## inside is written in [member Gen2LauncherTheme.on_surface].
@@ -57,6 +55,8 @@ static func chip(
 	return _made(skin, skin.padded(skin.floating(skin.surface, radius, spread), padding))
 
 
+## A surface that genuinely floats: sheets, toasts and the bottom dock. Never put
+## one inside a container that clips, because the shadow is drawn outside it.
 static func floating(
 	skin: Gen2LauncherTheme,
 	radius: float = Gen2LauncherTheme.RADIUS_LG,
