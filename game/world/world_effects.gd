@@ -70,6 +70,7 @@ const HEAL_MACHINE_FLASHES: int = 8
 ## grass and for `.OAMData_Tree`.
 const PAL_OW_EMOTE: int = 5
 const PAL_OW_TREE: int = 6
+const PAL_OW_ROCK: int = 7
 
 ## ShakeHeadbuttTree's `ld a, 32 / ld [wFrameCounter], a`, and OWCutAnimation's
 ## own, which both branches of its jumptable write.

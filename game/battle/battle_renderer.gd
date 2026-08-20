@@ -56,6 +56,9 @@ var _panels: TextureRect = null
 var _enemy_bar: TextureRect = null
 var _player_bar: TextureRect = null
 var _exp_bar: TextureRect = null
+## `BattleStart_TrainerHuds`' party balls, which are OAM rather than background
+## and so take no scroll.
+var _hud_balls: TextureRect = null
 var _sprites: TextureRect = null
 
 ## `SPRITE_MONSTER` (constants/sprite_constants.asm), the same number in both
@@ -126,6 +129,7 @@ func set_battle_data(data: GameData) -> bool:
 	_enemy_bar = _new_layer()
 	_player_bar = _new_layer()
 	_exp_bar = _new_layer()
+	_hud_balls = _new_layer()
 	_sprites = _new_layer()
 	return true
 
@@ -153,12 +157,26 @@ func _draw_pics() -> void:
 	var map: PackedByteArray = _bg_map()
 	_ensure_pixels()
 	var raster: Array = _raster_key()
+	# A packed array is passed by reference, so a key holding the screen's own
+	# map is a key that changes with it: every animation that edits nothing but
+	# the tilemap, which is most of them, would compare equal to what is on
+	# screen and never be redrawn.
+	var map_key: PackedByteArray = map.duplicate()
 
 	var enemy: int = int(_view.get("enemy_species", 0))
 	var enemy_palette: PackedColorArray = _battler_palette(
 		enemy, Gen2BattleAnimBackground.PAL_BG_ENEMY
 	)
-	var enemy_key: Array = [map, enemy, _enemy_pixels_key, enemy_palette, raster]
+	# `GetFrontpicPalettePointer` reads `wTrainerClass` rather than a species
+	# when the square is holding a trainer, which it is until that trainer has
+	# sent something out.
+	var enemy_trainer: int = int(_view.get("enemy_trainer_pic", 0))
+	if enemy_trainer > 0:
+		enemy_palette = _remap(
+			_data.trainer_palette(enemy_trainer),
+			_palette_map("bg_palette_maps", Gen2BattleAnimBackground.PAL_BG_ENEMY)
+		)
+	var enemy_key: Array = [map_key, enemy, _enemy_pixels_key, enemy_palette, raster]
 	if enemy_key != _enemy_pic_key:
 		_enemy_pic_key = enemy_key
 		_show_layer(
@@ -174,7 +192,15 @@ func _draw_pics() -> void:
 		var player_palette: PackedColorArray = _battler_palette(
 			player, Gen2BattleAnimBackground.PAL_BG_PLAYER
 		)
-		var player_key: Array = [map, player, _player_pixels_key, player_palette, raster]
+		# `GetPlayerOrMonPalettePointer`'s `and a / jp nz`: a zero species is the
+		# player standing there, and the palette is the player's own.
+		var backpic: String = String(_view.get("player_backpic", ""))
+		if not backpic.is_empty():
+			player_palette = _remap(
+				_data.player_palette(String(_view.get("player_backpic_palette", "chris"))),
+				_palette_map("bg_palette_maps", Gen2BattleAnimBackground.PAL_BG_PLAYER)
+			)
+		var player_key: Array = [map_key, player, _player_pixels_key, player_palette, raster]
 		if player_key != _player_pic_key:
 			_player_pic_key = player_key
 			_show_layer(
@@ -231,22 +257,35 @@ func _pic_layer(
 func _ensure_pixels() -> void:
 	var enemy_key: Array = [
 		int(_view.get("enemy_species", 0)), bool(_view.get("enemy_substitute", false)),
-		int(_view.get("enemy_unown_form", 0)),
+		int(_view.get("enemy_unown_form", 0)), int(_view.get("enemy_trainer_pic", 0)),
 	]
 	if enemy_key != _enemy_pixels_key:
-		_enemy_pixels = _substitute_pic(false) if bool(enemy_key[1]) \
-			else _padded_pic(
+		if int(enemy_key[3]) > 0:
+			_enemy_pixels = _padded_pic(
+				_data.trainer_pic(int(enemy_key[3])), Gen2BattleScreenMap.ENEMY_SIDE
+			)
+		elif bool(enemy_key[1]):
+			_enemy_pixels = _substitute_pic(false)
+		else:
+			_enemy_pixels = _padded_pic(
 				_battler_pic(int(enemy_key[0]), int(enemy_key[2]), false),
 				Gen2BattleScreenMap.ENEMY_SIDE
 			)
 		_enemy_pixels_key = enemy_key
 	var player_key: Array = [
 		int(_view.get("player_species", 0)), bool(_view.get("player_substitute", false)),
-		int(_view.get("player_unown_form", 0)),
+		int(_view.get("player_unown_form", 0)), String(_view.get("player_backpic", "")),
 	]
 	if player_key != _player_pixels_key:
-		_player_pixels = _substitute_pic(true) if bool(player_key[1]) \
-			else _padded_pic(
+		if not String(player_key[3]).is_empty():
+			_player_pixels = _padded_pic(
+				_data.player_backpic(String(player_key[3])),
+				Gen2BattleScreenMap.PLAYER_SIDE
+			)
+		elif bool(player_key[1]):
+			_player_pixels = _substitute_pic(true)
+		else:
+			_player_pixels = _padded_pic(
 				_battler_pic(int(player_key[0]), int(player_key[2]), true),
 				Gen2BattleScreenMap.PLAYER_SIDE
 			)
@@ -354,18 +393,11 @@ func _palette_map(key: String, slot: int) -> int:
 ## sits in a panel of black text without either being separate. Here that is one
 ## buffer per palette, which is why the bars are drawn apart from the panels.
 ##
-## `BattleAnimClearHud` takes all four off the map for the length of a move
-## animation and `BattleAnimRestoreHuds` puts them back, which is what
-## `hud_visible` is.
+## `BattleAnimClearHud` takes one side off the map for the length of a move
+## animation and `BattleAnimRestoreHuds` puts it back; a battle opening has
+## neither of them up for several seconds. Both are the two per-side keys, and
+## the view's own `hud_visible` is the summary of them.
 func _draw_panels() -> void:
-	if not bool(_view.get("hud_visible", true)):
-		_panels.texture = null
-		_enemy_bar.texture = null
-		_player_bar.texture = null
-		_exp_bar.texture = null
-		_layer_keys.clear()
-		return
-
 	var raster: Array = _raster_key()
 	var enemy_hp: int = int(_view.get("enemy_hp", 0))
 	var enemy_max_hp: int = int(_view.get("enemy_max_hp", 0))
@@ -376,38 +408,113 @@ func _draw_panels() -> void:
 	var player_name: String = String(_view.get("player_name", ""))
 	var player_level: int = int(_view.get("player_level", 0))
 	var exp_pixels: int = int(_view.get("exp_pixels", 0))
+	# Each panel goes up when its own side has something on the field.
+	# `InitBattleDisplay` clears the player's box, and its caller only reaches
+	# `UpdateEnemyHUD` for a wild battle, so an opening battle spends several
+	# seconds with neither of them drawn.
+	var enemy_hud: bool = bool(_view.get("enemy_hud_visible", true))
+	var player_hud: bool = bool(_view.get("player_hud_visible", true))
+	var border: Array = _view.get("trainer_hud_border", []) as Array
 
 	# The player's panel prints its own HP numbers, so it moves with the bar; the
 	# enemy's does not, which is why both sit in one layer keyed on all of it.
 	if _layer_changed(&"panels", [
-		enemy_name, enemy_level, player_name, player_level, player_hp, player_max_hp, raster,
+		enemy_name, enemy_level, player_name, player_level, player_hp, player_max_hp,
+		enemy_hud, player_hud, border, raster,
 	]):
 		var panels: PackedByteArray = _new_buffer()
-		_hud.draw_enemy(panels, Gen2Screen.WIDTH, enemy_name, enemy_level)
-		_hud.draw_player(
-			panels, Gen2Screen.WIDTH, player_name, player_level, player_hp, player_max_hp
-		)
+		if enemy_hud:
+			_hud.draw_enemy(panels, Gen2Screen.WIDTH, enemy_name, enemy_level)
+		if player_hud:
+			_hud.draw_player(
+				panels, Gen2Screen.WIDTH, player_name, player_level, player_hp, player_max_hp
+			)
+		_draw_trainer_hud_border(panels, border)
 		_show_layer(
 			_panels, panels,
 			Gen2Palette.pic_palette(PackedColorArray([Color.WHITE, Color.BLACK]))
 		)
 
-	if _layer_changed(&"enemy_bar", [enemy_hp, enemy_max_hp, raster]):
+	if _layer_changed(&"enemy_bar", [enemy_hp, enemy_max_hp, enemy_hud, raster]):
 		var enemy: PackedByteArray = _new_buffer()
-		_hud.draw_hp_bar(enemy, Gen2Screen.WIDTH, Gen2BattleHud.ENEMY_BAR, enemy_hp, enemy_max_hp)
+		if enemy_hud:
+			_hud.draw_hp_bar(
+				enemy, Gen2Screen.WIDTH, Gen2BattleHud.ENEMY_BAR, enemy_hp, enemy_max_hp
+			)
 		_show_layer(_enemy_bar, enemy, _hp_palette(enemy_hp, enemy_max_hp))
 
-	if _layer_changed(&"player_bar", [player_hp, player_max_hp, raster]):
+	if _layer_changed(&"player_bar", [player_hp, player_max_hp, player_hud, raster]):
 		var player: PackedByteArray = _new_buffer()
-		_hud.draw_hp_bar(
-			player, Gen2Screen.WIDTH, Gen2BattleHud.PLAYER_BAR, player_hp, player_max_hp
-		)
+		if player_hud:
+			_hud.draw_hp_bar(
+				player, Gen2Screen.WIDTH, Gen2BattleHud.PLAYER_BAR, player_hp, player_max_hp
+			)
 		_show_layer(_player_bar, player, _hp_palette(player_hp, player_max_hp))
 
-	if _layer_changed(&"exp_bar", [exp_pixels, raster]):
+	if _layer_changed(&"exp_bar", [exp_pixels, player_hud, raster]):
 		var gained: PackedByteArray = _new_buffer()
-		_hud.draw_exp_bar(gained, Gen2Screen.WIDTH, exp_pixels)
+		if player_hud:
+			_hud.draw_exp_bar(gained, Gen2Screen.WIDTH, exp_pixels)
 		_show_layer(_exp_bar, gained, _data.bar_palette("exp"))
+
+	_draw_hud_balls()
+
+
+## `DrawPlayerPartyIconHUDBorder` and `DrawEnemyHUDBorder`: the frame the party
+## balls hang in, a side, two corners and eight of a bottom edge out of the
+## battle's own tile page. Cells rather than pixels, the way the source writes
+## them into `wTilemap`.
+func _draw_trainer_hud_border(into: PackedByteArray, border: Array) -> void:
+	for entry: Variant in border:
+		if not entry is Dictionary:
+			continue
+		var cell: Dictionary = entry as Dictionary
+		_hud.tiles.draw(
+			int(cell.get("tile", 0)), into, Gen2Screen.WIDTH,
+			int(cell.get("x", 0)) * TILE, int(cell.get("y", 0)) * TILE
+		)
+
+
+## `LoadTrainerHudOAM`: six sprites a side, one of `LoadBallIconGFX`'s four tiles
+## each, all on `PAL_BATTLE_OB_YELLOW`. Objects, so they take no scroll, and they
+## are what `ClearSprites` takes away when the opening line is pressed past.
+func _draw_hud_balls() -> void:
+	var balls: Array = _view.get("trainer_hud_balls", []) as Array
+	if balls.is_empty():
+		_hud_balls.texture = null
+		_layer_keys.erase(&"hud_balls")
+		return
+	if not _layer_changed(&"hud_balls", [balls]):
+		return
+	var sheet: PackedByteArray = _data.tile_indices("ball_icons")
+	var width: int = int(_data.tile_sheet("ball_icons").get("width", 0))
+	var buffer: PackedByteArray = _new_buffer()
+	for entry: Variant in balls:
+		if not entry is Dictionary or width <= 0:
+			continue
+		var ball: Dictionary = entry as Dictionary
+		var tile: int = int(ball.get("tile", 0))
+		var left: int = int(ball.get("x", 0))
+		var top: int = int(ball.get("y", 0))
+		for row: int in TILE:
+			if top + row < 0 or top + row >= Gen2Screen.HEIGHT:
+				continue
+			var from: int = row * width + tile * TILE
+			var to: int = (top + row) * Gen2Screen.WIDTH + left
+			for column: int in TILE:
+				var x: int = left + column
+				if x < 0 or x >= Gen2Screen.WIDTH or from + column >= sheet.size():
+					continue
+				buffer[to + column] = sheet[from + column]
+	# Not through `_show_image`: an object is not part of the background plane
+	# and does not take the scroll the background layers do.
+	var image: Image = Gen2PicImage.from_indices(
+		buffer, Gen2Screen.WIDTH, Gen2Screen.HEIGHT,
+		_object_palette(Gen2BattleAnimBackground.PAL_OB_YELLOW), true
+	)
+	_hud_balls.texture = ImageTexture.create_from_image(image)
+	_hud_balls.size = image.get_size()
+	_hud_balls.position = Vector2.ZERO
 
 
 ## `wShadowOAM` as the animation left it: up to forty sprites, each eight by

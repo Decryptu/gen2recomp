@@ -12,6 +12,9 @@ extends SceneTree
 ##
 ##   Godot --path . -s res://tools/preview_world.gd -- crystal 26 2 /tmp/out.png live [kind] [x y] [WxH] [touch]
 ##
+## `kind` may carry the player's own cell as `<kind>@x,y`, which is what a kind
+## reading the two numbers as something else needs: `battle_transition@5,7`.
+##
 ## `WxH` is the window to photograph in, for the two shapes a phone has, and
 ## `touch` draws the on-screen controller with it, which is the only way to see
 ## how [Gen2GameFrame] splits a portrait screen:
@@ -105,6 +108,14 @@ var _screen: Gen2WorldScreen = null
 var _output_path: String = ""
 var _frames: int = 0
 var _kind: StringName = &"effects"
+## The two numbers after the kind. Most kinds read them as the cell the player
+## stands on; a few read them as their own arguments.
+var _cell := Vector2i(-1, -1)
+## `<kind>@x,y`: the cell for a kind whose own two numbers are not one, which is
+## `battle_transition`. `battle_transition@5,7` photographs the animation with
+## the player standing on that cell, which is how the grass over a sprite's legs
+## is photographed with the transition already written over it.
+var _kind_cell := Vector2i(-1, -1)
 
 
 func _initialize() -> void:
@@ -121,7 +132,14 @@ func _initialize() -> void:
 			quit(1)
 			return
 		_output_path = args[3]
-		_kind = StringName(args[5]) if args.size() >= 6 else &"effects"
+		var kind_arg: String = args[5] if args.size() >= 6 else "effects"
+		if kind_arg.contains("@"):
+			var halves: PackedStringArray = kind_arg.split("@")
+			kind_arg = halves[0]
+			var at: PackedStringArray = halves[1].split(",")
+			if at.size() == 2:
+				_kind_cell = Vector2i(int(at[0]), int(at[1]))
+		_kind = StringName(kind_arg)
 		if args.size() >= 9:
 			var shape: PackedStringArray = args[8].split("x")
 			if shape.size() == 2:
@@ -168,7 +186,12 @@ func _build_live(data: GameData, group: int, number: int, cell: Vector2i) -> voi
 	_screen = packed.instantiate() as Gen2WorldScreen
 	_screen.map_group = group
 	_screen.map_number = number
-	if cell.x >= 0:
+	_cell = cell
+	## The transition reads them as a frame count and a branch rather than as a
+	## cell, so the player is left where the map puts them.
+	if _kind_cell.x >= 0:
+		_screen.start_cell = _kind_cell
+	elif cell.x >= 0 and _kind != &"battle_transition":
 		_screen.start_cell = cell
 	## Pinned so two captures of the same map are the same picture: the seed the
 	## screen resolves is what a wandering NPC's own generator is built from.
@@ -203,6 +226,13 @@ func _process(_delta: float) -> bool:
 			## is what runs `special DisplayUnownWords` and puts the box up.
 			_screen.press_button(Gen2Button.A)
 			_screen.press_button(Gen2Button.A)
+		elif _kind == &"battle_transition":
+			## `DoBattleTransition` over the map it runs on. The first of the two
+			## numbers is how many frames into it to photograph rather than a
+			## cell, since a transition is two hundred of them and every one is
+			## a different picture; the second is 1 for a trainer's, which is the
+			## branch that draws the Poke Ball and floods the map.
+			_screen.preview_battle_transition(_cell.x, _cell.y != 0)
 		elif _kind == &"yes_no":
 			## `Script_yesorno`'s own box: the NPC beside the player is talked
 			## to and each page answered until the choice the script ends on is
@@ -290,7 +320,10 @@ func _process(_delta: float) -> bool:
 				_screen.call(SCREEN_DRIVER % _kind)
 		else:
 			_screen.preview_effect_sprites(_kind)
-		if _kind not in [&"warp", &"door", &"map_name_sign", &"ledge", &"heal_machine"]:
+		if _kind not in [
+			&"warp", &"door", &"map_name_sign", &"ledge", &"heal_machine",
+			&"battle_transition",
+		]:
 			## Those kinds drove themselves to the frame they want; every other
 			## kind stages a sprite and then spends the frames it needs.
 			for _frame: int in (STAGED_FRAMES_CUT if _kind == &"cut" else STAGED_FRAMES):

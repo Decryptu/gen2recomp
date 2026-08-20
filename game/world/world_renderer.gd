@@ -8,6 +8,17 @@ extends Node2D
 const PLAYER_COLOR: Color = Color("#d34a5a")
 const FALLBACK_BACKGROUND: Color = Color("#f5f1d8")
 
+## `.InitSprite` (engine/overworld/map_objects.asm) writes an object's OAM y as
+## `add OAM_Y_OFS - 4` against a plain `add OAM_X_OFS` on the other axis, so a
+## 16x16 overworld sprite stands four pixels above its own cell and nothing
+## shifts it sideways. Every map object shares the one write: the emote, the
+## shadow, the boulder dust and the shaking grass are tracking objects that copy
+## the tracked object's `OBJECT_SPRITE_Y` and go through it too, and the jump
+## arc, the tracking bob and the fishing rod are offsets added in front of it.
+## The tuft of grass over a sprite's legs is background rather than OAM and takes
+## no lift; it moves with the sprite because OAM_PRIO is what draws it.
+const SPRITE_LIFT := Vector2(0, -4)
+
 var _world: Gen2WorldAPI = null
 var _animation: Gen2WorldAnimation = null
 var _effects: Gen2WorldEffects = null
@@ -38,6 +49,27 @@ func set_world(world: Gen2WorldAPI, animation: Gen2WorldAnimation = null) -> voi
 	_effect_textures.clear()
 	_rebuild_atlas()
 	queue_redraw()
+
+
+## `DoBattleTransition`'s own screen: the cells it has written, the two tiles it
+## draws them with and the palette it floods the map with, or an empty one when
+## it floods nothing.
+var _transition_cells: PackedByteArray = PackedByteArray()
+var _transition_tiles: PackedByteArray = PackedByteArray()
+var _transition_palette: PackedColorArray = PackedColorArray()
+## Which map objects the transition has left in OAM, and which of them is the
+## opponent `RespawnPlayerAndOpponent` keeps beside the player.
+var _transition_sprites: int = Gen2BattleTransition.SPRITES_ALL
+var _transition_opponent: int = -1
+## `StartTrainerBattle_Flash` writes `wBGP` and calls `DmgToCgbBGPals` alone, so
+## the three flash passes are a background order and the sprites over them keep
+## their own colours. The map fade is the other shape and goes through
+## [method set_fade], which is both.
+var _transition_order: int = Gen2BattleTransition.IDENTITY
+## The one patterned tile of the pair, cached rather than drawn pixel by pixel:
+## the transition is redrawn once for the screen and again over the lower half of
+## every sprite standing in grass.
+var _transition_textures: Dictionary = {}
 
 
 ## Gen2ModHost.RENDERER_EFFECTS_METHOD: the emote bubbles, boulder dust, grass
@@ -145,8 +177,28 @@ func _rebuild_atlas() -> void:
 	_priority_atlas = null
 
 
+## The one palette `.pal_loop` puts every background tile on, through whatever
+## order the flash is on. Empty when the transition floods nothing, which is
+## every wild battle: those wedges take the palette their own cell was drawn in.
+func flood_palette() -> PackedColorArray:
+	if _transition_palette.is_empty():
+		return PackedColorArray()
+	return Gen2WorldPalette.fade_palette(
+		Gen2WorldPalette.fade_palette(_transition_palette, _fade_order), _transition_order
+	)
+
+
 func _tile_palettes() -> Array:
-	return Gen2WorldPalette.tile_palettes(
+	## `StartTrainerBattle_LoadPokeBallGraphics.pal_loop` puts every background
+	## tile on `PAL_BG_TEXT` and fills that one palette, which is why a trainer
+	## transition draws the whole map in four colours.
+	if not _transition_palette.is_empty():
+		var flooded: Array = []
+		var flood: PackedColorArray = flood_palette()
+		for _tile: int in _world.current_tileset.tile_count:
+			flooded.append(flood)
+		return flooded
+	var rows: Array = Gen2WorldPalette.tile_palettes(
 		_world.data,
 		_world.current_map,
 		_world.current_tileset,
@@ -156,6 +208,12 @@ func _tile_palettes() -> Array:
 		_fade_order,
 		_fade_white_fill,
 	)
+	if _transition_order == Gen2BattleTransition.IDENTITY:
+		return rows
+	var faded: Array = []
+	for row: PackedColorArray in rows:
+		faded.append(Gen2WorldPalette.fade_palette(row, _transition_order))
+	return faded
 
 
 ## One tile of the strip, coloured. Index 0 is a colour here rather than a hole:
@@ -173,6 +231,142 @@ func _paint_tile(image: Image, indices: PackedByteArray, palettes: Array, tile: 
 				left + x, y,
 				palette[color_index] if color_index < palette.size() else _background_color
 			)
+
+
+## `DoBattleTransition`, drawn over whatever the map was already showing.
+##
+## [param cells] is [method Gen2BattleTransition.cells], [param tiles] the two
+## tiles `LoadBattleTransitionGFX` loads as index buffers, and [param palette]
+## the four colours the whole map is flooded with while a trainer's ball is up.
+## An empty palette is the wild branch, which floods nothing: its black tile is
+## colour 3 of whatever palette the cell under it was already drawn in. Every
+## overworld palette's colour 3 is `gfx/overworld/trainer_battle.pal`'s own
+## (7,7,7), so both kinds of wedge come out the same dark grey.
+##
+## [param sprites] is [method Gen2BattleTransition.sprites] and [param opponent]
+## the map object `hLastTalked` names; [param order] is the flash's `wBGP`, which
+## `DmgToCgbBGPals` applies to the background alone.
+func set_transition(
+	cells: PackedByteArray, tiles: PackedByteArray, palette: PackedColorArray,
+	sprites: int = Gen2BattleTransition.SPRITES_ALL, opponent: int = -1,
+	order: int = Gen2BattleTransition.IDENTITY
+) -> void:
+	var was: PackedColorArray = _transition_palette
+	var was_order: int = _transition_order
+	_transition_cells = cells
+	_transition_tiles = tiles
+	_transition_palette = palette
+	_transition_sprites = sprites
+	_transition_opponent = opponent
+	_transition_order = order
+	if palette != was or order != was_order:
+		_transition_textures.clear()
+		_actor_textures.clear()
+		_effect_textures.clear()
+		_anim_textures.clear()
+		_rebuild_atlas()
+	queue_redraw()
+
+
+func clear_transition() -> void:
+	if _transition_cells.is_empty() and _transition_palette.is_empty():
+		return
+	var was_flooding: bool = not _transition_palette.is_empty()
+	_transition_cells = PackedByteArray()
+	_transition_tiles = PackedByteArray()
+	_transition_palette = PackedColorArray()
+	_transition_sprites = Gen2BattleTransition.SPRITES_ALL
+	_transition_opponent = -1
+	_transition_textures.clear()
+	if _transition_order != Gen2BattleTransition.IDENTITY:
+		_transition_order = Gen2BattleTransition.IDENTITY
+		was_flooding = true
+	if was_flooding:
+		_actor_textures.clear()
+		_effect_textures.clear()
+		_anim_textures.clear()
+		_rebuild_atlas()
+	queue_redraw()
+
+
+## The transition's own cells. `wTilemap` is the background, and OAM draws over
+## the background, so these go under every sprite: the player and the NPCs stay
+## on top of the wedges until `StartTrainerBattle_Finish` takes them away.
+##
+## [param clip] is the rectangle to draw inside, and [param priority] the
+## OAM_PRIO pass a sprite standing in grass wants: colour 0 loses that test, so
+## it is left transparent there and drawn like any other colour here.
+func _draw_transition(
+	page: PackedInt32Array, palettes: Array, window: Vector2i,
+	clip: Rect2 = Rect2(), priority: bool = false
+) -> void:
+	var black: int = Gen2BattleTransition.CELL_BLACK
+	var flood: PackedColorArray = flood_palette()
+	## The whole screen, or the few cells a sprite's own lower half falls in.
+	var first := Vector2i.ZERO
+	var last := Vector2i(Gen2BattleTransition.COLUMNS - 1, Gen2BattleTransition.ROWS - 1)
+	if priority:
+		first = Vector2i(
+			floori(clip.position.x / Gen2Tiles.TILE_WIDTH),
+			floori(clip.position.y / Gen2Tiles.TILE_HEIGHT),
+		)
+		last = Vector2i(
+			mini(ceili(clip.end.x / Gen2Tiles.TILE_WIDTH), last.x),
+			mini(ceili(clip.end.y / Gen2Tiles.TILE_HEIGHT), last.y),
+		)
+	for y: int in range(maxi(first.y, 0), last.y + 1):
+		for x: int in range(maxi(first.x, 0), last.x + 1):
+			var cell: int = int(_transition_cells[y * Gen2BattleTransition.COLUMNS + x])
+			if cell == Gen2BattleTransition.CELL_NONE:
+				continue
+			var at := Rect2(
+				Vector2(x * Gen2Tiles.TILE_WIDTH, y * Gen2Tiles.TILE_HEIGHT),
+				Vector2(Gen2Tiles.TILE_WIDTH, Gen2Tiles.TILE_HEIGHT)
+			)
+			var covered: Rect2 = at if not priority else at.intersection(clip)
+			if covered.size.x <= 0.0 or covered.size.y <= 0.0:
+				continue
+			var palette: PackedColorArray = flood
+			if palette.is_empty():
+				var tile: int = page[y * window.x + x] if y * window.x + x < page.size() else 0
+				palette = palettes[tile] if tile >= 0 and tile < palettes.size() \
+					else PackedColorArray()
+			if cell == black or _transition_tiles.is_empty():
+				draw_rect(covered, palette[3] if palette.size() > 3 else Color.BLACK, true)
+				continue
+			var texture: Texture2D = _transition_texture(palette, priority)
+			if texture == null:
+				continue
+			draw_texture_rect_region(
+				texture, covered, Rect2(covered.position - at.position, covered.size)
+			)
+
+
+## `BATTLETRANSITION_SQUARE`, the one tile of the pair that has a pattern in it.
+## [param transparent_zero] is the OAM_PRIO pass, where the tile's colour 0
+## pixels lose to the sprite under them.
+func _transition_texture(
+	palette: PackedColorArray, transparent_zero: bool
+) -> Texture2D:
+	if _transition_tiles.size() < Gen2Tiles.TILE_PIXELS:
+		return null
+	var key: String = "%d:%d" % [hash(palette), int(transparent_zero)]
+	var texture: Texture2D = _transition_textures.get(key, null)
+	if texture != null:
+		return texture
+	var image := Image.create(
+		Gen2Tiles.TILE_WIDTH, Gen2Tiles.TILE_HEIGHT, false, Image.FORMAT_RGBA8
+	)
+	for y: int in Gen2Tiles.TILE_HEIGHT:
+		for x: int in Gen2Tiles.TILE_WIDTH:
+			var index: int = int(_transition_tiles[y * Gen2Tiles.TILE_WIDTH + x])
+			var color: Color = palette[index] if index < palette.size() else Color.BLACK
+			if index == 0 and transparent_zero:
+				color.a = 0.0
+			image.set_pixel(x, y, color)
+	texture = ImageTexture.create_from_image(image)
+	_transition_textures[key] = texture
+	return texture
 
 
 func refresh() -> void:
@@ -216,26 +410,43 @@ func _draw() -> void:
 				Rect2(Vector2(tile * Gen2Tiles.TILE_WIDTH, 0), Vector2(8, 8)),
 			)
 
+	var palettes: Array = _tile_palettes()
+	if not _transition_cells.is_empty():
+		_draw_transition(page, palettes, window_size)
+	if _transition_sprites == Gen2BattleTransition.SPRITES_NONE:
+		return
+
 	var objects: Array = _world.visible_objects()
 	objects.sort_custom(_sort_objects)
+	## `RespawnPlayerAndOpponent` at each outro's setup: from there the only map
+	## objects left in OAM are the player and, in a scripted battle, whoever
+	## `hLastTalked` names.
+	var battlers_only: bool = _transition_sprites == Gen2BattleTransition.SPRITES_BATTLERS
 	## A mod's actors are drawn in the same pass and sorted into the same rows:
 	## a follower one cell below an NPC has to be drawn over it, and one cell
 	## above it under it. They carry no emote, no effect sprite and no grass of
-	## their own beyond the tuft the map draws over anything standing in it.
+	## their own beyond the tuft the map draws over anything standing in it, and
+	## they are map objects here, so the respawn takes them with the rest.
 	var drawn: Array = []
 	for object: Gen2WorldObject in objects:
+		if battlers_only and object.index != _transition_opponent:
+			continue
 		drawn.append({"object": object, "row": float(object.cell.y)})
-	if _actors != null:
+	if _actors != null and not battlers_only:
 		for sprite: Dictionary in _actors.sprites():
 			drawn.append({"actor": sprite, "row": (sprite["position_cells"] as Vector2).y})
 	drawn.sort_custom(_sort_drawn)
 	for entry: Dictionary in drawn:
 		if entry.has("actor"):
-			_draw_actor(entry["actor"], camera_pixels, page, tile_origin, tile_offset, window_size)
+			_draw_actor(
+				entry["actor"], camera_pixels, page, palettes, tile_origin, tile_offset,
+				window_size
+			)
 			continue
 		var object: Gen2WorldObject = entry["object"]
 		var pixel: Vector2 = Vector2(object.cell * Gen2WorldAPI.CELL_PIXELS) \
-			+ Vector2(object.step_offset(Gen2WorldAPI.CELL_PIXELS)) - camera_pixels
+			+ Vector2(object.step_offset(Gen2WorldAPI.CELL_PIXELS)) - camera_pixels \
+			+ SPRITE_LIFT
 		var texture: Texture2D = _actor_texture(
 			object.sprite, object.palette, object.facing, object.frame, object.big_object_shape()
 		)
@@ -245,12 +456,13 @@ func _draw() -> void:
 		if texture != null:
 			draw_texture(texture, pixel + object_jump)
 		if _in_grass(object.cell):
-			_draw_grass_over(pixel, page, tile_origin, tile_offset, window_size)
+			_draw_grass_over(pixel, page, palettes, tile_origin, tile_offset, window_size)
 		if object.emote_visible:
 			_draw_emote(object.emote_id, pixel)
-		_draw_effect_sprites(object.index, pixel)
+		if not battlers_only:
+			_draw_effect_sprites(object.index, pixel)
 
-	var player: Vector2 = Vector2(_world.player_pixel_position())
+	var player: Vector2 = Vector2(_world.player_pixel_position()) + SPRITE_LIFT
 	## The jump arc is a sprite offset, not a position: the shadow and the grass
 	## the hop leaves behind stay on the ground.
 	var jump: Vector2 = Vector2(0, _world.player_jump_offset())
@@ -261,7 +473,7 @@ func _draw() -> void:
 	if player_texture != null:
 		draw_texture(player_texture, player + jump)
 		if _in_grass(_world.player_cell):
-			_draw_grass_over(player + jump, page, tile_origin, tile_offset, window_size)
+			_draw_grass_over(player + jump, page, palettes, tile_origin, tile_offset, window_size)
 		if _world.fishing_busy():
 			_draw_fishing_rod(player + jump)
 	else:
@@ -269,10 +481,13 @@ func _draw() -> void:
 		draw_rect(marker, PLAYER_COLOR, false, 1.0)
 		draw_line(marker.position, marker.end, PLAYER_COLOR, 1.0)
 		draw_line(Vector2(marker.end.x, marker.position.y), Vector2(marker.position.x, marker.end.y), PLAYER_COLOR, 1.0)
+	if battlers_only:
+		return
 	_draw_effect_sprites(-1, player)
 	## The tree sprite stands over its own cell rather than over an object, and
 	## the source draws every one of these from `wShadowOAMSprite36` up, which is
-	## past every map object.
+	## past every map object. `Cut_Headbutt_GetPixelFacing` is a sprite anim
+	## rather than a map object, so it takes no lift.
 	for sprite: Dictionary in _effect_sprites():
 		if int(sprite["object_index"]) != -2:
 			continue
@@ -286,6 +501,17 @@ func _draw() -> void:
 		if bool(sprite.get("screen", false)):
 			_draw_effect_sprite(sprite, Vector2.ZERO)
 	_draw_encounter_pulse(camera_pixels)
+
+
+## `StartTrainerBattle_LoadPokeBallGraphics.copypals` writes the trainer palette
+## over `wOBPals1/2 palette PAL_OW_TREE` and `PAL_OW_ROCK` as well as
+## `PAL_BG_TEXT`, so a boulder or a fruit tree standing on the map turns with the
+## background it is standing on.
+func _sprite_palette(palette: int) -> PackedColorArray:
+	if not _transition_palette.is_empty() \
+		and palette in [Gen2WorldEffects.PAL_OW_TREE, Gen2WorldEffects.PAL_OW_ROCK]:
+		return _transition_palette
+	return _world.data.overworld_sprite_palette(palette, _time_of_day)
 
 
 func _actor_texture(
@@ -314,7 +540,7 @@ func _actor_texture(
 	## is background only, so a sprite flattens onto its own colour 0.
 	var colors: PackedColorArray = Gen2WorldPalette.fade_palette(
 		color_override if not color_override.is_empty() \
-			else _world.data.overworld_sprite_palette(palette, _time_of_day),
+			else _sprite_palette(palette),
 		_fade_order,
 	)
 	var image: Image = Gen2WorldSprite.big_image_for(sprite, indices, colors, big_shape) \
@@ -329,11 +555,12 @@ func _actor_texture(
 ## it. Its position is in walk cells, the unit `player_position_cells()` is in,
 ## so a follower halfway through a step is drawn halfway.
 func _draw_actor(
-	sprite: Dictionary, camera_pixels: Vector2, page: PackedInt32Array,
+	sprite: Dictionary, camera_pixels: Vector2, page: PackedInt32Array, palettes: Array,
 	tile_origin: Vector2i, tile_offset: Vector2, window_size: Vector2i
 ) -> void:
 	var cell_position: Vector2 = sprite["position_cells"]
-	var pixel: Vector2 = cell_position * float(Gen2WorldAPI.CELL_PIXELS) - camera_pixels
+	var pixel: Vector2 = cell_position * float(Gen2WorldAPI.CELL_PIXELS) - camera_pixels \
+		+ SPRITE_LIFT
 	var texture: Texture2D = _actor_texture(
 		sprite["sprite"], 0, int(sprite["facing"]), int(sprite["frame"]),
 		Gen2WorldSprite.BIG_SHAPE_NONE, sprite.get("colors", PackedColorArray())
@@ -342,7 +569,7 @@ func _draw_actor(
 		return
 	draw_texture(texture, pixel)
 	if _in_grass(Vector2i(roundi(cell_position.x), roundi(cell_position.y))):
-		_draw_grass_over(pixel, page, tile_origin, tile_offset, window_size)
+		_draw_grass_over(pixel, page, palettes, tile_origin, tile_offset, window_size)
 
 
 ## The object pass's own order, with a mod's actors sorted into it: the row a
@@ -393,6 +620,7 @@ func _in_grass(cell: Vector2i) -> bool:
 func _draw_grass_over(
 	pixel: Vector2,
 	page: PackedInt32Array,
+	palettes: Array,
 	_tile_origin: Vector2i,
 	tile_offset: Vector2,
 	window_size: Vector2i,
@@ -417,14 +645,53 @@ func _draw_grass_over(
 			var tile: int = page[y * window_size.x + x]
 			if tile < 0 or tile >= _world.current_tileset.tile_count:
 				continue
-			draw_texture_rect_region(
-				_priority_atlas,
-				covered,
-				Rect2(
-					Vector2(tile * Gen2Tiles.TILE_WIDTH, 0) + (covered.position - at.position),
-					covered.size,
-				),
-			)
+			for piece: Rect2 in _priority_pieces(covered):
+				draw_texture_rect_region(
+					_priority_atlas,
+					piece,
+					Rect2(
+						Vector2(tile * Gen2Tiles.TILE_WIDTH, 0) + (piece.position - at.position),
+						piece.size,
+					),
+				)
+	## The transition has already overwritten the map under the sprite, so what
+	## wins the priority test where it wrote is its own tile rather than the
+	## grass. The pieces above left those cells to it.
+	if not _transition_cells.is_empty():
+		_draw_transition(page, palettes, window_size, over, true)
+
+
+## The parts of [param rect] the map still owns, split on the screen's own
+## 8-pixel grid so a cell `DoBattleTransition` has written is left to it.
+func _priority_pieces(rect: Rect2) -> Array[Rect2]:
+	if _transition_cells.is_empty():
+		return [rect] as Array[Rect2]
+	var out: Array[Rect2] = []
+	var top: float = rect.position.y
+	while top < rect.end.y:
+		var bottom: float = minf(floorf(top / Gen2Tiles.TILE_HEIGHT) * Gen2Tiles.TILE_HEIGHT \
+			+ Gen2Tiles.TILE_HEIGHT, rect.end.y)
+		var left: float = rect.position.x
+		while left < rect.end.x:
+			var right: float = minf(floorf(left / Gen2Tiles.TILE_WIDTH) * Gen2Tiles.TILE_WIDTH \
+				+ Gen2Tiles.TILE_WIDTH, rect.end.x)
+			if not _transition_wrote(Vector2(left, top)):
+				out.append(Rect2(Vector2(left, top), Vector2(right - left, bottom - top)))
+			left = right
+		top = bottom
+	return out
+
+
+## Whether the transition has taken the screen cell [param at] falls in.
+func _transition_wrote(at: Vector2) -> bool:
+	var x: int = floori(at.x / Gen2Tiles.TILE_WIDTH)
+	var y: int = floori(at.y / Gen2Tiles.TILE_HEIGHT)
+	if x < 0 or x >= Gen2BattleTransition.COLUMNS \
+		or y < 0 or y >= Gen2BattleTransition.ROWS:
+		return false
+	var index: int = y * Gen2BattleTransition.COLUMNS + x
+	return index < _transition_cells.size() \
+		and int(_transition_cells[index]) != Gen2BattleTransition.CELL_NONE
 
 
 ## The same strip as the atlas with the cartridge's transparent index left out,

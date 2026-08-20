@@ -116,6 +116,151 @@ func run(r: RefCounted) -> void:
 		_verify_substitute_pic(game_id, data)
 		_run_every_animation(game_id, data)
 		_play_every_animation(game_id, data)
+		_verify_the_entrance(game_id, data)
+		_verify_the_transition(game_id, data)
+
+
+## The two bodies `BattleAnim_SendOutMon`'s parameter picks between, by the bg
+## effects each runs: `.Normal` is `BATTLE_BG_EFFECT_ENTER_MON` alone and
+## `.Shiny` is the inverted flash and the palette cycle. The beta body the fan
+## falls through to runs `BATTLE_BG_EFFECT_BETA_SEND_OUT_MON2` ($2b), which is
+## how a parameter that never reached the interpreter shows up here.
+const SEND_OUT_EFFECTS: Dictionary = {0: [0x0B], 1: [0x01, 0x06]}
+## And how long each takes: the two `anim_wait`s of `.Normal` and the ten of
+## `.Shiny`, plus the frame each batch of commands between them spends.
+const SEND_OUT_FRAMES: Dictionary = {0: 39, 1: 69}
+
+
+## `ANIM_SEND_OUT_MON`, which every entrance plays and which nothing else in the
+## corpus reaches with a parameter: `BattleAnim_SendOutMon` is an
+## `anim_if_param_equal` fan, so the sweep above walks its `$0` body alone and
+## the shiny branch is never decoded. Both are run here, on both sides, and the
+## `SFX_SHINE` `BattleStartMessage` plays in front of a trainer's line is looked
+## up in the audio index the way a track is.
+func _verify_the_entrance(game_id: StringName, data: GameData) -> void:
+	var anims: Gen2BattleAnimData = Gen2BattleAnimData.from_game_data(data)
+	if not _r.check(anims != null, "%s: no battle animation data in the cache." % game_id):
+		return
+	for param: int in [Gen2Battle.SEND_OUT_ANIM_NORMAL, Gen2Battle.SEND_OUT_ANIM_SHINY]:
+		for enemy_turn: bool in [false, true]:
+			var player: Gen2BattleAnimPlayer = Gen2BattleAnimPlayer.create(
+				anims, Gen2Battle.ANIM_SEND_OUT_MON, enemy_turn, param
+			)
+			if not _r.check(
+				player != null,
+				"%s: the send-out animation would not start at param %d." % [game_id, param]
+			):
+				continue
+			var frames: int = 0
+			var sprites: int = 0
+			var effects: Array = []
+			while player.advance_frame() and frames < MAX_FRAMES:
+				frames += 1
+				sprites = maxi(sprites, player.sprites().size())
+				for effect: Gen2BattleAnimBgEffect in player.bg_effects():
+					if not effects.has(effect.id):
+						effects.append(effect.id)
+			_r.check(
+				not player.failed(),
+				"%s: the send-out animation ran off its region at param %d." % [
+					game_id, param,
+				]
+			)
+			## Which body ran, not just that one did. `BattleAnim_SendOutMon` is
+			## a fan of `anim_if_param_equal`, and a parameter that does not
+			## reach the interpreter falls through to the beta branch, which is
+			## four times as long and deforms the other battler.
+			_r.check(
+				effects == SEND_OUT_EFFECTS[param],
+				"%s: param %d ran bg effects %s, not the pinned %s." % [
+					game_id, param, effects, SEND_OUT_EFFECTS[param],
+				]
+			)
+			_r.check(
+				frames == SEND_OUT_FRAMES[param],
+				"%s: param %d ran %d frames, not the pinned %d." % [
+					game_id, param, frames, SEND_OUT_FRAMES[param],
+				]
+			)
+			_r.check(
+				sprites > 0,
+				"%s: the send-out animation drew nothing at param %d on the %s side." % [
+					game_id, param, "enemy" if enemy_turn else "player",
+				]
+			)
+	_r.check(
+		not data.world_audio(&"sfx", Gen2BattleScreen.SFX_SHINE).is_empty(),
+		"%s: SFX_SHINE is not in the audio index, so a trainer battle opens silently." % game_id
+	)
+	print("%s: the entrance runs both send-out branches on both sides." % game_id)
+
+
+## `DoBattleTransition` on a real cache: the two tiles it wipes with, the palette
+## it floods the map with, and all four animations run to the end.
+##
+## The tiles are content whose value is known independently, which is what checks
+## the address: one of them is solid colour 3 and the other is the chequered
+## square, and no other pair of tiles in the dump is that.
+func _verify_the_transition(game_id: StringName, data: GameData) -> void:
+	var sheet: Dictionary = data.tile_sheet("battle_transition")
+	var indices: PackedByteArray = data.tile_indices("battle_transition")
+	if not _r.check(
+		int(sheet.get("tiles", 0)) == RomLayout.BATTLE_TRANSITION_TILES
+			and indices.size() == RomLayout.BATTLE_TRANSITION_TILES * Gen2Tiles.TILE_PIXELS,
+		"%s: the transition sheet is %d tiles, %d pixels." % [
+			game_id, int(sheet.get("tiles", 0)), indices.size(),
+		]
+	):
+		return
+	var width: int = int(sheet["width"])
+	var square: Array[int] = []
+	var black: Array[int] = []
+	for y: int in Gen2Tiles.TILE_HEIGHT:
+		for x: int in Gen2Tiles.TILE_WIDTH:
+			square.append(int(indices[y * width + x]))
+			black.append(int(indices[y * width + Gen2Tiles.TILE_WIDTH + x]))
+	_r.check(
+		black.count(3) == black.size(),
+		"%s: BATTLETRANSITION_BLACK is not solid colour 3." % game_id
+	)
+	_r.check(
+		square.count(3) < square.size() and square.count(3) > 0,
+		"%s: BATTLETRANSITION_SQUARE has no pattern in it." % game_id
+	)
+	for dark: bool in [false, true]:
+		var palette: PackedColorArray = data.battle_transition_palette(dark)
+		_r.check(
+			palette.size() == RomLayout.TRANSITION_PALETTE_COLORS,
+			"%s: the %s transition palette has %d colours." % [
+				game_id, "dark" if dark else "day", palette.size(),
+			]
+		)
+	## Every animation, to the frame the screen is black on. Nothing here says
+	## what one looks like; what it pins is that all four reach their own end
+	## rather than running off a table, and how long each takes.
+	var lengths: Array[int] = []
+	for stronger: bool in [false, true]:
+		for cave: bool in [false, true]:
+			var rng := RandomNumberGenerator.new()
+			rng.seed = 5
+			var transition: Gen2BattleTransition = Gen2BattleTransition.create(
+				stronger, cave, true, false, rng, data.battle_anim_sine()
+			)
+			var frames: int = 0
+			while transition.advance_frame() and frames < MAX_FRAMES:
+				frames += 1
+			lengths.append(frames)
+			var cells: PackedByteArray = transition.cells()
+			var black_cells: int = 0
+			for cell: int in cells:
+				black_cells += 1 if cell == Gen2BattleTransition.CELL_BLACK else 0
+			_r.check(
+				transition.finished() and black_cells == cells.size(),
+				"%s: the %s transition left %d of %d cells unwiped." % [
+					game_id, "cave" if cave else "route", black_cells, cells.size(),
+				]
+			)
+	print("%s: the four transitions run %s frames." % [game_id, lengths])
 
 
 ## `GetSubstitutePic`, on both sides and all three cartridges: the doll is four

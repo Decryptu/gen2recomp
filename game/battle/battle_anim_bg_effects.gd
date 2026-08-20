@@ -1478,6 +1478,11 @@ static func _beta_send_out_lines(
 
 ## `BattleBGEffect_BetaSendOutMon2`, unused: a deformation that shrinks to
 ## nothing over $40 frames.
+## Its scanline window and the square `enter_mon` resizes beside it are opposite
+## bands, so a send-out visibly wobbles the *other* battler. That is the source:
+## `.zero` reads the side once for `SetLCDStatCustoms1` and then writes `$40`
+## over the same struct byte as a counter, and this is a beta effect whose own
+## operand does not agree with `enter_mon`'s. Do not "fix" the polarity.
 static func _beta_send_out_mon2(
 	player: Gen2BattleAnimPlayer, effect: Gen2BattleAnimBgEffect
 ) -> void:

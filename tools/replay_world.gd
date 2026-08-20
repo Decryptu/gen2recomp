@@ -35,10 +35,11 @@ const GAMES: Array[StringName] = [&"gold", &"silver", &"crystal"]
 ## Twenty seconds of hardware frames: long enough for several walks, a script
 ## and a wild roll, short enough that no run crosses a clock minute.
 const DEFAULT_FRAMES: int = 1200
-## What the battle route asks for instead. A fight costs its intro, an animation
-## per hit and the boxes on either side of each, and it has to be walked into
-## first; forty seconds is still inside the same clock minute.
-const BATTLE_FRAMES: int = 2400
+## What the battle route asks for instead. A fight costs `DoBattleTransition`'s
+## own two hundred frames, then its intro, an animation per hit and the boxes on
+## either side of each, and it has to be walked into first; fifty seconds is
+## still inside the same clock minute.
+const BATTLE_FRAMES: int = 3000
 const DIRECTIONS: Array[int] = [
 	Gen2Button.UP, Gen2Button.DOWN, Gen2Button.LEFT, Gen2Button.RIGHT
 ]

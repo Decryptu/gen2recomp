@@ -44,11 +44,25 @@ func _open_battle() -> void:
 ## `BattleIntroSlidingPics` runs before `BattleStartMessage`, so a battle says
 ## and does nothing until the pics are in place. In play the screen's own frames
 ## spend that; a test driving events without it would drive them into the slide.
-func _settle_intro() -> void:
+func _settle_slide() -> void:
 	var guard: int = 4000
 	while _battle_screen.intro_running() and guard > 0:
 		_battle_screen.advance_frame()
 		guard -= 1
+
+
+## The slide and the entrance behind it, which together are what `DoBattle`
+## spends before its first menu: a test feeding its own events starts there.
+func _settle_intro() -> void:
+	var guard: int = 8000
+	while (_battle_screen.frames_running() or _battle_screen.entrance_running()) \
+		and guard > 0:
+		guard -= 1
+		_battle_screen.advance_frame()
+		if _battle_screen.frames_running() or not _battle_screen.entrance_running():
+			continue
+		_battle_screen.finish()
+		_battle_screen.advance()
 
 
 func _stub_script(body: String) -> GDScript:
@@ -530,7 +544,7 @@ func test_a_battle_opens_on_the_slide_and_says_nothing_until_it_is_done() -> voi
 	_battle_screen.advance()
 	assert_true(_battle_screen.intro_running())
 
-	_settle_intro()
+	_settle_slide()
 	assert_eq(
 		String(_battle_screen.battle_snapshot()["message"]), "Wild PIDGEY appeared!",
 		"the start message waited for the slide"

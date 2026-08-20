@@ -49,6 +49,8 @@ const PAL_BG_ENEMY: int = 1
 const PAL_OB_ENEMY: int = 0
 const PAL_OB_PLAYER: int = 1
 const PAL_OB_GRAY: int = 2
+## `LoadTrainerHudOAM` draws the party balls on this one.
+const PAL_OB_YELLOW: int = 3
 
 ## `wSurfWaveBGEffect`, the 64-entry wave `BattleBGEffect_Surf` rotates.
 const SURF_WAVE_LENGTH: int = 0x40

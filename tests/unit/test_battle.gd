@@ -513,10 +513,107 @@ func test_a_switch_between_turns_calls_one_back_and_sends_one_out() -> void:
 		[_mon(Fixture.CHARMANDER, 20, [Fixture.TACKLE])]
 	)
 	var events: Array = battle.send_out(Gen2Battle.PLAYER, 1)
-	assert_eq(events.size(), 2)
+	# The two lines, then `SendOutPlayerMon`'s own ball animation and cry.
+	assert_eq(events.size(), 4)
 	assert_eq(events[0]["type"], Gen2Battle.WITHDREW)
 	assert_eq(int(events[0]["index"]), 0)
 	assert_eq(events[1]["type"], Gen2Battle.SENT_OUT)
+	assert_eq(events[2]["type"], Gen2Battle.ANIMATION)
+	assert_eq(int(events[2]["index"]), Gen2Battle.ANIM_SEND_OUT_MON)
+	assert_eq(int(events[2]["param"]), Gen2Battle.SEND_OUT_ANIM_NORMAL)
+	assert_eq(events[3]["type"], Gen2Battle.CRY)
+
+
+## `SendOutPlayerMon`, `ShowSetEnemyMonAndSendOutAnimation` and the cry gate
+## between them, which every entrance in the source shares.
+func test_an_entrance_plays_the_ball_the_shiny_pass_and_the_cry() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 20, [Fixture.TACKLE]),
+		_mon(Fixture.CHARMANDER, 20, [Fixture.TACKLE])
+	)
+
+	## `SHINY_ATK_MASK` set and the other three DVs at ten, which is the whole of
+	## what `BattleCheckPlayerShininess` asks.
+	battle.player.dvs = Gen2Stats.pack_dvs(
+		Gen2Stats.MAX_DV, Gen2Stats.SHINY_DV, Gen2Stats.SHINY_DV, Gen2Stats.SHINY_DV
+	)
+	var shiny: Array = battle.entrance_events(Gen2Battle.PLAYER)
+	assert_eq(shiny.size(), 3)
+	assert_eq(int(shiny[0]["param"]), Gen2Battle.SEND_OUT_ANIM_NORMAL)
+	assert_false(bool(shiny[0]["enemy_turn"]))
+	assert_eq(int(shiny[1]["param"]), Gen2Battle.SEND_OUT_ANIM_SHINY)
+	assert_eq(shiny[2]["type"], Gen2Battle.CRY)
+
+	## `BattleStartMessage`'s wild branch has no ball in it, and the enemy's own
+	## entrance is played on the other side of the field.
+	var wild: Array = battle.entrance_events(Gen2Battle.ENEMY, false)
+	assert_eq(wild.size(), 1, "an ordinary enemy is neither shiny nor thrown")
+	assert_eq(wild[0]["type"], Gen2Battle.CRY)
+
+	## `CheckFaintedFrzSlp`: asleep, frozen and fainted are the three silences.
+	for state: int in [Gen2Status.FREEZE, Gen2Status.MIN_SLEEP]:
+		battle.player.status = state
+		assert_eq(
+			_of_type(battle.entrance_events(Gen2Battle.PLAYER), Gen2Battle.CRY).size(), 0
+		)
+	battle.player.status = Gen2Status.NONE
+	battle.player.hp = 0
+	assert_eq(
+		_of_type(battle.entrance_events(Gen2Battle.PLAYER), Gen2Battle.CRY).size(), 0
+	)
+
+
+## The one thing the two profiles part company on here: pokegold's
+## `SendOutPlayerMon` and `ShowSetEnemyMonAndSendOutAnimation` both reach
+## `PlayStereoCry` with nothing in front of it, so a Pokemon that is asleep,
+## frozen or fainted still cries there. `CheckFaintedFrzSlp` is Crystal's, and
+## so is the pic animation it was added beside.
+func test_gold_and_silver_cry_where_crystal_checks_first() -> void:
+	var directory: String = RomCache.directory_for(&"battletestgold", "0123456789abcdef")
+	var gold: GameData = Fixture.build(directory, "gold")
+	var battle: Gen2Battle = Gen2Battle.create(
+		gold,
+		Gen2BattleMon.create(gold, Fixture.PIKACHU, 20, [Fixture.TACKLE]),
+		Gen2BattleMon.create(gold, Fixture.CHARMANDER, 20, [Fixture.TACKLE]),
+		_rng
+	)
+	battle.player.status = Gen2Status.FREEZE
+	assert_eq(
+		_of_type(battle.entrance_events(Gen2Battle.PLAYER), Gen2Battle.CRY).size(), 1
+	)
+	battle.player.status = Gen2Status.NONE
+	battle.player.hp = 0
+	assert_eq(
+		_of_type(battle.entrance_events(Gen2Battle.PLAYER), Gen2Battle.CRY).size(), 1,
+		"and a fainted one, which is the third silence Crystal added"
+	)
+	RomCache.clear(directory)
+
+
+## `SendOutMonText`'s four lines, at the three boundaries its compares name.
+func test_the_send_out_line_follows_the_opponents_remaining_hp() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.PIKACHU, 20, [Fixture.TACKLE]),
+		_mon(Fixture.CHARMANDER, 50, [Fixture.TACKLE])
+	)
+	var max_hp: int = battle.enemy.max_hp()
+	for row: Array in [
+		[100, Gen2Battle.SEND_OUT_GO], [80, Gen2Battle.SEND_OUT_GO],
+		[60, Gen2Battle.SEND_OUT_DO_IT], [45, Gen2Battle.SEND_OUT_DO_IT],
+		[30, Gen2Battle.SEND_OUT_GO_FOR_IT], [20, Gen2Battle.SEND_OUT_GO_FOR_IT],
+		[5, Gen2Battle.SEND_OUT_FOES_WEAK],
+	]:
+		@warning_ignore("integer_division")
+		battle.enemy.hp = maxi(max_hp * int(row[0]) / 100, 1)
+		assert_eq(
+			battle.send_out_line(Gen2Battle.PLAYER), int(row[1]),
+			"%d%% of the enemy left" % int(row[0])
+		)
+	## `ld hl, GoMonText / jr z` in front of the arithmetic, and the enemy is
+	## never the one announced this way.
+	battle.enemy.hp = 0
+	assert_eq(battle.send_out_line(Gen2Battle.PLAYER), Gen2Battle.SEND_OUT_GO)
+	assert_eq(battle.send_out_line(Gen2Battle.ENEMY), Gen2Battle.SEND_OUT_GO)
 
 
 func test_a_battle_is_over_when_a_whole_party_is_down() -> void:

@@ -34,18 +34,31 @@ func after_each() -> void:
 	Gen2ModHost.reset()
 
 
-func _open_battle() -> void:
+## The battle as `InitBattleDisplay` leaves it, before `BattleStartMessage` and
+## `DoBattle`'s opening have spent a frame.
+func _seed_battle() -> void:
 	var packed: PackedScene = load("res://game/battle/battle_screen.tscn")
 	_screen = packed.instantiate() as Gen2BattleScreen
 	_screen.set_data(_data)
 	add_child(_screen)
 	await get_tree().process_frame
 	_screen.show_matchup(16, 155, 5, 5)
-	var guard: int = 4000
-	while _screen.intro_running() and guard > 0:
-		_screen.advance_frame()
+
+
+func _open_battle() -> void:
+	await _seed_battle()
+	var guard: int = 8000
+	## The slide, then `BattleStartMessage` and `DoBattle`'s opening: the ball
+	## thrown there is an animation of its own, so it is spent before a test
+	## drives one of its own.
+	while (_screen.frames_running() or _screen.entrance_running()) and guard > 0:
 		guard -= 1
-	## The intro runs on into `BattleMenu`, and a menu owns the joypad. These
+		_screen.advance_frame()
+		if _screen.frames_running() or not _screen.entrance_running():
+			continue
+		_screen.finish()
+		_screen.advance()
+	## The entrance runs on into `BattleMenu`, and a menu owns the joypad. These
 	## tests drive the pump mid-turn instead, so it is closed behind them.
 	_screen._close_battle_menu()
 
@@ -137,7 +150,11 @@ func test_a_status_animation_leaves_the_hud_up() -> void:
 
 
 func test_the_tilemap_is_the_battle_it_is_seeded_from() -> void:
-	await _open_battle()
+	## Read where `InitBattleDisplay` leaves it rather than after the opening:
+	## the entrance slides the player's own picture off that square and the ball
+	## draws the Pokemon back, and on this cache no animation script resolves,
+	## so nothing would put it there.
+	await _seed_battle()
 	var map: PackedByteArray = _screen._bg_map
 	assert_eq(map.size(), Gen2BattleScreenMap.COLUMNS * Gen2BattleScreenMap.ROWS)
 	# `GetEnemyFrontpicCoords` and `AppearUser`'s own `xor a` / `ld a, $31`.
@@ -305,3 +322,80 @@ func _settle_message() -> void:
 	while box != null and box.is_revealing() and guard > 0:
 		_screen.advance_frame()
 		guard -= 1
+
+
+## `BattleStartMessage` and `DoBattle`'s opening, as the two shapes the source
+## has: the pictures each square opens with, the panels neither of them has yet,
+## and the party balls `BattleStart_TrainerHuds` hangs over both.
+func test_a_wild_battle_opens_with_the_player_standing_on_the_field() -> void:
+	await _seed_battle()
+	while _screen.intro_running():
+		_screen.advance_frame()
+	var entrance: Dictionary = _screen.entrance_snapshot()
+	# `GetTrainerBackpic` puts the player there; a wild opponent is already
+	# itself, so there is no trainer picture on the other square.
+	assert_eq(String(entrance["player_backpic"]), "chris")
+	assert_eq(int(entrance["enemy_trainer_pic"]), 0)
+	# `InitBattleDisplay` clears both panels and only `BattleStartMessage`'s
+	# caller draws the enemy's, after the opening line has been pressed past.
+	assert_false(bool(entrance["enemy_hud"]))
+	assert_false(bool(entrance["player_hud"]))
+	# `ShowPlayerMonsRemaining` alone: a wild battle has no opposing trainer.
+	assert_eq(int(entrance["balls"]), Gen2Party.MAX_SIZE)
+	assert_true(bool(entrance["awaits_press"]), "WildPokemonAppearedText ends in prompt")
+
+
+func test_a_trainer_battle_opens_with_both_trainers_on_the_field() -> void:
+	var packed: PackedScene = load("res://game/battle/battle_screen.tscn")
+	_screen = packed.instantiate() as Gen2BattleScreen
+	_screen.set_data(_data)
+	add_child(_screen)
+	await get_tree().process_frame
+	_screen.show_trainer(Fixture.TRAINER_CLASS, 0)
+	while _screen.intro_running():
+		_screen.advance_frame()
+	# `SFX_SHINE` and its twenty frames come before the line, so the balls and
+	# the text are not up yet.
+	var guard: int = 400
+	while _screen.frames_running() and guard > 0:
+		_screen.advance_frame()
+		guard -= 1
+	var entrance: Dictionary = _screen.entrance_snapshot()
+	assert_eq(int(entrance["enemy_trainer_pic"]), Fixture.TRAINER_CLASS)
+	assert_eq(String(entrance["player_backpic"]), "chris")
+	# `ShowOTTrainerMonsRemaining` as well, so both sides' parties are up.
+	assert_eq(int(entrance["balls"]), Gen2Party.MAX_SIZE * 2)
+	assert_true(bool(entrance["awaits_press"]), "WantsToBattleText ends in prompt")
+
+
+## The order the two sides arrive in, which is `EnemySwitch` inside `DoBattle`
+## and then the player's own send-out forty frames later.
+func test_the_trainer_sends_out_first_and_the_player_second() -> void:
+	var packed: PackedScene = load("res://game/battle/battle_screen.tscn")
+	_screen = packed.instantiate() as Gen2BattleScreen
+	_screen.set_data(_data)
+	add_child(_screen)
+	await get_tree().process_frame
+	_screen.show_trainer(Fixture.TRAINER_CLASS, 0)
+	var seen: Array[String] = []
+	var guard: int = 8000
+	while (_screen.frames_running() or _screen.entrance_running()) and guard > 0:
+		guard -= 1
+		var now: Dictionary = _screen.entrance_snapshot()
+		if int(now["enemy_trainer_pic"]) == 0 and not seen.has("enemy"):
+			seen.append("enemy")
+		if String(now["player_backpic"]).is_empty() and not seen.has("player"):
+			seen.append("player")
+		if bool(now["enemy_hud"]) and not seen.has("enemy_hud"):
+			seen.append("enemy_hud")
+		if bool(now["player_hud"]) and not seen.has("player_hud"):
+			seen.append("player_hud")
+		_screen.advance_frame()
+		if _screen.frames_running() or not _screen.entrance_running():
+			continue
+		_screen.finish()
+		_screen.advance()
+	if bool(_screen.entrance_snapshot()["player_hud"]) and not seen.has("player_hud"):
+		seen.append("player_hud")
+	assert_eq(seen, ["enemy", "enemy_hud", "player", "player_hud"])
+	_screen._close_battle_menu()

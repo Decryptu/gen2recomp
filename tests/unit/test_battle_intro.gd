@@ -130,3 +130,275 @@ func test_the_middle_band_cuts_through_the_player_panel() -> void:
 			offsets[top], offsets[bottom - 1],
 			"so one panel is drawn in two places at once, which is why this is per scanline"
 		)
+
+
+## `SlideBattlePicOut`, the other half of what the opening display does with the
+## two squares: the pics slide in, and each of them slides out again when its
+## own side sends something out.
+func test_a_pic_slides_off_its_own_side_of_the_screen() -> void:
+	for player_side: bool in [true, false]:
+		var map: PackedByteArray = Gen2BattleScreenMap.seeded()
+		var at: Vector2i = Gen2BattleScreenMap.PLAYER_AT if player_side \
+			else Gen2BattleScreenMap.ENEMY_AT
+		var head: int = at.y * Gen2BattleScreenMap.COLUMNS + at.x
+		var base: int = Gen2BattleScreenMap.PLAYER_BASE_TILE if player_side \
+			else Gen2BattleScreenMap.ENEMY_BASE_TILE
+		assert_eq(int(map[head]), base, "the square starts with its own picture")
+
+		# One step moves the picture one column towards the edge it leaves by,
+		# which is left for the player and right for the enemy.
+		Gen2BattleScreenMap.slide_step(map, player_side)
+		var moved: int = head - 1 if player_side else head + 1
+		assert_eq(int(map[moved]), base, "one column over after one step")
+
+		for _step: int in int(Gen2BattleScreenMap.SLIDE_STEPS[player_side]):
+			Gen2BattleScreenMap.slide_step(map, player_side)
+		var side: int = Gen2BattleScreenMap.PLAYER_SIDE if player_side \
+			else Gen2BattleScreenMap.ENEMY_SIDE
+		for row: int in side:
+			for column: int in side:
+				var cell: int = (at.y + row) * Gen2BattleScreenMap.COLUMNS + at.x + column
+				assert_eq(
+					int(map[cell]), Gen2BattleScreenMap.BLANK_TILE,
+					"the whole square is empty once the walk has run"
+				)
+
+
+## The other square is not touched: `hlcoord 1, 5` and `hlcoord 18, 0` are seven
+## rows each and neither reaches the other picture.
+func test_a_slide_leaves_the_other_square_alone() -> void:
+	var map: PackedByteArray = Gen2BattleScreenMap.seeded()
+	for _step: int in int(Gen2BattleScreenMap.SLIDE_STEPS[true]):
+		Gen2BattleScreenMap.slide_step(map, true)
+	var enemy: PackedByteArray = Gen2BattleScreenMap.seeded()
+	for row: int in Gen2BattleScreenMap.ENEMY_SIDE:
+		for column: int in Gen2BattleScreenMap.ENEMY_SIDE:
+			var cell: int = (Gen2BattleScreenMap.ENEMY_AT.y + row) * Gen2BattleScreenMap.COLUMNS \
+				+ Gen2BattleScreenMap.ENEMY_AT.x + column
+			assert_eq(int(map[cell]), int(enemy[cell]))
+
+
+## `DoBattleTransition`, which is the other half of how a battle opens: the
+## overworld's own last two hundred frames, before the pics slide in at all.
+func _run_transition(
+	stronger: bool, cave: bool, trainer: bool, darkness: bool = false
+) -> Dictionary:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 7
+	var transition: Gen2BattleTransition = Gen2BattleTransition.create(
+		stronger, cave, trainer, darkness, rng, _sine_table()
+	)
+	var frames: int = 0
+	var orders: Array[int] = []
+	var squares: int = 0
+	while transition.advance_frame() and frames < 4000:
+		frames += 1
+		if not orders.has(transition.palette_order()):
+			orders.append(transition.palette_order())
+		squares = maxi(squares, _count(transition.cells(), Gen2BattleTransition.CELL_SQUARE))
+	return {
+		"frames": frames, "orders": orders, "squares": squares,
+		"black": _count(transition.cells(), Gen2BattleTransition.CELL_BLACK),
+	}
+
+
+## `sine_table 32` as the cartridge stores it, which is what the wavy outro
+## reads out of the cache. Built here rather than imported: this file has no
+## cartridge, and the table is the assembler's own arithmetic.
+func _sine_table() -> PackedByteArray:
+	var out := PackedByteArray()
+	for index: int in 32:
+		var value: int = int(round(sin(index * PI / 32.0) * 256.0))
+		out.append(value & 0xFF)
+		out.append((value >> 8) & 0xFF)
+	return out
+
+
+func _count(cells: PackedByteArray, value: int) -> int:
+	var out: int = 0
+	for cell: int in cells:
+		out += 1 if cell == value else 0
+	return out
+
+
+func test_every_transition_ends_with_the_screen_black() -> void:
+	for stronger: bool in [false, true]:
+		for cave: bool in [false, true]:
+			var ran: Dictionary = _run_transition(stronger, cave, false)
+			assert_eq(
+				int(ran["black"]),
+				Gen2BattleTransition.COLUMNS * Gen2BattleTransition.ROWS,
+				"DoBattleTransition.done fills every palette with zero"
+			)
+			assert_gt(int(ran["frames"]), 100, "the lead, three flashes and an outro")
+
+
+## `.DoFlashAnimation` walks its thirteen `dc` bytes two frames at a time, and
+## the thirteenth is the `cp %00000001` that ends the pass rather than a palette.
+func test_the_flash_walks_its_own_palette_list_three_times() -> void:
+	var ran: Dictionary = _run_transition(false, false, false)
+	for order: int in Gen2BattleTransition.FLASH_PALETTES:
+		if order == Gen2BattleTransition.FLASH_TERMINATOR:
+			continue
+		assert_true(
+			(ran["orders"] as Array).has(order),
+			"$%02X is one of the orders the flash draws with" % order
+		)
+
+
+## `wTimeOfDayPalset`'s `DARKNESS_PALSET` is the one thing that skips it, and it
+## skips the whole pass rather than one palette.
+func test_darkness_spends_no_frames_on_the_flash() -> void:
+	var lit: Dictionary = _run_transition(false, false, false)
+	var dark: Dictionary = _run_transition(false, false, false, true)
+	assert_eq(Array(dark["orders"]), [Gen2BattleTransition.IDENTITY])
+	assert_lt(int(dark["frames"]), int(lit["frames"]))
+
+
+## `StartTrainerBattle_LoadPokeBallGraphics` returns at once for a wild battle:
+## the ball is what says a person is on the other side of it.
+func test_only_a_trainer_transition_draws_the_poke_ball() -> void:
+	assert_eq(int(_run_transition(false, false, false)["squares"]), 0)
+	var trainer: Dictionary = _run_transition(false, false, true)
+	var lit: int = 0
+	for row: int in Gen2BattleTransition.POKE_BALL:
+		for bit: int in Gen2BattleTransition.BALL_SIDE:
+			lit += 1 if (row & (1 << bit)) != 0 else 0
+	assert_eq(int(trainer["squares"]), lit, "one cell per set bit of the overlay")
+
+
+## The two counts a real cartridge was measured at, which are what the flash and
+## the outros are paced by: `StartTrainerBattle_Flash` is called 25 times before
+## it hands on, three times over, and `..._SpinToBlack` spends three frames a
+## wedge over twenty of them.
+func test_the_flash_and_the_spin_take_the_cartridge_count() -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 1
+	var transition: Gen2BattleTransition = Gen2BattleTransition.create(
+		false, false, true, false, rng, _sine_table()
+	)
+	var spent: Dictionary = {}
+	var frames: int = 0
+	while frames < 4000:
+		## Read before the step, so a frame is counted against the scene that
+		## ran on it rather than against whatever it handed on to.
+		var scene: StringName = transition.scene()
+		if not transition.advance_frame():
+			break
+		frames += 1
+		spent[scene] = int(spent.get(scene, 0)) + 1
+	## The whole animation, against a real Route 30 trainer, where every one of
+	## these is a frame the oracle timed a routine on: `DoBattleTransition` 793,
+	## `..._DetermineWhichAnimation` 812, `..._LoadPokeBallGraphics` 813,
+	## `..._SetUpBGMap` 817, the first `..._Flash` 818, `..._SetUpForSpinOutro`
+	## 894, `..._Finish` 959, and the screen fully black on 962.
+	assert_eq(frames, 170, "`DoBattleTransition` on 793 and the screen black on 962")
+	assert_eq(int(spent.get(&"flash", 0)), 75, "three passes of 25")
+	assert_eq(
+		int(spent.get(&"spin", 0)),
+		Gen2BattleTransition.SPIN_QUADRANTS.size() * 3 + 1,
+		"three frames a wedge, and the call that finds the list out"
+	)
+	assert_eq(
+		int(spent.get(&"init", 0)), Gen2BattleTransition.LEAD_FRAMES + 1,
+		"`.InitGFX` in front of the jumptable"
+	)
+	assert_eq(
+		int(spent.get(&"ball", 0)), Gen2BattleTransition.BALL_FRAMES + 1,
+		"LoadPokeBallGraphics and the three frames behind it"
+	)
+
+
+## The two outros a cave battle takes, which the same oracle measured with
+## `wEnvironment` forced to CAVE: the wavy one runs `..._SineWave` sixteen times
+## over frames 97 to 138 and the zoom is one `..._ZoomToBlack` call over 96 to
+## 132, nine boxes four frames apart.
+func test_the_cave_outros_take_the_cartridge_count() -> void:
+	var wavy: Dictionary = _scene_frames(false, true)
+	assert_eq(int(wavy["sine"]), 42, "97 to 138 inclusive")
+	assert_eq(int(wavy["calls"].get(&"sine", 0)), 16, "fifteen waves and the `cp $60`")
+	var zoom: Dictionary = _scene_frames(true, true)
+	assert_eq(
+		int(zoom["zoom"]),
+		Gen2BattleTransition.ZOOM_BOXES.size() * Gen2BattleTransition.ZOOM_BOX_FRAMES + 1,
+		"96 to 132 inclusive"
+	)
+
+
+## `.DoSineWave` reads the offset before incrementing it, so the counter walks
+## the triangular numbers. A real cartridge holds 0, 1, 3, 6, 10, 15, 21, 28, 36,
+## 45, 55, 66, 78, 91 and 105, and 105 is what ends the outro.
+func test_the_wavy_outro_walks_the_triangular_numbers() -> void:
+	var transition: Gen2BattleTransition = Gen2BattleTransition.create(
+		false, true, false, false, null, _sine_table()
+	)
+	var seen: Array[int] = []
+	while transition.advance_frame():
+		if transition.scene() == &"sine" and not seen.has(transition._sine_amplitude):
+			seen.append(transition._sine_amplitude)
+	assert_eq(seen, [0, 1, 3, 6, 10, 15, 21, 28, 36, 45, 55, 66, 78, 91])
+
+
+## Frames and calls per scene, read before each step so a frame is counted
+## against the scene that ran on it.
+func _scene_frames(stronger: bool, cave: bool) -> Dictionary:
+	var transition: Gen2BattleTransition = Gen2BattleTransition.create(
+		stronger, cave, false, false, null, _sine_table()
+	)
+	var spent: Dictionary = {}
+	var calls: Dictionary = {}
+	var was_delayed: bool = false
+	var frames: int = 0
+	while frames < 4000:
+		var scene: StringName = transition.scene()
+		was_delayed = transition._delay > 0
+		if not transition.advance_frame():
+			break
+		frames += 1
+		spent[scene] = int(spent.get(scene, 0)) + 1
+		if not was_delayed:
+			calls[scene] = int(calls.get(scene, 0)) + 1
+	spent["calls"] = calls
+	return spent
+
+
+## Nothing in `DoBattleTransition.loop` writes shadow OAM, so the sprites
+## `.InitGFX`'s `UpdateSprites` left stand over the wedges. Each outro's own
+## setup runs `RespawnPlayerAndOpponent`, which hides every map object but the
+## player and `hLastTalked`, and `StartTrainerBattle_Finish` runs `ClearSprites`.
+## Measured on a real Route 30 trainer: 14 OAM slots through the whole flash, 8
+## from the frame `..._SetUpForSpinOutro` runs, and none from `..._Finish`.
+func test_the_sprites_stand_over_the_wedges_until_the_outro_hides_them() -> void:
+	for stronger: bool in [false, true]:
+		for cave: bool in [false, true]:
+			var rng := RandomNumberGenerator.new()
+			rng.seed = 7
+			var transition: Gen2BattleTransition = Gen2BattleTransition.create(
+				stronger, cave, true, false, rng, _sine_table()
+			)
+			var seen: Array[int] = []
+			var flash_sprites: Array[int] = []
+			var frames: int = 0
+			while frames < 4000:
+				var scene: StringName = transition.scene()
+				if not transition.advance_frame():
+					break
+				frames += 1
+				if not seen.has(transition.sprites()):
+					seen.append(transition.sprites())
+				if scene in [&"init", &"ball", &"bgmap", &"flash"]:
+					flash_sprites.append(transition.sprites())
+			assert_eq(
+				seen,
+				[
+					Gen2BattleTransition.SPRITES_ALL,
+					Gen2BattleTransition.SPRITES_BATTLERS,
+					Gen2BattleTransition.SPRITES_NONE,
+				],
+				"every object, then the two battlers, then none, in that order"
+			)
+			for sprites: int in flash_sprites:
+				assert_eq(
+					sprites, Gen2BattleTransition.SPRITES_ALL,
+					"the flash hides nothing: `RespawnPlayerAndOpponent` is the outro's"
+				)

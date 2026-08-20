@@ -90,6 +90,10 @@ func test_saving_writes_the_slot_and_leaves_it_clean() -> void:
 	var loaded: Dictionary = Gen2SaveStore.load_result(_data.id, _data.sha1, 0, _data)
 	assert_true(loaded["ok"], loaded["message"])
 	assert_eq((loaded["save"] as Gen2SaveData).player_name, "ASH")
+	## A second editor rebuilds every row, and the rows it replaces are dropped
+	## with `queue_free`: the game serves those at the end of its frame and a
+	## test has to spend one to see it.
+	await get_tree().process_frame
 
 
 func test_reloading_drops_uncommitted_edits() -> void:
