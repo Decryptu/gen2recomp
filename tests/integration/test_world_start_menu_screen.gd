@@ -282,21 +282,23 @@ func test_menu_account_draws_the_entry_description_and_off_takes_it_away() -> vo
 
 
 ## The pack's wording is the cartridge's, read out of the cache rather than
-## written here. `Pack_GetItemName` fills the name slot and the dial owns the
-## number, so both markers are gone by the time a box is drawn.
+## written here, and its own line breaks are kept: the box is the hardware's now,
+## and a break is where the cartridge ended the row. `Pack_GetItemName` fills the
+## name slot and the dial owns the number, so both markers are gone by the time a
+## box is drawn.
 func test_the_toss_boxes_read_the_cartridges_own_words() -> void:
 	await _open_world()
 	_world_screen._world.state.apply_changes({}, {}, {"items": {7: 5}})
 	var host: Gen2StartMenuScreen = await _open_pack()
 	_choose_action(host, Gen2WorldPack.ACTION_TOSS)
-	assert_eq(host.get("_status").text, "Throw away how many?")
+	assert_eq(host.get("_status").text, "Throw away how\nmany?")
 
 	host.handle_button(Gen2Button.DOWN)
 	host.handle_button(Gen2Button.A)
-	assert_eq(host.get("_summary").text, "Throw away 5 POTION(S)?")
+	assert_eq(host.get("_summary").text, "Throw away 5\nPOTION(S)?")
 
 	host.handle_button(Gen2Button.A)
-	assert_eq(String(host.get("_pack_result")), "Threw away POTION(S).")
+	assert_eq(String(host.get("_pack_result")), "Threw away\nPOTION(S).")
 	for marker: String in [Gen2TextStream.RAM_MARKER, Gen2TextStream.NUMBER_MARKER]:
 		assert_eq(String(host.get("_pack_result")).find(marker), -1, marker)
 
@@ -913,6 +915,65 @@ func test_use_on_a_party_item_asks_which_mon_then_heals_and_spends_it() -> void:
 	host.handle_button(Gen2Button.A)
 	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK)
 	assert_eq(((host.get("_pack_pockets")[0] as Dictionary)["items"] as Array).size(), 0)
+
+
+## Every box the pack opens is one of the cartridge's own `MENU_BACKUP_TILES`
+## menus over the pack screen rather than a window-resolution panel, so each mode
+## answers `_hardware_image()`. The two walks below reach all nine between them.
+func test_every_box_the_pack_opens_is_a_cartridge_page() -> void:
+	var host: Gen2StartMenuScreen = await _open_pack_with_a_hurt_party()
+	assert_not_null(host.call("_hardware_image"), "the pocket listing")
+
+	host.handle_button(Gen2Button.A)
+	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_ITEM)
+	assert_not_null(host.call("_hardware_image"), "USE/GIVE/TOSS/QUIT")
+
+	## TOSS is the third row of a usable, holdable, tossable item.
+	host.handle_button(Gen2Button.DOWN)
+	host.handle_button(Gen2Button.DOWN)
+	host.handle_button(Gen2Button.A)
+	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_TOSS_QUANTITY)
+	assert_not_null(host.call("_hardware_image"), "the quantity dial")
+
+	host.handle_button(Gen2Button.A)
+	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_TOSS_CONFIRM)
+	assert_not_null(host.call("_hardware_image"), "the throw-away yes/no")
+
+	host.handle_button(Gen2Button.A)
+	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_RESULT)
+	assert_not_null(host.call("_hardware_image"), "the result box")
+
+
+func test_every_box_the_tm_path_opens_is_a_cartridge_page() -> void:
+	_write_tmhm_item()
+	await _open_world()
+	_fill_moveset()
+	var host: Gen2StartMenuScreen = await _open_tmhm_pack()
+
+	host.handle_button(Gen2Button.A)
+	await get_tree().process_frame
+	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_ITEM)
+	host.handle_button(Gen2Button.A)
+	await get_tree().process_frame
+	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_TEACH)
+	assert_not_null(host.call("_hardware_image"), "AskTeachTMHM's yes/no")
+
+	host.handle_button(Gen2Button.A)
+	await get_tree().process_frame
+	host.handle_button(Gen2Button.A)
+	await get_tree().process_frame
+	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_FORGET_ASK)
+	assert_not_null(host.call("_hardware_image"), "ForgetMove's ask")
+
+	host.handle_button(Gen2Button.A)
+	await get_tree().process_frame
+	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_FORGET)
+	assert_not_null(host.call("_hardware_image"), "ListMoves' own box")
+
+	host.handle_button(Gen2Button.B)
+	await get_tree().process_frame
+	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_STOP_LEARNING)
+	assert_not_null(host.call("_hardware_image"), "LearnMove.cancel's yes/no")
 
 
 ## `.Party` opens the party menu itself, not a panel: `GiveItem` and every

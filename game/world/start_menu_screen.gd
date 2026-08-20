@@ -1,10 +1,11 @@
 class_name Gen2StartMenuScreen
 extends Control
 
-## The overworld pause menu (engine/menus/start_menu.asm). The list, `_Option`
-## and `SaveMenu` are the cartridge's own screens through [Gen2StartMenuPage],
-## drawn into whichever [Gen2Screen] the host hands over; the pack's modes are
-## still a window-resolution Control panel, which is `HANDOFF.md`'s open row.
+## The overworld pause menu (engine/menus/start_menu.asm). The list, `_Option`,
+## `SaveMenu` and every box the pack opens are the cartridge's own screens
+## through [Gen2StartMenuPage] and [Gen2PackPage], drawn into whichever
+## [Gen2Screen] the host hands over. A caller that hands over none keeps the
+## window-resolution panel below, which is what a launcher preview gets.
 ##
 ## Pokedex, Pokemon and Pokegear are screens the world already owns
 ## (Gen2PokedexScreen, Gen2PartyScreen, the phone list on
@@ -96,6 +97,28 @@ const ERROR: Color = Color("#ef8a8a")
 ## How many window pixels a hardware pixel is drawn as inside the panel.
 const PACK_VIEW_SCALE: int = 2
 
+## The pack's submenus, all `MENU_BACKUP_TILES` boxes over the pack's own screen.
+##
+## `MenuHeader_UsableKeyItem` and its five siblings differ only in where the box
+## starts: `menu_coords 13, y, SCREEN_WIDTH - 1, TEXTBOX_Y - 1` with y chosen so
+## the rows end on the text box, which is `TEXTBOX_Y - 1 - 2 * items`.
+const ITEM_MENU_LEFT: int = 13
+const ITEM_MENU_RIGHT: int = 19
+const ITEM_MENU_BOTTOM: int = 11
+## `YesNoBox`'s own `lb bc, SCREEN_WIDTH - 6, 7`, which `_YesNoBox` turns into
+## left 14, right 19, top 7, bottom 11.
+const YES_NO_AT: Vector2i = Vector2i(14, 7)
+const YES_NO_SPAN: Vector2i = Vector2i(5, 4)
+## `TossItem_MenuHeader`: `menu_coords 15, 9, SCREEN_WIDTH - 1, TEXTBOX_Y - 1`.
+const TOSS_QUANTITY_AT: Vector2i = Vector2i(15, 9)
+const TOSS_QUANTITY_TO: Vector2i = Vector2i(19, 11)
+## `STATICMENU_CURSOR | STATICMENU_NO_TOP_SPACING`, which every one of them sets.
+const SUBMENU_FLAGS: int = (
+	Gen2MenuBox.STATICMENU_CURSOR | Gen2MenuBox.STATICMENU_NO_TOP_SPACING
+)
+## `YesNoMenuHeader.MenuData`'s own two strings.
+const YES_NO_OPTIONS: Array[String] = ["YES", "NO"]
+
 var _world: Gen2WorldAPI = null
 var _data: GameData = null
 var _save_action: Callable = Callable()
@@ -118,6 +141,10 @@ var _pack_cursors: Array[int] = [0, 0, 0, 0]
 var _pack_page: Gen2PackPage = null
 var _pack_view: TextureRect = null
 var _pack_result_ok: bool = false
+## `PrintText` waits per page, so a result longer than the box's two rows is
+## pressed through rather than cut off at the frame.
+var _pack_result_pages: Array = []
+var _pack_result_page: int = 0
 ## AskTeachTMHM's resolved prompt, held while its yes/no is on screen, and
 ## whether the party list that follows is ChooseMonToLearnTMHM's rather than
 ## `.Party`'s.
@@ -134,9 +161,11 @@ var _toss_confirm_cursor: int = 0
 ## which acts on the item rather than opening a submenu over it.
 var _giving: bool = false
 var _give_target: int = -1
-## `PokemonAskSwapItemText`'s yes/no and who it is about.
+## `PokemonAskSwapItemText`'s yes/no, who it is about and the question itself,
+## which stands in the pack's own text box while the box is up.
 var _swap_cursor: int = 0
 var _swap_target: int = -1
+var _swap_question: String = ""
 ## Whether the USE running is `UseRegisteredItem`'s rather than the pack's own,
 ## which is the one thing the two jumptables disagree about: their refusals.
 var _using_registered: bool = false
@@ -174,8 +203,7 @@ var _mod_option_cursor: int = 0
 ## The cartridge's own screens, drawn into whichever [Gen2Screen] the host
 ## handed over. `StartMenu`'s box sits over the map, so it goes into the world's
 ## own screen rather than one of this node's; without one, the panel below
-## stands in, which is what a test or the launcher gets. The pack and its
-## modes are still the panel, and are the next row of `HANDOFF.md`'s table.
+## stands in, which is what a test or the launcher gets.
 var _screen: Gen2Screen = null
 var _view: TextureRect = null
 var _page: Gen2StartMenuPage = null
@@ -449,6 +477,8 @@ func _confirm() -> void:
 		## A pack opened over one Pokemon has no menu behind it to go back to:
 		## the party screen closed when it asked for this one.
 		Mode.PACK_RESULT:
+			if _pack_result_advanced():
+				return
 			if _give_target >= 0:
 				closed.emit()
 			else:
@@ -482,6 +512,8 @@ func _cancel() -> void:
 		Mode.PACK_ITEM, Mode.PACK_TEACH:
 			_open_pack_mode(false)
 		Mode.PACK_RESULT:
+			if _pack_result_advanced():
+				return
 			if _give_target >= 0:
 				closed.emit()
 			else:
@@ -822,14 +854,84 @@ func _pack_rows() -> Array:
 func _pack_image() -> Image:
 	if _pack_page == null:
 		_pack_page = Gen2PackPage.from_data(_data)
+	if _pack_page == null:
+		return null
+	return _pack_page.image(
+		_data, _pack_map(_pack_description()), _pack_pocket_index, _player_is_female()
+	)
+
+
+## The pocket listing's own tilemap with [param text] in its description box,
+## which is where every one of the pack's prints lands: `Pack_PrintTextNoScroll`
+## and `MenuTextbox` both write the same six rows at the foot of the screen.
+func _pack_map(text: String) -> PackedInt32Array:
 	var pocket: int = _pack_pocket_index
-	var rows: Array = _pack_rows()
-	var cursor: int = _pack_cursor - _pack_scroll[_pack_pocket_index]
-	var map: PackedInt32Array = _pack_page.pocket_map(
-		pocket, rows, cursor, _pack_description(),
+	return _pack_page.pocket_map(
+		pocket, _pack_rows(), _pack_cursor - _pack_scroll[pocket], text,
 		_data.pack_pocket_name(pocket) if _data != null else PackedByteArray()
 	)
-	return _pack_page.image(_data, map, pocket, _player_is_female())
+
+
+## The pack's screen with one of its `MENU_BACKUP_TILES` boxes over it.
+## [param draw] writes tiles into the map the pack just built, so the box wears
+## the attrmap `_CGB_PackPals` left rather than being a layer of its own.
+func _pack_overlay(text: String, draw: Callable) -> Image:
+	if _pack_page == null:
+		_pack_page = Gen2PackPage.from_data(_data)
+	if _pack_page == null:
+		return null
+	var map: PackedInt32Array = _pack_map(text)
+	if draw.is_valid():
+		draw.call(map)
+	return _pack_page.image(_data, map, _pack_pocket_index, _player_is_female())
+
+
+## `YesNoBox` over one of the pack's printed questions, which is what every one
+## of its confirmations is.
+func _pack_yes_no(text: String, cursor: int) -> Image:
+	return _pack_overlay(_last_page(text), func(map: PackedInt32Array) -> void:
+		_pack_page.draw_menu(
+			map,
+			Gen2MenuBox.from_coords(
+				YES_NO_AT.x, YES_NO_AT.y,
+				YES_NO_AT.x + YES_NO_SPAN.x, YES_NO_AT.y + YES_NO_SPAN.y,
+				SUBMENU_FLAGS
+			),
+			YES_NO_OPTIONS, cursor
+		)
+	)
+
+
+## `MenuHeader_UsableKeyItem` and its five siblings, which are one box whose top
+## is chosen so [param count] rows end on the text box.
+func _item_menu_box(count: int) -> Gen2MenuBox:
+	return Gen2MenuBox.from_coords(
+		ITEM_MENU_LEFT, ITEM_MENU_BOTTOM - 2 * maxi(count, 0),
+		ITEM_MENU_RIGHT, ITEM_MENU_BOTTOM, SUBMENU_FLAGS
+	)
+
+
+## What a box is left holding after the prints in front of a question: `YesNoBox`
+## opens over the last page of the last `PrintText`, so a question preceded by
+## more words than two rows hold shows its tail rather than its head.
+## `AskTeachTMHM`'s pair of texts is the one that reaches past a page.
+func _last_page(text: String) -> String:
+	var pages: Array = Gen2TextLayout.lay_out(
+		text, Gen2PackPage.TEXTBOX_COLUMNS - 2, Gen2PackPage.TEXTBOX_ROWS_OF_TEXT
+	)
+	if pages.is_empty():
+		return ""
+	return "\n".join(pages[pages.size() - 1] as PackedStringArray)
+
+
+## Which page of the result text the box is holding.
+func _pack_result_text() -> String:
+	if _pack_result_pages.is_empty():
+		return ""
+	var page: PackedStringArray = _pack_result_pages[
+		clampi(_pack_result_page, 0, _pack_result_pages.size() - 1)
+	]
+	return "\n".join(page)
 
 
 func _pack_description() -> String:
@@ -987,15 +1089,15 @@ func _open_give_swap(party_index: int, held_name: String) -> void:
 	_mode = Mode.PACK_GIVE_SWAP
 	_swap_cursor = 0
 	_swap_target = party_index
+	_swap_question = Gen2WorldPack.ask_swap_text(_target_name(party_index), held_name)
 	_status.text = ""
 	_footer.text = "Up and down: move    A: choose    B: back"
-	_render_give_swap(held_name)
+	_render_give_swap()
 
 
-func _render_give_swap(held_name: String = "") -> void:
+func _render_give_swap() -> void:
 	_title.text = "GIVE"
-	if not held_name.is_empty():
-		_summary.text = Gen2WorldPack.ask_swap_text(_target_name(_swap_target), held_name)
+	_summary.text = _swap_question
 	_render_options([{"label": "YES"}, {"label": "NO"}], _swap_cursor,
 		func(entry: Dictionary) -> String: return String(entry.get("label", ""))
 	)
@@ -1564,14 +1666,14 @@ func _coins() -> int:
 	return _world.state.coins() if _world != null and _world.state != null else 0
 
 
-## One of the pack's own texts, imported when the cache carries it. The lines
-## are joined with a space: these boxes are window-resolution panels rather than
-## the hardware's own, and the source's breaks are where its box ended.
+## One of the pack's own texts, imported when the cache carries it. The source's
+## own line breaks are kept: these boxes are the hardware's now, and a break is
+## where the cartridge ended the row.
 func _pack_text(key: String) -> String:
 	var text: String = _data.menu_text(key) if _data != null else ""
 	if text.is_empty():
 		text = String(TEXT_FALLBACKS.get(key, ""))
-	return text.replace("\n", " ")
+	return text
 
 
 ## `Pack_GetItemName` fills wStringBuffer2 and the dial owns wItemQuantityChange,
@@ -1590,8 +1692,22 @@ func _show_pack_result(message: String, ok: bool) -> void:
 	_mode = Mode.PACK_RESULT
 	_pack_result = message
 	_pack_result_ok = ok
+	_pack_result_pages = Gen2TextLayout.lay_out(
+		message, Gen2PackPage.TEXTBOX_COLUMNS - 2, Gen2PackPage.TEXTBOX_ROWS_OF_TEXT
+	)
+	_pack_result_page = 0
 	_footer.text = "A: continue"
 	_render_pack_result()
+
+
+## `PrintText`'s own wait: a result that runs past the box's two rows is pressed
+## through page by page before the pack comes back.
+func _pack_result_advanced() -> bool:
+	if _pack_result_page + 1 >= _pack_result_pages.size():
+		return false
+	_pack_result_page += 1
+	_render_pack_result()
+	return true
 
 
 func _render_pack_result() -> void:
@@ -1885,6 +2001,53 @@ func _hardware_image() -> Image:
 			return _page.render_options(_options_menu.rows(), _options_menu.cursor)
 		Mode.PACK:
 			return _pack_image()
+		Mode.PACK_ITEM:
+			var labels: Array = []
+			for entry: Dictionary in _item_actions:
+				labels.append(String(entry.get("label", "")))
+			return _pack_overlay(_pack_description(), func(map: PackedInt32Array) -> void:
+				_pack_page.draw_menu(map, _item_menu_box(labels.size()), labels, _item_cursor)
+			)
+		Mode.PACK_TEACH:
+			return _pack_yes_no(String(_teach_prompt.get("text", "")), _teach_cursor)
+		Mode.PACK_FORGET_ASK:
+			return _pack_yes_no(Gen2MoveForget.ask_text(
+				_target_name(_forget_party_index),
+				String(_teach_prompt.get("move_name", ""))
+			), _forget_confirm_cursor)
+		Mode.PACK_STOP_LEARNING:
+			return _pack_yes_no(Gen2MoveForget.stop_text(
+				String(_teach_prompt.get("move_name", ""))
+			), _forget_confirm_cursor)
+		Mode.PACK_TOSS_CONFIRM:
+			return _pack_yes_no(_fill_item_text(
+				_pack_text(TEXT_TOSS_ASK_QUANTITY),
+				String(_selected_item().get("name", "")),
+				_toss_prompt.value if _toss_prompt != null else 1
+			), _toss_confirm_cursor)
+		Mode.PACK_GIVE_SWAP:
+			return _pack_yes_no(_swap_question, _swap_cursor)
+		Mode.PACK_TOSS_QUANTITY:
+			return _pack_overlay(_pack_text(TEXT_TOSS_ASK), func(map: PackedInt32Array) -> void:
+				_pack_page.draw_quantity(
+					map,
+					Gen2MenuBox.from_coords(
+						TOSS_QUANTITY_AT.x, TOSS_QUANTITY_AT.y,
+						TOSS_QUANTITY_TO.x, TOSS_QUANTITY_TO.y, 0
+					),
+					_toss_prompt.value if _toss_prompt != null else 1
+				)
+			)
+		Mode.PACK_FORGET:
+			var moves: Array = []
+			for entry: Dictionary in _forget_moves:
+				moves.append(String(entry.get("name", "")))
+			return _pack_overlay(
+				Gen2MoveForget.which_text(), func(map: PackedInt32Array) -> void:
+					_pack_page.draw_move_list(map, moves, _forget_cursor)
+			)
+		Mode.PACK_RESULT:
+			return _pack_overlay(_pack_result_text(), Callable())
 		Mode.PACK_TARGET:
 			if _party_menu_page() == null:
 				return null
