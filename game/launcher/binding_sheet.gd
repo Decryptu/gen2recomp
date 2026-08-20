@@ -77,12 +77,12 @@ func _build_rows() -> void:
 ## place, so a button with no entry yet is given one first.
 func _bindings() -> Array:
 	if _action != &"":
-		var name: String = String(_action)
-		if not _options.mod_controls.has(name):
+		var action_name: String = String(_action)
+		if not _options.mod_controls.has(action_name):
 			# Seeded from what the mod declared, so editing starts from what is
 			# bound rather than from nothing.
-			_options.mod_controls[name] = _registered_default()
-		return _options.mod_controls[name]
+			_options.mod_controls[action_name] = _registered_default()
+		return _options.mod_controls[action_name]
 	if not _options.controls.has(_button):
 		_options.controls[_button] = []
 	return _options.controls[_button]
@@ -106,9 +106,9 @@ func _refresh() -> void:
 	var bindings: Array = _bindings()
 	for index: int in bindings.size():
 		var row: HBoxContainer = Gen2LauncherUI.row(Gen2LauncherUI.GAP_SM)
-		var name: Label = Gen2LauncherUI.body(_theme, Gen2InputActions.describe(bindings[index]))
-		name.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		row.add_child(name)
+		var description: Label = Gen2LauncherUI.body(_theme, Gen2InputActions.describe(bindings[index]))
+		description.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(description)
 		var remove: Gen2LauncherButton = Gen2LauncherButton.icon_only(
 			_theme, &"trash", Gen2LauncherButton.Variant.DANGER, 36.0
 		)

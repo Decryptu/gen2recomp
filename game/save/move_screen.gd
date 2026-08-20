@@ -29,11 +29,11 @@ var _row: int = 0
 var _held: int = -1
 
 
-static func create(data: GameData, party: Array, cursor: int = 0) -> Gen2MoveScreen:
+static func create(data: GameData, party: Array, start_cursor: int = 0) -> Gen2MoveScreen:
 	var out := Gen2MoveScreen.new()
 	out._data = data
 	out._party = party
-	out._cursor = clampi(cursor, 0, maxi(party.size() - 1, 0))
+	out._cursor = clampi(start_cursor, 0, maxi(party.size() - 1, 0))
 	return out
 
 

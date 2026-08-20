@@ -99,6 +99,17 @@ An optional `<method> <times> [int arg]` drives a scene before capture. Keep
 state changes as callable methods, not only input branches, so screens stay
 inspectable without a key press.
 
+The GDScript analyzer runs only inside the editor: no CLI mode prints its
+warnings, `--check-only` suppresses them, and file logging records the running
+game rather than the editor. Read them with `tools/dump_editor_errors.gd` from
+Editor > File > Run, which writes `user://editor_errors.txt` and tallies the
+warning codes; the panel holds what the session has analysed, so reload the
+project first for a full sweep. The tree stays at zero entries.
+
+`integer_division` is the one warning turned off in `project.godot`: this is
+8-bit hardware arithmetic throughout, where `a / b` on two integers is the
+intended operation, and a float result is written with an explicit `float()`.
+
 Before rewriting or finishing a subsystem, read the verification method: port
 the state machine rather than approximating its output, find a second executable
 implementation to diff against, pick an artefact that compares exactly, sweep

@@ -73,7 +73,7 @@ var _elapsed: float = 0.0
 ## Optional the way the trainer card is: without a world, its state or a cache
 ## carrying the dex order tables there is no listing, so this answers false and
 ## the caller keeps the start menu open.
-func open(data: GameData, world: Gen2WorldAPI, previous_entry: int = 0) -> bool:
+func open(data: GameData, world: Gen2WorldAPI, start_entry: int = 0) -> bool:
 	_data = data
 	_world = world
 	if _data == null or _world == null or _world.state == null:
@@ -84,7 +84,7 @@ func open(data: GameData, world: Gen2WorldAPI, previous_entry: int = 0) -> bool:
 	if _page == null or not _page.ready():
 		return false
 	_dex = Gen2Pokedex.open(
-		_data, _world.state, _world.state.last_dex_mode(), previous_entry
+		_data, _world.state, _world.state.last_dex_mode(), start_entry
 	)
 	if is_inside_tree() and _background != null:
 		_open_list_mode()

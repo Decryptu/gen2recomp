@@ -48,7 +48,6 @@ const BADGE_OAM: Array[Dictionary] = [
 ]
 
 var _data: GameData = null
-var _card: Gen2TrainerCard = null
 var _page_renderer: Gen2TrainerCardPage = null
 var _save: Gen2SaveData = null
 var _world: Gen2WorldAPI = null
@@ -214,8 +213,8 @@ func _refresh_badges() -> void:
 func _badge_image(frame_tile: int) -> Image:
 	var tiles: PackedByteArray = _data.tile_indices("card_badges")
 	var palette: PackedColorArray = _data.card_badge_palette()
-	var size: int = BADGE_TILE_SIZE * 2
-	var image := Image.create(size, size, false, Image.FORMAT_RGBA8)
+	var side: int = BADGE_TILE_SIZE * 2
+	var image := Image.create(side, side, false, Image.FORMAT_RGBA8)
 	if tiles.is_empty():
 		return image
 	var strip_width: int = tiles.size() / BADGE_TILE_SIZE
@@ -235,7 +234,7 @@ func _badge_image(frame_tile: int) -> Image:
 				## rules, which is what lets a badge sit over the card.
 				if index == 0:
 					continue
-				var at_x: int = size - 1 - (to_x + x) if flip else to_x + x
+				var at_x: int = side - 1 - (to_x + x) if flip else to_x + x
 				image.set_pixel(
 					at_x, to_y + y, palette[clampi(index, 0, palette.size() - 1)]
 				)

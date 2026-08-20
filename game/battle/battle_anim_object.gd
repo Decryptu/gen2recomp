@@ -86,8 +86,8 @@ var _frame_flags: int = 0
 ## `InitBattleAnimation`. [param row] is a `BattleAnimObjects` row and
 ## [param tile_id] is what `GetBattleAnimTileOffset` answered for its graphics.
 static func create(
-	object_index: int, row: Dictionary, tile_id: int,
-	x: int, y: int, param: int
+	object_index: int, row: Dictionary, tile: int,
+	at_x: int, at_y: int, parameter: int
 ) -> Gen2BattleAnimObject:
 	var out := Gen2BattleAnimObject.new()
 	out.index = object_index & 0xFF
@@ -96,10 +96,10 @@ static func create(
 	out.frameset = int(row.get(&"frameset", 0))
 	out.function = int(row.get(&"function", 0))
 	out.palette = int(row.get(&"palette", 0))
-	out.tile_id = tile_id & 0xFF
-	out.x = x & 0xFF
-	out.y = y & 0xFF
-	out.param = param & 0xFF
+	out.tile_id = tile & 0xFF
+	out.x = at_x & 0xFF
+	out.y = at_y & 0xFF
+	out.param = parameter & 0xFF
 	out.frame = 0xFF
 	return out
 
@@ -136,14 +136,14 @@ func oam_update(
 	# replacing the other, so a frameset can flip a sprite the row did not.
 	var flags: int = (_frame_flags ^ int(buffer["flags"])) & OAM_SHARED_FLAGS
 
-	var set: Dictionary = data.oam_set(command)
-	if set.is_empty():
+	var oam: Dictionary = data.oam_set(command)
+	if oam.is_empty():
 		return {"deleted": false, "sprites": []}
-	var tile: int = (int(buffer["tile_id"]) + int(set["vtile"])) & 0xFF
+	var tile: int = (int(buffer["tile_id"]) + int(oam["vtile"])) & 0xFF
 
 	var sprites: Array = []
-	for slot: int in int(set["length"]):
-		var sprite: Dictionary = data.oam_sprite(int(set["address"]), slot)
+	for slot: int in int(oam["length"]):
+		var sprite: Dictionary = data.oam_sprite(int(oam["address"]), slot)
 		sprites.append({
 			"y": _place(
 				int(sprite["y"]), int(buffer["y"]), int(buffer["y_offset"]),

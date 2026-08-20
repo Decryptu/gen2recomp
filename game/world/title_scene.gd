@@ -185,12 +185,12 @@ var _cloud_scroll: int = 0
 
 ## [param sine] is `BattleAnimSineWave`, which the bird's own callback scales.
 ## Gold and Silver hold still without one rather than inventing a curve.
-static func create(profile: StringName, sine: Gen2BattleAnimData = null) -> Gen2TitleScene:
+static func create(profile_name: StringName, sine: Gen2BattleAnimData = null) -> Gen2TitleScene:
 	var out := Gen2TitleScene.new()
-	out._profile = profile
+	out._profile = profile_name
 	out._sine = sine
-	out._scene = SCENE_ENTRANCE if profile == RomRegistry.CRYSTAL else SCENE_TIMER
-	out._scx = ENTRANCE_SCX if profile == RomRegistry.CRYSTAL else 0
+	out._scene = SCENE_ENTRANCE if profile_name == RomRegistry.CRYSTAL else SCENE_TIMER
+	out._scx = ENTRANCE_SCX if profile_name == RomRegistry.CRYSTAL else 0
 	out._crystal_y = CRYSTAL_START_Y & 0xFF
 	return out
 

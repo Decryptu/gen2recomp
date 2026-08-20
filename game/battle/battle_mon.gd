@@ -289,7 +289,7 @@ func set_badge_boosts(mask: int) -> void:
 			badge_stat_boosts["sp_defense"] = true
 
 	badge_type_boost_mask = 0
-	var types: Array[int] = [
+	var boosted_types: Array[int] = [
 		RomLayout.TYPE_FLYING, RomLayout.TYPE_BUG, RomLayout.TYPE_NORMAL,
 		RomLayout.TYPE_GHOST, RomLayout.TYPE_STEEL, RomLayout.TYPE_FIGHTING,
 		RomLayout.TYPE_ICE, RomLayout.TYPE_DRAGON, RomLayout.TYPE_ROCK,
@@ -297,9 +297,9 @@ func set_badge_boosts(mask: int) -> void:
 		RomLayout.TYPE_POISON, RomLayout.TYPE_PSYCHIC, RomLayout.TYPE_FIRE,
 		RomLayout.TYPE_GROUND,
 	]
-	for badge: int in types.size():
+	for badge: int in boosted_types.size():
 		if mask & (1 << badge):
-			badge_type_boost_mask |= 1 << types[badge]
+			badge_type_boost_mask |= 1 << boosted_types[badge]
 
 
 func clear_badge_boosts() -> void:

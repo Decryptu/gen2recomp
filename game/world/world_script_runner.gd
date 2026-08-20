@@ -648,8 +648,8 @@ func complete_runtime_request(result: Dictionary) -> Dictionary:
 			return _fail(
 				StringName(result.get("reason", &"catch_tutorial_failed")), result
 			)
-		var outcome: StringName = StringName(result.get("outcome", &""))
-		if outcome != Gen2WorldBattleAdapter.OUTCOME_CAUGHT:
+		var catch_outcome: StringName = StringName(result.get("outcome", &""))
+		if catch_outcome != Gen2WorldBattleAdapter.OUTCOME_CAUGHT:
 			return _fail(&"invalid_catch_tutorial_outcome", result)
 		_script_value = 1
 		_events.append({
@@ -2753,9 +2753,9 @@ func _phone_trainer_mon_name() -> String:
 	var party: Array = data.trainer_party(trainer_group, trainer_id).get("party", []) if data != null else []
 	var candidates: Array[int] = []
 	for mon: Dictionary in party:
-		var species: int = int(mon.get("species", 0))
-		if species > 0 and data.species(species).size() > 0:
-			candidates.append(species)
+		var party_species: int = int(mon.get("species", 0))
+		if party_species > 0 and data.species(party_species).size() > 0:
+			candidates.append(party_species)
 	if candidates.is_empty():
 		return ""
 	var species: int = candidates[_random.randi_range(0, candidates.size() - 1)]

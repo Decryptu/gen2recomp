@@ -47,13 +47,13 @@ var _side: float = DOCK_SIDE
 
 
 static func create(
-	theme: Gen2LauncherTheme,
+	palette: Gen2LauncherTheme,
 	label: String,
 	kind: Variant = Variant.NEUTRAL,
 	glyph: StringName = &"",
 ) -> Gen2LauncherButton:
 	var button := Gen2LauncherButton.new()
-	button._theme = theme
+	button._theme = palette
 	button.variant = kind
 	button.text = label
 	button._glyph = glyph
@@ -64,12 +64,12 @@ static func create(
 
 ## A square button carrying only an icon.
 static func icon_only(
-	theme: Gen2LauncherTheme,
+	palette: Gen2LauncherTheme,
 	glyph: StringName,
 	kind: Variant = Variant.QUIET,
 	side: float = 42.0,
 ) -> Gen2LauncherButton:
-	var button: Gen2LauncherButton = create(theme, "", kind, glyph)
+	var button: Gen2LauncherButton = create(palette, "", kind, glyph)
 	button.set_side(side)
 	return button
 
@@ -86,8 +86,8 @@ func set_side(side: float) -> void:
 
 
 ## A round dock button with its name written underneath by the caller.
-static func dock(theme: Gen2LauncherTheme, glyph: StringName) -> Gen2LauncherButton:
-	return icon_only(theme, glyph, Variant.DOCK, DOCK_SIDE)
+static func dock(palette: Gen2LauncherTheme, glyph: StringName) -> Gen2LauncherButton:
+	return icon_only(palette, glyph, Variant.DOCK, DOCK_SIDE)
 
 
 func _init() -> void:

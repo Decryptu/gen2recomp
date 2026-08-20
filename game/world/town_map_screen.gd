@@ -472,8 +472,8 @@ func _background_image() -> Image:
 func _header_codes() -> PackedByteArray:
 	if _map.screen != Gen2TownMap.SCREEN_DEX_AREA:
 		return _data.landmark(cursor_landmark()).get("codes", PackedByteArray())
-	var name: String = String(_data.species(_species).get("name", ""))
-	var out: PackedByteArray = Gen2Text.encode(name)
+	var species_name: String = String(_data.species(_species).get("name", ""))
+	var out: PackedByteArray = Gen2Text.encode(species_name)
 	out.append_array(Gen2Text.encode(NEST_HEADER_SUFFIX))
 	return out
 

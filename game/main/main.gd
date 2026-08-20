@@ -194,10 +194,10 @@ func import_mod_path(path: String, replace: bool = false) -> Dictionary:
 	return result
 
 
-func _confirm_mod_replace(path: String, name: String) -> void:
+func _confirm_mod_replace(path: String, mod_name: String) -> void:
 	var sheet: Gen2LauncherSheet = Gen2LauncherSheet.create(_palette, "Replace mod")
 	sheet.body().add_child(Gen2LauncherUI.muted(
-		_palette, "%s is already installed. Replace it with this archive?" % name
+		_palette, "%s is already installed. Replace it with this archive?" % mod_name
 	))
 	var replace: Gen2LauncherButton = Gen2LauncherButton.create(
 		_palette, "Replace", Gen2LauncherButton.Variant.PRIMARY

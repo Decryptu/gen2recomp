@@ -1361,7 +1361,7 @@ static func _wobble_screen(
 ## The jumptable index counts the frames left and the parameter's low nybble the
 ## frames between reversals, reloaded from its own high nybble.
 static func _shake_amount(
-	background: Gen2BattleAnimBackground, effect: Gen2BattleAnimBgEffect
+	_background: Gen2BattleAnimBackground, effect: Gen2BattleAnimBgEffect
 ) -> int:
 	if effect.jumptable_index == 0:
 		effect.end()

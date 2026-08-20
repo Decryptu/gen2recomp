@@ -32,11 +32,11 @@ var _cursor: int = 0
 var _page: int = PINK_PAGE
 
 
-static func create(data: GameData, mons: Array, cursor: int = 0) -> Gen2MonStatsScreen:
+static func create(data: GameData, mons: Array, start_cursor: int = 0) -> Gen2MonStatsScreen:
 	var out := Gen2MonStatsScreen.new()
 	out._data = data
 	out._mons = mons
-	out._cursor = clampi(cursor, 0, maxi(mons.size() - 1, 0))
+	out._cursor = clampi(start_cursor, 0, maxi(mons.size() - 1, 0))
 	return out
 
 

@@ -68,8 +68,8 @@ func _exit_tree() -> void:
 	Gen2InputRuntime.instance().release_touch_pad(self)
 
 
-func set_layout(layout: Gen2TouchLayout) -> void:
-	_layout = layout if layout != null else Gen2TouchLayout.new()
+func set_layout(new_layout: Gen2TouchLayout) -> void:
+	_layout = new_layout if new_layout != null else Gen2TouchLayout.new()
 	_layout_given = true
 	queue_redraw()
 

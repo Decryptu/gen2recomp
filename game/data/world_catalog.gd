@@ -345,10 +345,10 @@ func _record_script_site(
 				if picture >= 0:
 					row["picture_address"] = address + picture
 			if kind == KIND_PRIZE:
-				var check: int = _nearest_coin_command(commands, offset, &"checkcoins", crystal)
+				var check_at: int = _nearest_coin_command(commands, offset, &"checkcoins", crystal)
 				var take: int = _nearest_coin_command(commands, offset, &"takecoins", crystal)
-				if check >= 0:
-					row["check_address"] = address + check
+				if check_at >= 0:
+					row["check_address"] = address + check_at
 				if take >= 0:
 					row["take_address"] = address + take
 			_add(kind, bank, address, offset, row, commands, offset, crystal)
@@ -503,11 +503,11 @@ func _attribute_maps() -> void:
 				references[key] = Gen2WorldScript.scan_references(
 					body, int(entry[0]), int(entry[1]), crystal
 				).get("scripts", []) if not body.is_empty() else []
-			for reference: Variant in references[key]:
-				if reference is Dictionary:
+			for referenced: Variant in references[key]:
+				if referenced is Dictionary:
 					pending.append([
-						int((reference as Dictionary)["bank"]),
-						int((reference as Dictionary)["address"]),
+						int((referenced as Dictionary)["bank"]),
+						int((referenced as Dictionary)["address"]),
 					])
 	for id: Variant in _rows:
 		var row: Dictionary = _rows[id]

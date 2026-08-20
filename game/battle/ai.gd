@@ -466,8 +466,8 @@ static func _apply_basic(
 ## encouraged only on the attacker's first turn and lowering only on the
 ## defender's; past that both are heavily discouraged.
 static func _apply_setup(
-	scores: Array, attacker: Gen2BattleMon, defender: Gen2BattleMon, data: GameData,
-	rng: RandomNumberGenerator, atk_turns: int, def_turns: int, weather: int,
+	scores: Array, attacker: Gen2BattleMon, _defender: Gen2BattleMon, data: GameData,
+	rng: RandomNumberGenerator, atk_turns: int, def_turns: int, _weather: int,
 	_attacker_screens: int = Gen2Screens.NONE, _defender_screens: int = Gen2Screens.NONE,
 	_has_bench: bool = false,
 	_matchup_score: int = Gen2AISwitch.BASE_SCORE
@@ -504,7 +504,7 @@ static func _in_run(effect: int, base: int) -> bool:
 ## unless it is the only type of damage on offer.
 static func _apply_types(
 	scores: Array, attacker: Gen2BattleMon, defender: Gen2BattleMon, data: GameData,
-	_rng: RandomNumberGenerator, _atk_turns: int, _def_turns: int, weather: int,
+	_rng: RandomNumberGenerator, _atk_turns: int, _def_turns: int, _weather: int,
 	_attacker_screens: int = Gen2Screens.NONE, _defender_screens: int = Gen2Screens.NONE,
 	_has_bench: bool = false,
 	_matchup_score: int = Gen2AISwitch.BASE_SCORE
@@ -548,7 +548,7 @@ static func _apply_types(
 ## for a class whose whole strategy is to attack.
 static func _apply_offensive(
 	scores: Array, attacker: Gen2BattleMon, _defender: Gen2BattleMon, data: GameData,
-	_rng: RandomNumberGenerator, _atk_turns: int, _def_turns: int, weather: int,
+	_rng: RandomNumberGenerator, _atk_turns: int, _def_turns: int, _weather: int,
 	_attacker_screens: int = Gen2Screens.NONE, _defender_screens: int = Gen2Screens.NONE,
 	_has_bench: bool = false,
 	_matchup_score: int = Gen2AISwitch.BASE_SCORE
@@ -1319,7 +1319,7 @@ static func _smart_psych_up(
 ## once its own HP is low, more insistently the lower it is.
 static func _apply_opportunist(
 	scores: Array, attacker: Gen2BattleMon, _defender: Gen2BattleMon, data: GameData,
-	rng: RandomNumberGenerator, _atk_turns: int, _def_turns: int, weather: int,
+	rng: RandomNumberGenerator, _atk_turns: int, _def_turns: int, _weather: int,
 	_attacker_screens: int = Gen2Screens.NONE, _defender_screens: int = Gen2Screens.NONE,
 	_has_bench: bool = false,
 	_matchup_score: int = Gen2AISwitch.BASE_SCORE
@@ -1348,7 +1348,7 @@ static func _apply_opportunist(
 ## hard they rank, not which move is strongest.
 static func _apply_aggressive(
 	scores: Array, attacker: Gen2BattleMon, defender: Gen2BattleMon, data: GameData,
-	_rng: RandomNumberGenerator, _atk_turns: int, _def_turns: int, weather: int,
+	_rng: RandomNumberGenerator, _atk_turns: int, _def_turns: int, _weather: int,
 	_attacker_screens: int = Gen2Screens.NONE, _defender_screens: int = Gen2Screens.NONE,
 	_has_bench: bool = false,
 	_matchup_score: int = Gen2AISwitch.BASE_SCORE
@@ -1402,7 +1402,7 @@ static func _estimate_damage(
 ## slots on a missed roll, where pret's own fix moves on to the next one.
 static func _apply_cautious(
 	scores: Array, attacker: Gen2BattleMon, _defender: Gen2BattleMon, data: GameData,
-	rng: RandomNumberGenerator, atk_turns: int, _def_turns: int, weather: int,
+	rng: RandomNumberGenerator, atk_turns: int, _def_turns: int, _weather: int,
 	_attacker_screens: int = Gen2Screens.NONE, _defender_screens: int = Gen2Screens.NONE,
 	_has_bench: bool = false,
 	_matchup_score: int = Gen2AISwitch.BASE_SCORE
@@ -1427,7 +1427,7 @@ static func _apply_cautious(
 ## [constant RomLayout.MATCHUP_NO_EFFECT] out of the real chart.
 static func _apply_status(
 	scores: Array, attacker: Gen2BattleMon, defender: Gen2BattleMon, data: GameData,
-	_rng: RandomNumberGenerator, _atk_turns: int, _def_turns: int, weather: int,
+	_rng: RandomNumberGenerator, _atk_turns: int, _def_turns: int, _weather: int,
 	_attacker_screens: int = Gen2Screens.NONE, _defender_screens: int = Gen2Screens.NONE,
 	_has_bench: bool = false,
 	_matchup_score: int = Gen2AISwitch.BASE_SCORE
@@ -1451,7 +1451,7 @@ static func _apply_status(
 ## back on unless the attacker is already hurt.
 static func _apply_risky(
 	scores: Array, attacker: Gen2BattleMon, defender: Gen2BattleMon, data: GameData,
-	rng: RandomNumberGenerator, _atk_turns: int, _def_turns: int, weather: int,
+	rng: RandomNumberGenerator, _atk_turns: int, _def_turns: int, _weather: int,
 	_attacker_screens: int = Gen2Screens.NONE, _defender_screens: int = Gen2Screens.NONE,
 	_has_bench: bool = false,
 	_matchup_score: int = Gen2AISwitch.BASE_SCORE

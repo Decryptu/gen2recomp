@@ -352,16 +352,16 @@ func start_step(direction: Vector2i, frames: int) -> void:
 ## walking its whole path already facing the last command's way.
 func queue_step(
 	direction: Vector2i, frames: int, jumping: bool = false,
-	facing: Vector2i = Vector2i.ZERO
+	new_facing: Vector2i = Vector2i.ZERO
 ) -> void:
 	if step_frames_remaining > 0 or not queued_steps.is_empty():
 		scripted_steps = true
 		queued_steps.append({
 			"direction": direction, "frames": maxi(0, frames), "jumping": jumping,
-			"facing": facing,
+			"facing": new_facing,
 		})
 		return
-	apply_direction(facing)
+	apply_direction(new_facing)
 	## A turn spends no frames, so an entry with none to spend leaves nothing
 	## for the stream's wait to end on: it is the turn and nothing else.
 	if frames <= 0 and direction == Vector2i.ZERO:

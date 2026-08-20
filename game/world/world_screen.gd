@@ -621,9 +621,9 @@ func input_recording() -> Array:
 
 ## Plays a recorded log back into this world instead of reading the input
 ## runtime. Every entry is applied on the frame it names, from inside the pump.
-func replay_input(log: Array) -> void:
+func replay_input(entries: Array) -> void:
 	_input_replay = {}
-	for raw: Variant in log:
+	for raw: Variant in entries:
 		if not raw is Dictionary:
 			continue
 		var entry: Dictionary = raw
@@ -1115,11 +1115,11 @@ func _after_map_settled() -> bool:
 	## met by walking into one. Everything else that reaches a wild, a script, a
 	## rod, Headbutt, Rock Smash, Sweet Scent and the contest, keeps its own path.
 	if _encounters != null and _encounters.active():
-		var visible: Dictionary = _encounters.battle_request_at(_world.player_cell)
-		if not visible.is_empty():
-			_battle_encounter_id = StringName(visible["visible_encounter"])
+		var request: Dictionary = _encounters.battle_request_at(_world.player_cell)
+		if not request.is_empty():
+			_battle_encounter_id = StringName(request["visible_encounter"])
 			_zero_map_name_sign_timer()
-			_start_battle_request(visible)
+			_start_battle_request(request)
 		return true
 	var encounter: Dictionary = _world.encounter_request(
 		_encounter_random, false, &"auto", _repel_lead_level(), _party_holds_cleanse_tag()
@@ -2027,10 +2027,10 @@ func preview_fishing_battle() -> void:
 func _position_for_fishing_preview() -> void:
 	if _world.current_map == null or _world.current_map.fish_group <= 0:
 		return
-	var size: Vector2i = _world.map_size_cells()
+	var map_size: Vector2i = _world.map_size_cells()
 	var directions: Array[Vector2i] = [Vector2i.DOWN, Vector2i.UP, Vector2i.LEFT, Vector2i.RIGHT]
-	for y: int in size.y:
-		for x: int in size.x:
+	for y: int in map_size.y:
+		for x: int in map_size.x:
 			var cell := Vector2i(x, y)
 			if _world.collision_permission_at(cell) != Gen2WorldCollision.LAND_TILE:
 				continue
@@ -3173,19 +3173,19 @@ func _run_mon_item_action(action: Dictionary) -> void:
 	var result: Dictionary = Gen2WorldBagHost.take_from_party(
 		_world, save, slot, _injected_save == null
 	)
-	var name: String = String(action.get("name", ""))
+	var action_name: String = String(action.get("name", ""))
 	if bool(result.get("ok", false)):
-		_show_field_move_text(Gen2WorldPack.took_text(name, String(result.get("name", ""))))
+		_show_field_move_text(Gen2WorldPack.took_text(action_name, String(result.get("name", ""))))
 		return
 	match StringName(result.get("reason", &"")):
 		&"not_holding":
-			_show_field_move_text(Gen2WorldPack.not_holding_text(name))
+			_show_field_move_text(Gen2WorldPack.not_holding_text(action_name))
 		&"bag_full":
 			_show_field_move_text(Gen2WorldPack.storage_full_text())
 		_:
 			_show_field_move_text(
 				"%s could not hand that over (%s)." % [
-					name, String(result.get("reason", "")),
+					action_name, String(result.get("reason", "")),
 				]
 			)
 

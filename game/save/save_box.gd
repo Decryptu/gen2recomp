@@ -41,7 +41,10 @@ func to_dict() -> Array:
 	var out: Array = []
 	for index: int in CAPACITY:
 		var mon: Gen2SaveMon = slots[index] if index < slots.size() else null
-		out.append(mon.to_dict() if mon != null else null)
+		if mon == null:
+			out.append(null)
+			continue
+		out.append(mon.to_dict())
 	return out
 
 

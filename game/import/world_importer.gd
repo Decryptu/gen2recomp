@@ -267,9 +267,9 @@ static func _read_command_queues(
 		var references: Dictionary = Gen2WorldScript.scan_references(
 			bytes, int(parts[0]), 0, rom.id == &"crystal"
 		)
-		for reference: Dictionary in references.get("command_queues", []):
+		for referenced: Dictionary in references.get("command_queues", []):
 			_read_command_queue(
-				rom, int(reference["bank"]), int(reference["address"]),
+				rom, int(referenced["bank"]), int(referenced["address"]),
 				queues, script_data, text_data, movement_data
 			)
 	return {"ok": true, "queues": queues}

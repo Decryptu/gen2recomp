@@ -18,9 +18,9 @@ var _slide: float = 0.0:
 		queue_redraw()
 
 
-static func create(theme: Gen2LauncherTheme, on: bool) -> Gen2LauncherToggle:
+static func create(palette: Gen2LauncherTheme, on: bool) -> Gen2LauncherToggle:
 	var toggle := Gen2LauncherToggle.new()
-	toggle._theme = theme
+	toggle._theme = palette
 	toggle.toggle_mode = true
 	toggle.custom_minimum_size = TRACK
 	toggle.set_pressed_no_signal(on)

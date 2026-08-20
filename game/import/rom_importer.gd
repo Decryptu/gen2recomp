@@ -1277,7 +1277,7 @@ static func read_pokecenter_pc_lists(
 
 ## One `text_far` stub, followed and decoded. Empty when the stub is not one,
 ## which is what a table that is not `OakRatings` produces.
-static func read_oak_text(rom: RomFile, layout: Dictionary, stub: int) -> String:
+static func read_oak_text(rom: RomFile, _layout: Dictionary, stub: int) -> String:
 	if not rom.in_bounds(stub, RomLayout.OAK_TEXT_STUB_SIZE) \
 		or rom.u8(stub) != Gen2TextStream.TX_FAR:
 		return ""
@@ -5551,7 +5551,6 @@ static func _rows_from_columns(
 		return strip
 	var out := PackedByteArray()
 	out.resize(strip.size())
-	var width: int = columns * Gen2Tiles.TILE_WIDTH
 	for column: int in columns:
 		for row: int in rows:
 			var source_tile: int = column * rows + row

@@ -111,19 +111,19 @@ var enemy_off_field: bool = false
 ## animation. [param param] is `wBattleAnimParam` and [param enemy_turn] is
 ## `hBattleTurn`, the two inputs set before `PlayBattleAnim`.
 static func create(
-	data: Gen2BattleAnimData, index: int, enemy_turn: bool = false, param: int = 0
+	anim_data: Gen2BattleAnimData, index: int, on_enemy_turn: bool = false, param: int = 0
 ) -> Gen2BattleAnimPlayer:
-	if data == null:
+	if anim_data == null:
 		return null
-	var region: Dictionary = data.region(&"scripts")
-	var address: int = data.pointer(&"scripts", index)
+	var region: Dictionary = anim_data.region(&"scripts")
+	var address: int = anim_data.pointer(&"scripts", index)
 	if region.is_empty() or address < 0:
 		return null
 
 	var player := Gen2BattleAnimPlayer.new()
-	player._data = data
+	player._data = anim_data
 	player._anim_index = index
-	player._enemy_turn = enemy_turn
+	player._enemy_turn = on_enemy_turn
 	# `ClearBattleAnims` zeroes the whole animation block before the script's
 	# pointer is loaded, so every object slot, the tile dict and the flags start
 	# empty on each animation rather than carrying over from the last one.
@@ -496,16 +496,16 @@ func _update_oam() -> void:
 		if not object.active():
 			continue
 		var update: Dictionary = object.oam_update(_data, _enemy_turn, _anim_index)
-		var sprites: Array = update["sprites"]
-		if _sprites.size() + sprites.size() > MAX_SPRITES:
+		var new_sprites: Array = update["sprites"]
+		if _sprites.size() + new_sprites.size() > MAX_SPRITES:
 			# `BattleAnimOAMUpdate` returns carry once the pointer reaches the end
 			# of the shadow buffer, and the caller stops there.
-			for sprite: Variant in sprites:
+			for sprite: Variant in new_sprites:
 				if _sprites.size() >= MAX_SPRITES:
 					break
 				_sprites.append(sprite)
 			return
-		_sprites.append_array(sprites)
+		_sprites.append_array(new_sprites)
 
 
 ## `DoBattleAnimFrame`: the object's own motion callback, in

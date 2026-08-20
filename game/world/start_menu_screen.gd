@@ -875,20 +875,20 @@ func _pack_map(text: String) -> PackedInt32Array:
 ## The pack's screen with one of its `MENU_BACKUP_TILES` boxes over it.
 ## [param draw] writes tiles into the map the pack just built, so the box wears
 ## the attrmap `_CGB_PackPals` left rather than being a layer of its own.
-func _pack_overlay(text: String, draw: Callable) -> Image:
+func _pack_overlay(text: String, draw_page: Callable) -> Image:
 	if _pack_page == null:
 		_pack_page = Gen2PackPage.from_data(_data)
 	if _pack_page == null:
 		return null
 	var map: PackedInt32Array = _pack_map(text)
-	if draw.is_valid():
-		draw.call(map)
+	if draw_page.is_valid():
+		draw_page.call(map)
 	return _pack_page.image(_data, map, _pack_pocket_index, _player_is_female())
 
 
 ## `YesNoBox` over one of the pack's printed questions, which is what every one
 ## of its confirmations is.
-func _pack_yes_no(text: String, cursor: int) -> Image:
+func _pack_yes_no(text: String, cursor_index: int) -> Image:
 	return _pack_overlay(_last_page(text), func(map: PackedInt32Array) -> void:
 		_pack_page.draw_menu(
 			map,
@@ -897,7 +897,7 @@ func _pack_yes_no(text: String, cursor: int) -> Image:
 				YES_NO_AT.x + YES_NO_SPAN.x, YES_NO_AT.y + YES_NO_SPAN.y,
 				SUBMENU_FLAGS
 			),
-			YES_NO_OPTIONS, cursor
+			YES_NO_OPTIONS, cursor_index
 		)
 	)
 
@@ -1054,12 +1054,12 @@ func _give_selected_item(party_index: int, swap: bool = false) -> void:
 		_world, _pack_save, number, party_index, swap, _pack_persist
 	)
 	if bool(result.get("ok", false)):
-		var name: String = _target_name(party_index)
+		var target_name: String = _target_name(party_index)
 		var held_name: String = String(result.get("held_name", ""))
 		_show_pack_result(
-			Gen2WorldPack.swap_text(name, held_name, String(result.get("name", ""))) \
+			Gen2WorldPack.swap_text(target_name, held_name, String(result.get("name", ""))) \
 				if int(result.get("held", 0)) > 0 \
-				else Gen2WorldPack.hold_text(name, String(result.get("name", ""))),
+				else Gen2WorldPack.hold_text(target_name, String(result.get("name", ""))),
 			true
 		)
 		return
@@ -1405,10 +1405,10 @@ func _confirm_forget() -> void:
 			_teach_refusal(StringName(result.get("reason", &"")), _forget_party_index), false
 		)
 		return
-	var name: String = _target_name(_forget_party_index)
+	var target_name: String = _target_name(_forget_party_index)
 	_show_pack_result("%s %s" % [
-		Gen2MoveForget.forgot_text(name, String(entry.get("name", ""))),
-		Gen2MoveForget.learned_text(name, String(_teach_prompt.get("move_name", ""))),
+		Gen2MoveForget.forgot_text(target_name, String(entry.get("name", ""))),
+		Gen2MoveForget.learned_text(target_name, String(_teach_prompt.get("move_name", ""))),
 	], true)
 
 
@@ -1453,18 +1453,18 @@ func _target_name(party_index: int) -> String:
 ## revalidation failing between the two teach_tm_hm() calls.
 func _teach_refusal(reason: StringName, party_index: int) -> String:
 	var move_name: String = String(_teach_prompt.get("move_name", "that move"))
-	var name: String = _target_name(party_index)
+	var target_name: String = _target_name(party_index)
 	match reason:
 		&"not_compatible":
 			return "%s is not compatible with %s. It can't learn %s." % [
-				move_name, name, move_name,
+				move_name, target_name, move_name,
 			]
 		&"already_knows_move":
-			return "%s knows %s." % [name, move_name]
+			return "%s knows %s." % [target_name, move_name]
 		&"cannot_forget_hm":
 			return Gen2MoveForget.cant_forget_hm_text()
 		&"invalid_forget_slot":
-			return "%s can't forget that move." % name
+			return "%s can't forget that move." % target_name
 		&"cannot_teach_egg":
 			return "An EGG can't learn anything."
 	return "Can't teach that: %s" % String(reason)
@@ -1527,17 +1527,17 @@ func _use_selected_item(party_index: int) -> void:
 ## The source has no single "it worked" line: the effect routine prints its own.
 ## These name what changed, from the values Gen2WorldPartyHost already returns.
 func _use_summary(item: Dictionary, result: Dictionary) -> String:
-	var name: String = String(item.get("name", "ITEM"))
+	var item_name: String = String(item.get("name", "ITEM"))
 	if int(result.get("repel_steps", -1)) >= 0:
 		return "%s will repel weak Pokemon for %d steps." % [
-			name, int(result.get("repel_steps", 0)),
+			item_name, int(result.get("repel_steps", 0)),
 		]
 	var healed: int = int(result.get("healed", 0))
 	if healed > 0:
-		return "%s restored %d HP." % [name, healed]
+		return "%s restored %d HP." % [item_name, healed]
 	if int(result.get("status_cleared", 0)) != 0:
-		return "%s cured the status." % name
-	return "%s was used." % name
+		return "%s cured the status." % item_name
+	return "%s was used." % item_name
 
 
 ## `UseItem` and `UseRegisteredItem` refuse the same item in two words: the
@@ -1726,16 +1726,16 @@ func _open_save_confirm_mode() -> void:
 
 ## The yes/no's own cursor, `YesNoMenuHeader`'s `db 1` default, and the words
 ## the box holds. [param cursor] below zero is a mode with no box at all.
-func _enter_save_mode(mode: Mode, lines: Array, cursor: int) -> void:
+func _enter_save_mode(mode: Mode, lines: Array, cursor_index: int) -> void:
 	_mode = mode
 	_save_lines = lines.duplicate()
 	_save_line = 0
-	_save_cursor = cursor
+	_save_cursor = cursor_index
 	_save_frames = 0
 	_title.text = "SAVE"
 	_summary.text = " ".join(_save_lines)
 	_status.text = ""
-	_footer.text = "D-pad: choose    A: confirm    B: cancel" if cursor >= 0 \
+	_footer.text = "D-pad: choose    A: confirm    B: cancel" if cursor_index >= 0 \
 		else "A: continue"
 	_render_save()
 
@@ -1839,9 +1839,9 @@ func _show_save_result() -> void:
 			"Save failed:", String(_save_result.get("reason", "unknown")),
 		], 0)
 		return
-	var name: String = _pack_save.player_name if _pack_save != null else ""
+	var player_name: String = _pack_save.player_name if _pack_save != null else ""
 	_enter_save_mode(Mode.SAVE_SAVED, [
-		SAVE_SAVED_LINES[0] % name, SAVE_SAVED_LINES[1],
+		SAVE_SAVED_LINES[0] % player_name, SAVE_SAVED_LINES[1],
 	], -1)
 	## `WaitSFX` after it is not spent, for the reason the intro cry's is not.
 	sfx_requested.emit(SFX_SAVE)
@@ -2085,21 +2085,21 @@ func _hardware_image() -> Image:
 ## Keeps the active global row on the hardware page. Input and mutations retain
 ## the global cursor; only the rows handed to the page move.
 func _option_window(
-	rows: Array, cursor: int,
+	rows: Array, cursor_index: int,
 	visible_rows: int = Gen2StartMenuPage.OPTIONS_VISIBLE_ROWS
 ) -> Dictionary:
 	var first: int = clampi(
-		cursor - visible_rows + 1,
+		cursor_index - visible_rows + 1,
 		0, maxi(rows.size() - visible_rows, 0)
 	)
 	var last: int = mini(first + visible_rows, rows.size())
 	return {
 		"rows": rows.slice(first, last),
-		"cursor": cursor - first if cursor >= 0 else -1,
+		"cursor": cursor_index - first if cursor_index >= 0 else -1,
 	}
 
 
-func _render_options(values: Array, cursor: int, label_for: Callable) -> void:
+func _render_options(values: Array, cursor_index: int, label_for: Callable) -> void:
 	_render_hardware()
 	if _pack_view != null:
 		_pack_view.visible = false
@@ -2109,9 +2109,9 @@ func _render_options(values: Array, cursor: int, label_for: Callable) -> void:
 		child.queue_free()
 	for index: int in values.size():
 		var label := Label.new()
-		var name: String = label_for.call(values[index])
-		label.text = ("> " if index == cursor else "  ") + name
-		label.add_theme_color_override("font_color", ACCENT if index == cursor else TEXT)
+		var option_text: String = label_for.call(values[index])
+		label.text = ("> " if index == cursor_index else "  ") + option_text
+		label.add_theme_color_override("font_color", ACCENT if index == cursor_index else TEXT)
 		label.add_theme_font_size_override("font_size", 18)
 		_options.add_child(label)
 

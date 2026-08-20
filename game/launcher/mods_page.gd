@@ -421,9 +421,9 @@ func receive_feed_response(
 
 func _listing_text(received: Dictionary) -> String:
 	var entries: Array = received["entries"]
-	var name: String = String(received.get("name", ""))
+	var source_name: String = String(received.get("name", ""))
 	var line: String = "%s lists %d mod%s." % [
-		name if not name.is_empty() else "That source",
+		source_name if not source_name.is_empty() else "That source",
 		entries.size(), "" if entries.size() == 1 else "s",
 	]
 	var updates: int = Gen2ModIndex.update_count(entries, _installed_versions())
