@@ -280,6 +280,11 @@ func _draw() -> void:
 			sprite,
 			Vector2((sprite["cell"] as Vector2i) * Gen2WorldAPI.CELL_PIXELS) - camera_pixels,
 		)
+	## `HealMachineAnim` writes OAM at fixed screen pixels rather than over an
+	## object or a cell, so the camera does not move it.
+	for sprite: Dictionary in _effect_sprites():
+		if bool(sprite.get("screen", false)):
+			_draw_effect_sprite(sprite, Vector2.ZERO)
 	_draw_encounter_pulse(camera_pixels)
 
 
@@ -561,6 +566,8 @@ func _hidden_tree_tiles() -> Dictionary:
 ## spawned them, so their anchor is where that object is drawn. -1 is the player.
 func _draw_effect_sprites(object_index: int, pixel: Vector2) -> void:
 	for sprite: Dictionary in _effect_sprites():
+		if bool(sprite.get("screen", false)):
+			continue
 		if int(sprite["object_index"]) == object_index:
 			_draw_effect_sprite(sprite, pixel)
 
@@ -576,7 +583,22 @@ func _draw_effect_sprite(sprite: Dictionary, anchor: Vector2) -> void:
 			int(sprite["palette"]),
 			bool(tile["flip_x"]),
 			anchor + Vector2(tile["offset"] as Vector2i),
+			int(sprite.get("rotation", 0)),
 		)
+
+
+## A sheet with a `colors` of its own is the heal machine, whose palette
+## `.LoadPalettes` writes over PAL_OW_TREE and `.FlashPalettes` then rotates
+## left. Everything else wears the overworld palette its spawn named, at the
+## time of day the map is on.
+func _effect_palette(sheet: Dictionary, palette_index: int, rotation: int) -> PackedColorArray:
+	var own: PackedColorArray = sheet.get("colors", PackedColorArray())
+	if own.is_empty():
+		return _world.data.overworld_sprite_palette(palette_index, _time_of_day)
+	var rotated := PackedColorArray()
+	for slot: int in own.size():
+		rotated.append(own[(slot + rotation) % own.size()])
+	return rotated
 
 
 func _effect_sheet(name: String) -> Dictionary:
@@ -591,11 +613,14 @@ func _effect_sheet(name: String) -> Dictionary:
 
 ## One 8x8 tile of an effect sheet. Index 0 is the transparent colour here, as it
 ## is for every object: these are sprites, not background.
+## [param rotation] is `.FlashPalettes`' rotate-left count, which only a sheet
+## carrying its own palette can be asked for.
 func _draw_effect_tile(
-	sheet: Dictionary, tile: int, palette_index: int, flip_x: bool, at: Vector2
+	sheet: Dictionary, tile: int, palette_index: int, flip_x: bool, at: Vector2,
+	rotation: int = 0
 ) -> void:
-	var key: String = "%s:%d:%d:%d:%d" % [
-		sheet["name"], tile, palette_index, int(flip_x), _time_of_day,
+	var key: String = "%s:%d:%d:%d:%d:%d" % [
+		sheet["name"], tile, palette_index, int(flip_x), _time_of_day, rotation,
 	]
 	var texture: Texture2D = _effect_textures.get(key, null)
 	if texture == null:
@@ -603,9 +628,7 @@ func _draw_effect_tile(
 		var tiles: int = int(sheet["tiles"])
 		if tile < 0 or tile >= tiles or indices.size() < tiles * Gen2Tiles.TILE_PIXELS:
 			return
-		var palette: PackedColorArray = _world.data.overworld_sprite_palette(
-			palette_index, _time_of_day
-		)
+		var palette: PackedColorArray = _effect_palette(sheet, palette_index, rotation)
 		var image := Image.create(
 			Gen2Tiles.TILE_WIDTH, Gen2Tiles.TILE_HEIGHT, false, Image.FORMAT_RGBA8
 		)

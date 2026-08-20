@@ -290,9 +290,9 @@ func _process(_delta: float) -> bool:
 				_screen.call(SCREEN_DRIVER % _kind)
 		else:
 			_screen.preview_effect_sprites(_kind)
-		if _kind not in [&"warp", &"door", &"map_name_sign", &"ledge"]:
-			## Those two kinds drove themselves to the frame they want; every
-			## other kind stages a sprite and then spends the frames it needs.
+		if _kind not in [&"warp", &"door", &"map_name_sign", &"ledge", &"heal_machine"]:
+			## Those kinds drove themselves to the frame they want; every other
+			## kind stages a sprite and then spends the frames it needs.
 			for _frame: int in (STAGED_FRAMES_CUT if _kind == &"cut" else STAGED_FRAMES):
 				_screen.advance_frame()
 	if _frames < 18:

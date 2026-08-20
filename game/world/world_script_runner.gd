@@ -117,12 +117,12 @@ const SPECIAL_RESTART_MAP_MUSIC: int = 61
 const SPECIAL_HEAL_MACHINE_ANIM: int = 62
 ## `HealMachineAnim.Pointers`' three sequences. Only the Hall of Fame's differs:
 ## it loads its balls from a second OAM table and plays two effects where the
-## other two play `MUSIC_HEAL`.
-const HEAL_MACHINE_HALL_OF_FAME: int = 2
-## `.LoadBallsOntoMachine`'s `ld c, 30 / call DelayFrames`, once a party member.
-const HEAL_MACHINE_BALL_FRAMES: int = 30
-## `.FlashPalettes8Times`: eight passes of `ld c, 10 / call DelayFrames`.
-const HEAL_MACHINE_FLASH_FRAMES: int = 80
+## other two play `MUSIC_HEAL`. The routine's own frame costs belong to the
+## animation, so they are read from the class that draws it.
+const HEAL_MACHINE_HALL_OF_FAME: int = Gen2WorldEffects.HEAL_MACHINE_HALL_OF_FAME
+const HEAL_MACHINE_BALL_FRAMES: int = Gen2WorldEffects.HEAL_MACHINE_BALL_FRAMES
+const HEAL_MACHINE_FLASH_FRAMES: int = Gen2WorldEffects.HEAL_MACHINE_FLASHES \
+	* Gen2WorldEffects.HEAL_MACHINE_FLASH_INTERVAL
 ## constants/sfx_constants.asm. The first is played once a ball by
 ## `.LoadBallsOntoMachine`; the other two are `.HOF_PlaySFX`'s pair.
 const SFX_SECOND_PART_OF_ITEMFINDER: int = 0x12

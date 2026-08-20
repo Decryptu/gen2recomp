@@ -23,8 +23,14 @@ const EXPECTED: Array = [
 	["heart", 4, 0xF8], ["bolt", 4, 0xF8], ["sleep", 4, 0xF8], ["fish", 4, 0xF8],
 	["shadow", 1, 0xFC], ["rod", 2, 0xFC], ["boulder_dust", 2, 0xFE],
 	["grass_rustle", 1, 0xFE], ["headbutt_tree", 8, 0x84], ["cut_tree", 4, 0x84],
-	["cut_grass", 4, 0x80],
+	["cut_grass", 4, 0x80], ["heal_machine", 2, 0x7C],
 ]
+
+## `gfx/overworld/heal_machine.pal`, the one sheet that carries a palette of its
+## own instead of wearing an overworld one: `RGB 31, 31, 31`, `RGB 31, 19, 10`,
+## `RGB 31, 07, 01` and black, packed the way the cartridge stores them and
+## identical on all three.
+const HEAL_MACHINE_COLORS: Array[int] = [0x7FFF, 0x2A7F, 0x04FF, 0x0000]
 
 var _first: Dictionary = {}
 
@@ -74,4 +80,20 @@ func _check_game() -> void:
 			)
 		else:
 			_first[name] = indices
+		var colors: PackedColorArray = sheet.get("colors", PackedColorArray())
+		if name == "heal_machine":
+			if _r.check(
+				colors.size() == HEAL_MACHINE_COLORS.size(),
+				"the heal machine carries %d colours, not four." % colors.size()
+			):
+				for slot: int in colors.size():
+					var want: Color = Gen2Palette.from_packed(HEAL_MACHINE_COLORS[slot])
+					_r.check(
+						colors[slot].is_equal_approx(want),
+						"heal machine colour %d is %s, not the source's %s." % [
+							slot, colors[slot], want,
+						]
+					)
+		else:
+			_r.check(colors.is_empty(), "%s carries a palette it has no source for." % name)
 	_r.note("overworld effects: %d sheets, %d drawn pixels." % [EXPECTED.size(), lit])

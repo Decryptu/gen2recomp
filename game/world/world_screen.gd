@@ -174,8 +174,7 @@ var _replay_held_direction: int = Gen2Button.NONE
 var _spending_frame: bool = false
 ## `HealMachineAnim`'s own sounds and the frame of its wait each is due on, taken
 ## from the event the special emits and spent by [method advance_frame]. The
-## machine's two tiles are not drawn with them: `gfx/overworld/heal_machine.2bpp`
-## is imported by nothing.
+## machine's two tiles are drawn alongside them by Gen2WorldEffects.
 var _heal_machine_sounds: Array = []
 var _heal_machine_frame: int = 0
 var _screen_base_position: Vector2 = Vector2.ZERO
@@ -1418,6 +1417,20 @@ func preview_effect_sprites(kind: StringName = &"effects") -> void:
 				Gen2WorldAPI.STEP_FRAMES_HOP,
 			)
 		_script_prompt = "Debug cut animation preview"
+		_renderer.refresh()
+		_refresh_labels()
+		return
+	if kind == &"heal_machine":
+		## `HealMachineAnim` over Elm's Lab, driven to the last frame before
+		## `.FlashPalettes8Times` starts: a full party is on the machine and the
+		## palette is still the one `.LoadPalettes` wrote, which is the picture
+		## the colours can be read off.
+		if _effects != null:
+			var balls: int = Gen2WorldEffects.HEAL_MACHINE_BALLS.size()
+			_effects.start_heal_machine(Gen2WorldEffects.HEAL_MACHINE_ELMS_LAB, balls)
+			for _frame: int in balls * Gen2WorldEffects.HEAL_MACHINE_BALL_FRAMES - 1:
+				_effects.advance_frame()
+		_script_prompt = "Debug heal machine preview"
 		_renderer.refresh()
 		_refresh_labels()
 		return
@@ -3991,6 +4004,10 @@ func _play_encounter_sounds() -> void:
 func _start_heal_machine_sounds(event: Dictionary) -> void:
 	_heal_machine_sounds = (event.get("sounds", []) as Array).duplicate(true)
 	_heal_machine_frame = 0
+	if _effects != null:
+		_effects.start_heal_machine(
+			int(event.get("machine_type", 0)), int(event.get("balls", 0))
+		)
 	_advance_heal_machine_sounds()
 
 

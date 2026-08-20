@@ -792,16 +792,22 @@ func overworld_sprite_indices(number: int) -> PackedByteArray:
 
 ## One of the sprites the engine draws over an object rather than as one, by the
 ## name `data/sprites/emotes.asm` gives it plus ShakeHeadbuttTree's own sheet:
-## { tiles, vtile, indices }, empty when the cache does not hold it.
+## { tiles, vtile, indices, colors }, empty when the cache does not hold it.
+## `colors` is only on the heal machine, which is the one sheet that brings its
+## own palette instead of wearing an overworld one.
 func overworld_effect(name: String) -> Dictionary:
 	for row: Variant in _overworld_effect_records():
 		if not row is Dictionary or String((row as Dictionary).get("name", "")) != name:
 			continue
 		var record: Dictionary = row as Dictionary
+		var colors: PackedColorArray = PackedColorArray()
+		for packed: Variant in (record.get("colors", []) as Array):
+			colors.append(Gen2Palette.from_packed(int(packed)))
 		return {
 			"name": name,
 			"tiles": int(record.get("tiles", 0)),
 			"vtile": int(record.get("vtile", 0)),
+			"colors": colors,
 			"indices": _payload_bytes(
 				record if record.has(RomCache.PAYLOAD_KEY) else record.get("bytes", []),
 				_blob("overworld_effects"),

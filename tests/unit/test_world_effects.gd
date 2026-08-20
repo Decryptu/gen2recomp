@@ -290,3 +290,68 @@ func test_an_actor_that_has_not_moved_reports_no_redraw() -> void:
 	actor.out = [{"icon": 1, "position_cells": Vector2(3, 3.5)}]
 	assert_true(actors.advance_frame())
 	RomCache.clear(ActorFixture.directory())
+
+
+## `HealMachineAnim`: one ball every thirty frames over the machine's own two
+## tiles, Elm's Lab shifted by `bcpixel 2, 4`, and the Hall of Fame's ring drawn
+## from its own table with no machine under it.
+func test_the_heal_machine_places_one_ball_every_thirty_frames() -> void:
+	var effects := Gen2WorldEffects.new()
+	effects.start_heal_machine(0, 3)
+	var first: Dictionary = effects.sprites()[0]
+	assert_true(bool(first["screen"]), "The machine is drawn at screen pixels.")
+	assert_eq(int(first["palette"]), -1, "The machine wears its own palette.")
+	assert_eq((first["tiles"] as Array).size(), 3, "Two machine tiles and one ball.")
+	assert_eq(
+		(first["tiles"] as Array)[2]["offset"], Gen2WorldEffects.HEAL_MACHINE_BALLS[0][0]
+	)
+	for _frame: int in Gen2WorldEffects.HEAL_MACHINE_BALL_FRAMES:
+		effects.advance_frame()
+	assert_eq((effects.sprites()[0]["tiles"] as Array).size(), 4, "The second ball.")
+	for _frame: int in Gen2WorldEffects.HEAL_MACHINE_BALL_FRAMES * 2:
+		effects.advance_frame()
+	assert_eq(
+		(effects.sprites()[0]["tiles"] as Array).size(), 5,
+		"A party of three places three balls and no more."
+	)
+
+
+func test_the_heal_machine_shifts_for_elms_lab_and_rings_for_the_hall_of_fame() -> void:
+	var lab := Gen2WorldEffects.new()
+	lab.start_heal_machine(Gen2WorldEffects.HEAL_MACHINE_ELMS_LAB, 1)
+	assert_eq(
+		(lab.sprites()[0]["tiles"] as Array)[0]["offset"],
+		Gen2WorldEffects.HEAL_MACHINE_BAR[0][0] + Gen2WorldEffects.HEAL_MACHINE_ELMS_LAB_OFFSET
+	)
+	var hall := Gen2WorldEffects.new()
+	hall.start_heal_machine(Gen2WorldEffects.HEAL_MACHINE_HALL_OF_FAME, 1)
+	var tiles: Array = hall.sprites()[0]["tiles"]
+	assert_eq(tiles.size(), 1, "The Hall of Fame places no machine tiles.")
+	assert_eq(tiles[0]["offset"], Gen2WorldEffects.HEAL_MACHINE_HOF_BALLS[0][0])
+
+
+## `.FlashPalettes8Times` rotates the four colours left once every ten frames,
+## and eight rotations of four leave the palette where it started.
+func test_the_heal_machine_rotates_its_palette_once_the_balls_are_placed() -> void:
+	var effects := Gen2WorldEffects.new()
+	effects.start_heal_machine(0, 1)
+	assert_eq(int(effects.sprites()[0]["rotation"]), 0, "Nothing rotates under the balls.")
+	for _frame: int in Gen2WorldEffects.HEAL_MACHINE_BALL_FRAMES:
+		effects.advance_frame()
+	assert_eq(int(effects.sprites()[0]["rotation"]), 1)
+	for _frame: int in Gen2WorldEffects.HEAL_MACHINE_FLASH_INTERVAL * 3:
+		effects.advance_frame()
+	assert_eq(int(effects.sprites()[0]["rotation"]), 0, "Four rotations is the identity.")
+	for _frame: int in Gen2WorldEffects.HEAL_MACHINE_FLASH_INTERVAL * 5:
+		effects.advance_frame()
+	assert_false(
+		effects.sprites_active(),
+		"The animation lasts the balls' frames plus the eight flashes' eighty."
+	)
+
+
+## `ld a, [wPartyCount] / and a / ret z`: an empty party draws nothing at all.
+func test_the_heal_machine_draws_nothing_for_an_empty_party() -> void:
+	var effects := Gen2WorldEffects.new()
+	effects.start_heal_machine(0, 0)
+	assert_false(effects.sprites_active())

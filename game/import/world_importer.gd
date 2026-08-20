@@ -620,12 +620,12 @@ const EMOTE_TILE_LAYOUT: Array = [
 	[1, 0xFC], [2, 0xFC], [2, 0xFE], [1, 0xFE],
 ]
 
-## The three sheets `engine/events/field_moves.asm` loads by name rather than
-## through a table: name, layout key, tiles, the tile they are loaded to, and the
-## first tile row each one starts with. None has a table to pin it, and a wrong
-## offset in this bank decodes the routine beside it as legal-looking art, so the
-## signature is the check. CutTreeGFX and CutGrassGFX are adjacent, which is what
-## makes one wrong offset show up on two sheets.
+## The sheets an engine routine loads by name rather than through a table: name,
+## layout key, tiles, the tile they are loaded to, and the bytes each one starts
+## with. None has a table to pin it, and a wrong offset in these banks decodes
+## the routine beside it as legal-looking art, so the signature is the check.
+## CutTreeGFX and CutGrassGFX are adjacent, which is what makes one wrong offset
+## show up on two sheets.
 const FIELD_MOVE_SHEETS: Array = [
 	## FIELDMOVE_TREE, which ShakeHeadbuttTree and Cut_SpawnAnimateTree write
 	## into the struct's own tile field rather than reading from a table.
@@ -636,7 +636,20 @@ const FIELD_MOVE_SHEETS: Array = [
 	## FIELDMOVE_GRASS, the leaves' own tile.
 	["cut_grass", "cut_grass_gfx", 4, 0x80,
 		[0x00, 0x00, 0x3C, 0x3C, 0x7E, 0x42, 0xE3, 0x9D]],
+	## `HealMachineAnim.LoadGFX`'s two tiles at `vTiles0 tile $7c`: the machine's
+	## own bar and one ball. Both tiles are the signature, since a two-tile sheet
+	## whose first row is blank pins nothing on its own.
+	["heal_machine", "heal_machine_gfx", 2, 0x7C,
+		[0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x7E, 0x00,
+		0x7E, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x0C, 0x0C, 0x12, 0x1E,
+		0x21, 0x3F, 0x33, 0x2D, 0x1E, 0x12, 0x0C, 0x0C]],
 ]
+
+## `HealMachineAnim.LoadPalettes` copies one four-colour palette over
+## `wOBPals2 palette PAL_OW_TREE`, so the machine and its balls do not wear the
+## time of day the rest of the overworld's objects do.
+const HEAL_MACHINE_PALETTE_COLORS: int = 4
 
 static func _read_overworld_effects(rom: RomFile, layout: Dictionary) -> Dictionary:
 	var table: int = int(layout.get("emotes", -1))
@@ -685,13 +698,39 @@ static func _read_overworld_effects(rom: RomFile, layout: Dictionary) -> Diction
 		)
 		if sheet_pixels.size() != sheet_tiles * Gen2Tiles.TILE_PIXELS:
 			return _error("%s graphics did not decode." % name)
-		effects.append({
+		var record: Dictionary = {
 			"name": name,
 			"tiles": sheet_tiles,
 			"vtile": int(sheet[3]),
 			"bytes": Array(sheet_pixels),
-		})
+		}
+		if name == "heal_machine":
+			var machine_palette: Dictionary = _read_heal_machine_palette(rom, layout)
+			if not bool(machine_palette.get("ok", false)):
+				return machine_palette
+			record["colors"] = machine_palette["colors"]
+		effects.append(record)
 	return {"ok": true, "effects": effects}
+
+
+## `HealMachineAnim.palettes`, `gfx/overworld/heal_machine.pal`: white, two reds
+## and black. It is byte-identical on all three cartridges, and `.FlashPalettes`
+## rotates these four rather than loading a second set, so this is the whole of
+## the animation's colour.
+static func _read_heal_machine_palette(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var offset: int = int(layout.get("heal_machine_palette", -1))
+	var bytes: int = HEAL_MACHINE_PALETTE_COLORS * Gen2Palette.COLOR_BYTES
+	if offset < 0 or not rom.in_bounds(offset, bytes):
+		return _error("The heal machine palette is outside the cartridge.")
+	var colors: Array = []
+	for slot: int in HEAL_MACHINE_PALETTE_COLORS:
+		var color: int = rom.u16le(offset + slot * Gen2Palette.COLOR_BYTES)
+		if color & 0x8000:
+			return _error("Heal machine palette colour %d is not colour data." % slot)
+		colors.append(color)
+	if colors[0] != 0x7FFF or colors[HEAL_MACHINE_PALETTE_COLORS - 1] != 0:
+		return _error("The heal machine palette does not run white to black.")
+	return {"ok": true, "colors": colors}
 
 
 static func _read_tileset(rom: RomFile, layout: Dictionary, number: int) -> Dictionary:
