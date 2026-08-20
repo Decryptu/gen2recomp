@@ -229,6 +229,7 @@ func _build_context() -> Dictionary:
 	return {
 		"map": _world.map_id(),
 		"eligible": _world.visible_encounter_cells(),
+		"occupied": _occupied_cells(),
 		"tables": _world.active_encounter_tables(),
 		"player": {"cell": _world.player_cell, "facing": _world.player_facing},
 		"run_seed": _world.random_seed,
@@ -236,16 +237,52 @@ func _build_context() -> Dictionary:
 	}
 
 
+## The walk cells the map's own objects hold this frame, which is live state and
+## deliberately NOT folded into `eligible`: which cells a wild MAY stand on is
+## `CanEncounterWildMon`'s rule and does not change while the map is up, and
+## [method _validate] drops an entry standing outside `eligible`, so folding the
+## two together would delete a wild an NPC walks over.
+##
+## An object mid-step is DRAWN between two cells, so both are held: its committed
+## `cell` and the cell its drawing laps into, which is what `step_offset_cells()`
+## measures. A big object holds all four of the cells `occupies` answers for.
+## The player is not in it; `player` is where that cell is.
+func _occupied_cells() -> PackedVector2Array:
+	var out := PackedVector2Array()
+	if _world == null:
+		return out
+	var seen: Dictionary = {}
+	for object: Gen2WorldObject in _world.visible_objects():
+		var drawn: Vector2 = Vector2(object.cell) + object.step_offset_cells()
+		for corner: Vector2i in [
+			object.cell, Vector2i(drawn.floor()), Vector2i(drawn.ceil()),
+		]:
+			var span: int = Gen2WorldObject.BIG_OBJECT_SIZE if object.is_big_object() else 1
+			for x: int in span:
+				for y: int in span:
+					var cell := Vector2(corner + Vector2i(x, y))
+					if seen.has(cell):
+						continue
+					seen[cell] = true
+					out.append(cell)
+	return out
+
+
 ## The pose moves and the map does not, so the sweep and the tables are not taken
-## again: a provider is handed the same context with `player` refreshed, and only
-## when the player has actually moved.
+## again: a provider is handed the same context with `player` and `occupied`
+## refreshed, and only when one of the two has actually changed. An object walks
+## while the player stands still, so the occupancy is on this pass rather than on
+## the map change.
 func _push_player_pose() -> void:
 	if _world == null or _context.is_empty():
 		return
 	var pose: Dictionary = {"cell": _world.player_cell, "facing": _world.player_facing}
-	if _context.get("player", {}) == pose:
+	var occupied: PackedVector2Array = _occupied_cells()
+	if _context.get("player", {}) == pose \
+	and _context.get("occupied", PackedVector2Array()) == occupied:
 		return
 	_context["player"] = pose
+	_context["occupied"] = occupied
 	for provider: Object in _providers:
 		provider.call("set_context", _context.duplicate(true))
 

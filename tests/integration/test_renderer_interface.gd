@@ -392,6 +392,45 @@ func test_a_visible_encounter_provider_is_driven_validated_drawn_and_fought() ->
 		)
 	)
 
+	## `occupied` is who is standing where, and it is deliberately NOT folded
+	## into `eligible`: the trainer's cell is in both, because which cells a wild
+	## MAY stand on is a cartridge rule and `_validate` drops an entry outside it.
+	var trainer: Gen2WorldObject = _world_screen._world.visible_objects()[0]
+	assert_true(
+		(context["occupied"] as PackedVector2Array).has(Vector2(trainer.cell)),
+		"the map's own object holds its cell"
+	)
+	assert_true(
+		(context["eligible"][Gen2WorldEncounter.METHOD_GRASS] as PackedVector2Array).has(
+			Vector2(trainer.cell)
+		),
+		"and eligible still answers the cartridge's own rule for it"
+	)
+	assert_false(
+		(context["occupied"] as PackedVector2Array).has(
+			Vector2(_world_screen._world.player_cell)
+		),
+		"the player is in `player`, not in `occupied`"
+	)
+
+	## An object moves without the player moving, so the occupancy is refreshed
+	## with the pose rather than only on a map change.
+	trainer.cell = Vector2i(6, 3)
+	_world_screen._encounters.advance_frame()
+	var moved: PackedVector2Array = provider.get("context")["occupied"]
+	assert_true(moved.has(Vector2(6, 3)), "the cell it walked onto")
+	assert_false(moved.has(Vector2(5, 3)), "and not the one it left")
+
+	## Mid-step it is DRAWN across two cells, and a wild standing in either of
+	## them stands inside it, so `step_offset_cells()` puts both in the list.
+	trainer.step_direction = Vector2i(1, 0)
+	trainer.step_frames_total = 8
+	trainer.step_frames_remaining = 4
+	_world_screen._encounters.advance_frame()
+	var walking: PackedVector2Array = provider.get("context")["occupied"]
+	assert_true(walking.has(Vector2(6, 3)), "the cell it is committed to")
+	assert_true(walking.has(Vector2(5, 3)), "and the one it is still drawn over")
+
 	## Off the table, so nothing is drawn: the host will not stand a Pokemon the
 	## map cannot produce.
 	provider.set("entry", {

@@ -270,6 +270,13 @@ class Population:
 		var table: Array = _context.get("tables", {}).get("grass", {}).get("slots", [])
 		if cells.is_empty() or table.is_empty():
 			return
+		# `occupied` is who is standing where this frame: NPCs, item balls and
+		# every other map object. It is beside `eligible` rather than inside it,
+		# because the host would delete an entry an NPC walked over; refusing a
+		# taken cell on spawn is this provider's own rule.
+		var taken: Dictionary = {}
+		for cell: Vector2 in _context.get("occupied", PackedVector2Array()):
+			taken[Vector2i(cell)] = true
 		# The run's seed rather than a fresh generator, so the same save walking
 		# back onto the same map meets the same population.
 		var rolls := RandomNumberGenerator.new()
@@ -283,9 +290,12 @@ class Population:
 			count += 1
 		for at: int in mini(count, cells.size()):
 			var slot: Dictionary = table[rolls.randi_range(0, table.size() - 1)]
+			var cell: Vector2i = Vector2i(cells[rolls.randi_range(0, cells.size() - 1)])
+			if taken.has(cell):
+				continue
 			_entries.append({
 				"id": StringName("voltling_%d_%d" % [_generation, at]),
-				"cell": Vector2i(cells[rolls.randi_range(0, cells.size() - 1)]),
+				"cell": cell,
 				"facing": Gen2WorldSprite.FACING_DOWN,
 				"species": int(slot.get("species", 0)),
 				"level": int(slot.get("min_level", 2)),
