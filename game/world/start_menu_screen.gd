@@ -721,7 +721,6 @@ func _pack_cursor_on_cancel() -> bool:
 
 
 func _render_pack() -> void:
-	var pocket: Dictionary = _current_pocket()
 	_render_hardware()
 
 
