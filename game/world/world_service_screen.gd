@@ -21,16 +21,8 @@ signal completed(results: Array)
 ## carries is that the sound is heard.
 signal sfx_requested(index: int, waited: bool)
 
-const PANEL: Color = Color("#14233a")
-const BORDER: Color = Color("#4f6f9e")
-const TEXT: Color = Color("#f4f7fb")
-const MUTED: Color = Color("#9eacc0")
-const ACCENT: Color = Color("#f3c969")
-const SUCCESS: Color = Color("#7bd89a")
-const ERROR: Color = Color("#ef8a8a")
-
 enum MODE {
-	MENU, MART, PHONE, POKEGEAR, TOWN_MAP, CARD,
+	MENU, MART, PHONE, TOWN_MAP, CARD,
 	APRICORN, PC, PC_ITEMS, PC_ITEM_LIST, PC_TEXT,
 }
 
@@ -122,7 +114,7 @@ var _pokegear: Gen2PokegearScreen = null
 ## that never opened one leaves the map's own music where it stands.
 var _radio_music: int = RADIO_MUSIC_SILENT
 ## Whether the region map on screen is the fly map, which answers a spawn rather
-## than closing back into the card list.
+## than closing the overlay.
 var _fly_map: bool = false
 var _town_map_from_request: bool = false
 ## `PokemonCenterPC` and the item PC behind it: which rows are on offer, which
@@ -141,17 +133,19 @@ var _pc_label: String = ""
 var _boxes: Gen2BoxScreen = null
 
 var _service_hardware: Gen2Screen = null
+## Whether the hardware layer holds an image for the mode this host is in, and
+## whether a screen of its own is standing over both layers. [method
+## _apply_layer_visibility] is what these two decide.
+var _service_drawn: bool = false
+var _overlay_open: bool = false
 var _service_view: TextureRect = null
 var _service_page: Gen2WorldServicePage = null
 ## `SetDayOfWeek`'s own dial, shared with the new game's `InitClock` screen.
 var _clock_page: Gen2ClockSetPage = null
 
-var _panel: PanelContainer = null
-var _title: Label = null
-var _summary: Label = null
-var _options: VBoxContainer = null
-var _status: Label = null
-var _footer: Label = null
+var _title: String = ""
+var _summary: String = ""
+var _status: String = ""
 
 
 func _ready() -> void:
@@ -227,8 +221,9 @@ func open_phone_list(
 	return true
 
 
-## Opens the Pokegear on its card list. Only cards the player owns are
-## selectable, in the source's own clock/map/phone/radio order.
+## `PokeGear`'s own entrance. `.InitTilemap` writes POKEGEARCARD_CLOCK and
+## opens on it: there is no card list on the cartridge, and B on any card is
+## that card's own `.quit`, which leaves the Pokegear rather than a list.
 func open_pokegear(
 	world: Gen2WorldAPI,
 	data: GameData,
@@ -237,7 +232,7 @@ func open_pokegear(
 ) -> bool:
 	if not _open_pokegear(world, data, save, persist, "Pokegear"):
 		return false
-	_open_pokegear_cards()
+	_open_card(Gen2PokegearScreen.CARD_CLOCK)
 	return true
 
 
@@ -274,8 +269,8 @@ func handle_button(button: int) -> bool:
 		return true
 	if _mode == MODE.CARD and _pokegear != null:
 		return _pokegear.handle_button(button)
-	## The panel is behind the box screen while BILL'S PC is open, the way it is
-	## behind the region map, so the buttons are the box screen's.
+	## The box screen owns all 160x144 while BILL'S PC is open, the way the
+	## region map does, so the buttons are its own.
 	if _boxes != null:
 		return _boxes.handle_button(button)
 	if Gen2Button.is_direction(button):
@@ -296,42 +291,6 @@ func selected_index() -> int:
 
 
 func _build_ui() -> void:
-	var center := CenterContainer.new()
-	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	add_child(center)
-	_panel = PanelContainer.new()
-	_panel.custom_minimum_size = Vector2(500, 300)
-	_panel.add_theme_stylebox_override("panel", _panel_style())
-	center.add_child(_panel)
-	var margin := MarginContainer.new()
-	margin.add_theme_constant_override("margin_left", 24)
-	margin.add_theme_constant_override("margin_top", 20)
-	margin.add_theme_constant_override("margin_right", 24)
-	margin.add_theme_constant_override("margin_bottom", 20)
-	_panel.add_child(margin)
-	var content := VBoxContainer.new()
-	content.add_theme_constant_override("separation", 10)
-	margin.add_child(content)
-	_title = Label.new()
-	_title.add_theme_color_override("font_color", TEXT)
-	_title.add_theme_font_size_override("font_size", 24)
-	content.add_child(_title)
-	_summary = Label.new()
-	_summary.add_theme_color_override("font_color", MUTED)
-	_summary.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	content.add_child(_summary)
-	_options = VBoxContainer.new()
-	_options.add_theme_constant_override("separation", 4)
-	_options.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	content.add_child(_options)
-	_status = Label.new()
-	_status.add_theme_color_override("font_color", MUTED)
-	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	content.add_child(_status)
-	_footer = Label.new()
-	_footer.add_theme_color_override("font_color", ACCENT)
-	content.add_child(_footer)
-
 	_service_hardware = HARDWARE_SCENE.instantiate() as Gen2Screen
 	_service_hardware.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_service_hardware.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -342,8 +301,7 @@ func _build_ui() -> void:
 	_service_view.size = Vector2(Gen2Screen.WIDTH, Gen2Screen.HEIGHT)
 	_service_view.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_service_hardware.display(_service_view)
-	_panel.visible = false
-	_service_hardware.visible = false
+	_apply_layer_visibility()
 
 
 func _open_menu(input: Dictionary) -> void:
@@ -352,14 +310,13 @@ func _open_menu(input: Dictionary) -> void:
 	_menu = WorldMenu.from_input(_menu_input)
 	_choices = _menu.options.duplicate(true)
 	_cursor = _menu.selected_index()
-	_title.text = "MENU"
+	_title = "MENU"
 	## The question the box behind this menu is still showing. A command name is
 	## an internal key, never something the cartridge prints, so it is not a
 	## fallback: an unattached menu says nothing rather than saying "yesorno".
-	_summary.text = String(input.get("text", ""))
-	_status.text = ""
-	_footer.text = "D-pad: move    A: choose    B: cancel"
-	_render_options()
+	_summary = String(input.get("text", ""))
+	_status = ""
+	_render_rows()
 
 
 ## `BuyMenu`, which is a screen of its own rather than a box over the map: the
@@ -375,7 +332,7 @@ func _open_mart(mart: Dictionary) -> void:
 	_mart_purchased = false
 	_mart_scroll = 0
 	_cursor = 0
-	_panel.visible = false
+	_set_overlay_open(true)
 	if _mart_hardware == null:
 		_mart_hardware = HARDWARE_SCENE.instantiate() as Gen2Screen
 		_mart_hardware.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -603,8 +560,7 @@ func _buy_mart_selection() -> void:
 			&"bargain_item_sold_out": "sold_out",
 		}.get(reason, "")
 		if slot.is_empty():
-			_status.text = "Purchase failed: %s" % String(reason)
-			_status.add_theme_color_override("font_color", ERROR)
+			_status = "Purchase failed: %s" % String(reason)
 			_mart_stage = MART_LIST
 			_render_mart()
 			return
@@ -629,8 +585,7 @@ func _close_mart() -> void:
 		Gen2Screen.drop(_mart_hardware)
 		_mart_hardware = null
 		_mart_view = null
-	_panel.visible = true
-	_service_hardware.visible = true
+	_set_overlay_open(false)
 
 
 func _render_mart() -> void:
@@ -693,7 +648,7 @@ func _mart_description() -> String:
 func _open_apricorns() -> void:
 	_mode = MODE.APRICORN
 	_apricorns = Gen2WorldApricorn.open(_world.data, _world.state)
-	_title.text = "APRICORNS"
+	_title = "APRICORNS"
 	if _apricorns.is_done():
 		## FindApricornsInBag's own refusal. Kurt only asks with one in the bag,
 		## so this is the guard rather than a branch a player reaches.
@@ -706,20 +661,17 @@ func _render_apricorns() -> void:
 	if _apricorns.phase == Gen2WorldApricorn.SELECT_QUANTITY:
 		_cursor = 0
 		var chosen: Dictionary = _apricorns.selected_entry()
-		_summary.text = "How many should I make?"
+		_summary = "How many should I make?"
 		## `PlaceApricornQuantity` draws the name and `×NN` under it; the
 		## ceiling is this host's own, since nothing here draws a bag page.
-		_status.text = "x%d    of %d" % [
+		_status = "x%d    of %d" % [
 			_apricorns.prompt.value, _apricorns.prompt.maximum,
 		]
-		_status.add_theme_color_override("font_color", TEXT)
-		_footer.text = "Up/down: one    Left/right: ten    A: give    B: back"
-		_render_options([String(chosen.get("name", ""))])
+		_render_rows([String(chosen.get("name", ""))])
 		return
-	_summary.text = "Which APRICORN should I use?"
-	_status.text = ""
-	_footer.text = "D-pad: move    A: choose    B: leave"
-	_render_options(_apricorn_rows())
+	_summary = "Which APRICORN should I use?"
+	_status = ""
+	_render_rows(_apricorn_rows())
 
 
 ## The four-row window the scrolling menu shows, CANCEL included when the list
@@ -768,12 +720,10 @@ func _open_pc(mode: StringName) -> void:
 	_pc_rows = Gen2WorldPC.top_menu(
 		_data, _world.state, _save.player_name if _save != null else ""
 	)
-	_title.text = "PC"
-	_summary.text = _data.pokecenter_pc_text("whose")
-	_status.text = ""
-	_status.add_theme_color_override("font_color", MUTED)
-	_footer.text = "D-pad: move    A: choose    B: turn off"
-	_render_options()
+	_title = "PC"
+	_summary = _data.pokecenter_pc_text("whose")
+	_status = ""
+	_render_rows()
 
 
 ## The item PC's own menu. The Pokemon Center's list ends in LOG OFF because the
@@ -783,15 +733,14 @@ func _open_pc_items() -> void:
 	_cursor = 0
 	_pc_action = -1
 	_pc_rows = Gen2WorldPC.players_pc_menu(_data, _pc_house)
-	_title.text = _data.pokecenter_pc_row("players_pc").replace(
+	_title = _data.pokecenter_pc_row("players_pc").replace(
 		Gen2WorldPC.PLAYER_MARKER,
 		_save.player_name if _save != null and not _save.player_name.is_empty()
 		else "PLAYER"
 	)
-	_summary.text = _data.pokecenter_pc_text("ask_what_do")
+	_summary = _data.pokecenter_pc_text("ask_what_do")
 	_refresh_pc_counts()
-	_footer.text = "D-pad: move    A: choose    B: back"
-	_render_options()
+	_render_rows()
 
 
 ## Whichever of the bag and the PC the chosen action reads.
@@ -805,21 +754,19 @@ func _open_pc_item_list(action: int) -> void:
 		## for a deposit. The other two open an empty scrolling menu there, which
 		## can only be cancelled, so they are refused with the same box rather
 		## than drawn empty.
-		_status.text = _data.pokecenter_pc_text("no_items")
-		_status.add_theme_color_override("font_color", ERROR)
-		_render_options()
+		_status = _data.pokecenter_pc_text("no_items")
+		_render_rows()
 		return
 	_mode = MODE.PC_ITEM_LIST
 	## `SelectQuantityToToss` is asked before the move, so the box that names it
 	## is the list's own prompt here.
-	_summary.text = {
+	_summary = {
 		Gen2WorldPC.PLAYERSPCITEM_WITHDRAW_ITEM: "how_many_withdraw",
 		Gen2WorldPC.PLAYERSPCITEM_DEPOSIT_ITEM: "how_many_deposit",
 	}.get(action, "")
-	_summary.text = _data.pokecenter_pc_text(_summary.text) if not _summary.text.is_empty() \
+	_summary = _data.pokecenter_pc_text(_summary) if not _summary.is_empty() \
 		else _data.menu_text("toss_ask")
-	_footer.text = "D-pad: move and quantity    A: choose    B: back"
-	_render_options()
+	_render_rows()
 
 
 func _refresh_pc_entries() -> void:
@@ -831,10 +778,9 @@ func _refresh_pc_entries() -> void:
 
 
 func _refresh_pc_counts() -> void:
-	_status.text = "PC %d/%d stacks" % [
+	_status = "PC %d/%d stacks" % [
 		_world.state.pc_items().size(), Gen2WorldPack.MAX_PC_ITEMS,
 	]
-	_status.add_theme_color_override("font_color", MUTED)
 
 
 func _confirm_pc_row() -> void:
@@ -884,19 +830,18 @@ func _confirm_pc_item() -> void:
 		## `.PackFull` and `.NoRoomInPC` are the two the source has a box for;
 		## everything else is a refusal it never reaches.
 		var reason: StringName = StringName(applied.get("reason", &""))
-		_status.text = {
+		_status = {
 			&"pc_full": "no_room_deposit", &"pack_full": "no_room_withdraw",
 			&"item_stack_full": "no_room_withdraw",
 		}.get(reason, "")
-		_status.text = _data.pokecenter_pc_text(_status.text) if not _status.text.is_empty() \
+		_status = _data.pokecenter_pc_text(_status) if not _status.is_empty() \
 			else "Refused: %s" % String(reason)
-		_status.add_theme_color_override("font_color", ERROR)
 		return
 	_pc_quantity = 1
 	_refresh_pc_entries()
 	## `.PlayersPCWithdrewItemsText` and `.PlayersPCDepositItemsText`, whose two
 	## markers `PartyMonItemName` and the quantity fill.
-	_status.text = _filled(
+	_status = _filled(
 		_data.pokecenter_pc_text(
 			"withdrew" if _pc_action == Gen2WorldPC.PLAYERSPCITEM_WITHDRAW_ITEM
 			else "deposited"
@@ -905,8 +850,7 @@ func _confirm_pc_item() -> void:
 	) if _pc_action != Gen2WorldPC.PLAYERSPCITEM_TOSS_ITEM else _filled(
 		_data.menu_text("toss_threw"), applied
 	)
-	_status.add_theme_color_override("font_color", SUCCESS)
-	_render_options()
+	_render_rows()
 
 
 ## The item name and the quantity into whichever markers the box left for them.
@@ -924,7 +868,7 @@ func _change_pc_quantity(step: int) -> void:
 		return
 	var owned: int = int(_pc_entries[_cursor].get("quantity", 1))
 	_pc_quantity = clampi(_pc_quantity + step, 1, maxi(1, owned))
-	_render_options()
+	_render_rows()
 
 
 ## `OaksPC`, which prints `ProfOaksPC`'s rating into the PC's own box and
@@ -933,8 +877,7 @@ func _change_pc_quantity(step: int) -> void:
 func _open_pc_oak() -> void:
 	var boot: Dictionary = Gen2ProfOaksPC.boot(_data, _world.state)
 	if boot.is_empty():
-		_status.text = "PROF.OAK'S PC needs a cache that carries its ratings."
-		_status.add_theme_color_override("font_color", ERROR)
+		_status = "PROF.OAK'S PC needs a cache that carries its ratings."
 		return
 	_pc_sfx = int(boot["sfx"])
 	_open_pc_text(boot["pages"], &"top", "PROF.OAK'S PC")
@@ -951,11 +894,9 @@ func _open_pc_text(pages: Array, after: StringName, label: String) -> void:
 
 
 func _show_pc_page() -> void:
-	_summary.text = String(_pc_pages[0]) if not _pc_pages.is_empty() else ""
-	_status.text = ""
-	_status.add_theme_color_override("font_color", MUTED)
-	_footer.text = "A: continue"
-	_render_options([_pc_label])
+	_summary = String(_pc_pages[0]) if not _pc_pages.is_empty() else ""
+	_status = ""
+	_render_rows([_pc_label])
 
 
 ## `ProfOaksPCBoot` plays the sound `Rate` chose once the rating is printed, so
@@ -981,12 +922,10 @@ func _advance_pc_text() -> void:
 func _open_boxes() -> void:
 	var host: Gen2BoxScreen = BOX_SCENE.instantiate() as Gen2BoxScreen
 	if host == null or _save == null:
-		_status.text = "Box storage needs a validated save."
-		_status.add_theme_color_override("font_color", ERROR)
+		_status = "Box storage needs a validated save."
 		return
 	_boxes = host
-	_panel.visible = false
-	_service_hardware.visible = false
+	_set_overlay_open(true)
 	host.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	host.z_index = 5
 	add_child(host)
@@ -1000,56 +939,41 @@ func _on_boxes_closed(_result: Dictionary) -> void:
 	if _boxes != null:
 		Gen2Screen.drop(_boxes)
 		_boxes = null
-	_panel.visible = true
-	_service_hardware.visible = true
+	_set_overlay_open(false)
 	_open_pc(&"pokemon_center")
 
 
 func _open_phone(request: Dictionary, data: Dictionary) -> void:
 	_mode = MODE.PHONE
 	_cursor = 0
-	_title.text = "PHONE"
+	_title = "PHONE"
 	var summary: Dictionary = {}
 	if StringName(request.get("kind", &"")) == &"phone_call_requested":
 		summary = Gen2WorldPhoneHost.contact_summary(
 			_data, data.get("contact", {})
 		)
-		_summary.text = _phone_text(summary)
+		_summary = _phone_text(summary)
 	else:
 		summary = Gen2WorldPhoneHost.special_call_summary(
 			_data, data.get("special_call", {})
 		)
-		_summary.text = "Special call %d for contact %d." % [
+		_summary = "Special call %d for contact %d." % [
 			int(summary.get("index", -1)), int(summary.get("contact", -1)),
 		]
-	_status.text = "The imported call record is ready."
+	_status = "The imported call record is ready."
 	if bool(data.get("out_of_area", false)):
-		_status.text = "This call will use the cartridge out-of-area script."
+		_status = "This call will use the cartridge out-of-area script."
 	elif bool(data.get("phone", {}).get("same_map", false)):
-		_status.text = "This call will use the cartridge same-map script."
-	_footer.text = "A: continue    B: hang up"
-	_render_options(["Continue"])
+		_status = "This call will use the cartridge same-map script."
+	_render_rows(["Continue"])
 
 
-func _open_pokegear_cards() -> void:
-	_mode = MODE.POKEGEAR
-	_cursor = 0
-	_title.text = "POKEGEAR"
-	var clock: Dictionary = _world.world_clock()
-	_summary.text = "%02d:%02d" % [int(clock.get("hour", 0)), int(clock.get("minute", 0))]
-	_status.text = "Choose a card."
-	_footer.text = "D-pad: move    A: open    B: close"
-	_render_options()
-
-
-## The clock, phone and radio cards, each on the hardware's own tile grid the way
-## the MAP card is. The card list stays this panel's, so a card is opened over it
-## and closing one comes back to the list.
+## One of `PokegearJumptable`'s cards, each on the hardware's own tile grid the
+## way the MAP card is. It owns all 160x144 while it is up.
 func _open_card(card: StringName) -> void:
 	_mode = MODE.CARD
 	_cursor = 0
-	_panel.visible = false
-	_service_hardware.visible = false
+	_set_overlay_open(true)
 	_pokegear = Gen2PokegearScreen.new()
 	_pokegear.z_index = 5
 	add_child(_pokegear)
@@ -1117,8 +1041,8 @@ func _on_card_switched(direction: int) -> void:
 		return
 	var card: StringName = order[at]
 	if card == &"map":
-		# The MAP card is the region map's own screen, and closing it comes back
-		# to the card list rather than to the card this left.
+		# The MAP card is the region map's own screen, and B on it is the same
+		# `.cancel` every other card has: it leaves the Pokegear.
 		_close_card()
 		_open_town_map(false)
 		return
@@ -1130,7 +1054,7 @@ func _on_card_switched(direction: int) -> void:
 ## `ExitPokegearRadio_HandleMusic` restarts the map's music only when the radio
 ## card has played something over it, and every other service leaves it alone.
 ## The restart lands when this overlay closes rather than when the card does,
-## since the card list is this panel rather than the Pokegear's own screen.
+## since the overlay is what the world is waiting on rather than the card.
 func radio_music_playing() -> int:
 	return _radio_music
 
@@ -1152,9 +1076,8 @@ func _on_card_tuned(knob: int) -> void:
 func _on_card_called(contact: int) -> void:
 	var results: Array = _world.request_outgoing_phone_call(contact)
 	_close_card()
-	_panel.visible = true
-	_service_hardware.visible = true
 	_mode = -1
+	_set_overlay_open(false)
 	completed.emit(results)
 
 
@@ -1172,9 +1095,9 @@ func _on_card_closed() -> void:
 	if _pokegear != null and _pokegear.card() == Gen2PokegearScreen.CARD_RADIO:
 		_world.close_radio()
 	_close_card()
-	_panel.visible = true
-	_service_hardware.visible = true
-	_open_pokegear_cards()
+	_mode = -1
+	_set_overlay_open(false)
+	completed.emit([])
 
 
 func _close_card() -> void:
@@ -1203,8 +1126,7 @@ func open_fly_map(
 	_mode = MODE.TOWN_MAP
 	_town_map_from_request = false
 	_fly_map = true
-	_panel.visible = false
-	_service_hardware.visible = false
+	_set_overlay_open(true)
 	_town_map = Gen2TownMapScreen.new()
 	_town_map.z_index = 5
 	add_child(_town_map)
@@ -1229,10 +1151,9 @@ func open_fly_map(
 func _open_town_map(from_request: bool) -> void:
 	_mode = MODE.TOWN_MAP
 	_town_map_from_request = from_request
-	# The region map is the whole screen, so the card list's own panel goes with
-	# its labels; the scrim behind it stays as the overlay's backdrop.
-	_panel.visible = false
-	_service_hardware.visible = false
+	# The region map is the whole screen, so neither of this host's own layers
+	# is drawn under it.
+	_set_overlay_open(true)
 	_town_map = Gen2TownMapScreen.new()
 	_town_map.z_index = 5
 	add_child(_town_map)
@@ -1262,8 +1183,7 @@ func _on_town_map_closed() -> void:
 	if _town_map != null:
 		Gen2Screen.drop(_town_map)
 		_town_map = null
-	_panel.visible = true
-	_service_hardware.visible = true
+	_set_overlay_open(false)
 	if _fly_map:
 		_fly_map = false
 		_mode = -1
@@ -1284,7 +1204,7 @@ func _move_cursor(delta: int) -> void:
 	_cursor = wrapi(_cursor + delta, 0, count)
 	if _mode == MODE.PC_ITEM_LIST:
 		_pc_quantity = 1
-	_render_options()
+	_render_rows()
 
 
 func _move_direction(direction: Vector2i) -> void:
@@ -1294,7 +1214,7 @@ func _move_direction(direction: Vector2i) -> void:
 	if _mode == MODE.MENU and _menu != null:
 		if _menu.move(direction):
 			_cursor = _menu.selected_index()
-			_render_options()
+			_render_rows()
 		return
 	if _mode == MODE.PC_ITEM_LIST and direction.x != 0:
 		_change_pc_quantity(direction.x)
@@ -1317,24 +1237,9 @@ func _confirm() -> void:
 		return
 	if _mode == MODE.MENU:
 		if _choices.is_empty():
-			_status.text = "The imported menu has no selectable options."
-			_status.add_theme_color_override("font_color", ERROR)
+			_status = "The imported menu has no selectable options."
 			return
 		_finish_input(_cursor)
-		return
-	if _mode == MODE.POKEGEAR:
-		if _cursor >= _pokegear_cards.size():
-			return
-		var card: Dictionary = _pokegear_cards[_cursor]
-		if bool(card.get("unavailable", false)):
-			_status.text = "%s is not implemented." % String(card.get("name", ""))
-			_status.add_theme_color_override("font_color", ERROR)
-			return
-		var chosen: StringName = StringName(card.get("card", &""))
-		if chosen == &"map":
-			_open_town_map(false)
-		else:
-			_open_card(chosen)
 		return
 	if _mode == MODE.PHONE:
 		_finish_runtime({"ok": true, "script_value": 1})
@@ -1356,9 +1261,6 @@ func _cancel() -> void:
 		_advance_pc_text()
 	elif _mode == MODE.MENU:
 		_finish_input_cancelled()
-	elif _mode == MODE.POKEGEAR:
-		_mode = -1
-		completed.emit([])
 	elif _mode == MODE.PHONE:
 		_finish_runtime({"ok": true, "script_value": 0, "cancelled": true})
 	elif _mode == MODE.TOWN_MAP and _town_map != null:
@@ -1380,8 +1282,8 @@ func _finish_runtime(result: Dictionary) -> void:
 		_world, result, _save, _persist
 	)
 	if not bool(host_result.get("ok", false)):
-		_status.text = "Request failed: %s" % String(host_result.get("reason", "unknown"))
-		_status.add_theme_color_override("font_color", ERROR)
+		_status = "Request failed: %s" % String(host_result.get("reason", "unknown"))
+		_render_rows()
 		return
 	_finish(host_result.get("results", []))
 
@@ -1392,17 +1294,9 @@ func _finish(results: Array) -> void:
 	completed.emit(results)
 
 
-func _render_options(override: Array = []) -> void:
-	if _options == null:
-		return
-	Gen2Screen.drop_children(_options)
-	var parent: Container = _options
-	if _mode == MODE.MENU and _menu != null and _menu.kind == &"2d":
-		var grid := GridContainer.new()
-		grid.columns = maxi(1, _menu.columns)
-		grid.add_theme_constant_override("h_separation", 18)
-		_options.add_child(grid)
-		parent = grid
+## The rows this mode is offering, which is all [method _render_service_page]
+## needs: there is no second list to keep in step with it any more.
+func _render_rows(override: Array = []) -> void:
 	if _is_dial() and override.is_empty():
 		## One value at a time, the way the dial itself shows it.
 		override = [_choices[clampi(_cursor, 0, _choices.size() - 1)]] if not _choices.is_empty() \
@@ -1411,29 +1305,8 @@ func _render_options(override: Array = []) -> void:
 		_choices if _mode == MODE.MENU \
 		else _pc_rows if _mode in [MODE.PC, MODE.PC_ITEMS] \
 		else _pc_entries if _mode == MODE.PC_ITEM_LIST \
-		else _pokegear_cards if _mode == MODE.POKEGEAR else ["Continue"]
+		else ["Continue"]
 	)
-	for index: int in values.size():
-		var value: Variant = values[index]
-		var label := Label.new()
-		var text: String = str(value)
-		if value is Dictionary:
-			var dictionary: Dictionary = value as Dictionary
-			text = str(dictionary.get("name", ""))
-			if text.is_empty():
-				text = str(dictionary.get("caller_label", ""))
-			if text.is_empty():
-				text = str(dictionary.get("trainer_name", "UNKNOWN"))
-			if text.is_empty() and dictionary.has("index"):
-				text = "CONTACT %d" % int(dictionary.get("index", -1))
-		if value is Dictionary and _mode == MODE.PC_ITEM_LIST:
-			var stack: int = int((value as Dictionary).get("quantity", 0))
-			text = "%s    x%d of %d" % [text, _pc_quantity, stack] if index == _cursor \
-				else "%s    x%d" % [text, stack]
-		label.text = ("> " if index == _cursor else "  ") + text
-		label.add_theme_color_override("font_color", ACCENT if index == _cursor else TEXT)
-		label.add_theme_font_size_override("font_size", 18)
-		parent.add_child(label)
 	_render_service_page(values)
 
 
@@ -1441,10 +1314,14 @@ func _render_options(override: Array = []) -> void:
 ## neither one, so those two draw no rows at all here.
 func _render_service_page(values: Array) -> void:
 	if _service_view == null or _data == null:
+		_service_drawn = false
+		_apply_layer_visibility()
 		return
 	if _service_page == null:
 		_service_page = Gen2WorldServicePage.from_data(_data)
 	if _service_page == null:
+		_service_drawn = false
+		_apply_layer_visibility()
 		return
 	var page_rows: Array = [] if _mode in [MODE.PHONE, MODE.PC_TEXT] else values
 	var labels: Array = []
@@ -1458,11 +1335,29 @@ func _render_service_page(values: Array) -> void:
 		else:
 			labels.append(String(value))
 	var image: Image = _dial_image() if _is_dial() else _service_page.render(
-		_title.text, _summary.text, labels, _cursor, _status.text, _service_box()
+		_title, _summary, labels, _cursor, _status, _service_box()
 	)
 	if image != null:
 		_service_view.texture = ImageTexture.create_from_image(image)
-		_service_hardware.visible = true
+	_service_drawn = image != null
+	_apply_layer_visibility()
+
+
+## An overlay owns all 160x144 while it is up: the mart, box storage, a Pokegear
+## card and the region map are each a screen rather than a box over this one.
+func _set_overlay_open(open: bool) -> void:
+	_overlay_open = open
+	_apply_layer_visibility()
+
+
+## The one place either layer is shown. The debug panel is a fallback for a host
+## handed no cartridge cache, never a layer *under* the hardware one: exactly one
+## of the two can be on screen, and neither is while an overlay is up or before a
+## service has opened. Setting the two by hand at each entrance is what left the
+## panel standing behind whatever the mode drew.
+func _apply_layer_visibility() -> void:
+	if _service_hardware != null:
+		_service_hardware.visible = _mode >= 0 and not _overlay_open and _service_drawn
 
 
 func _is_dial() -> bool:
@@ -1477,7 +1372,7 @@ func _dial_image() -> Image:
 	if _clock_page == null:
 		return null
 	var day: int = clampi(_cursor, 0, Gen2ClockSetScreen.DAYS.size() - 1)
-	var prompt: String = _summary.text if not _summary.text.is_empty() \
+	var prompt: String = _summary if not _summary.is_empty() \
 		else "What day is it?"
 	return _clock_page.render(Gen2ClockSetScreen.DAYS[day], prompt, -1, true)
 
@@ -1498,8 +1393,6 @@ func _service_box() -> Gen2MenuBox:
 			return _apricorn_quantity_box() if _apricorns != null \
 				and _apricorns.phase == Gen2WorldApricorn.SELECT_QUANTITY \
 				else _apricorn_select_box()
-		MODE.POKEGEAR:
-			return _dynamic_box(_option_count())
 	return null
 
 
@@ -1527,20 +1420,9 @@ func _apricorn_quantity_box() -> Gen2MenuBox:
 	return Gen2MenuBox.from_coords(6, 9, 19, 12, 0)
 
 
-## The one list box still left to the panel: POKEGEAR's card list, which
-## `HANDOFF.md` already records as staying a panel.
-func _dynamic_box(count: int) -> Gen2MenuBox:
-	var bottom: int = mini(17, 1 + maxi(count, 1) * 2)
-	return Gen2MenuBox.from_coords(
-		9, 0, 19, bottom, Gen2MenuBox.STATICMENU_CURSOR | Gen2MenuBox.STATICMENU_WRAP
-	)
-
-
 func _option_count() -> int:
 	if _mode == MODE.MENU:
 		return _menu.options.size() if _menu != null else _choices.size()
-	if _mode == MODE.POKEGEAR:
-		return _pokegear_cards.size()
 	if _mode in [MODE.PC, MODE.PC_ITEMS]:
 		return _pc_rows.size()
 	if _mode == MODE.PC_ITEM_LIST:
@@ -1567,21 +1449,12 @@ func _phone_text(summary: Dictionary) -> String:
 	]
 
 
+## Nothing is drawn for it: a host with no world or cartridge cache never opens,
+## and the caller's own `false` is what says so.
 func _show_error(message: String) -> void:
 	_mode = -1
 	_menu = null
-	if _title != null:
-		_title.text = "SERVICE ERROR"
-		_summary.text = message
-		_status.text = ""
-		_footer.text = ""
-		_status.add_theme_color_override("font_color", ERROR)
-
-
-func _panel_style() -> StyleBoxFlat:
-	var style := StyleBoxFlat.new()
-	style.bg_color = PANEL
-	style.border_color = BORDER
-	style.set_border_width_all(2)
-	style.set_corner_radius_all(8)
-	return style
+	_title = "SERVICE ERROR"
+	_summary = message
+	_status = ""
+	_apply_layer_visibility()

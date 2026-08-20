@@ -1763,8 +1763,9 @@ func _walk_start_menu_to(kind: StringName) -> bool:
 
 
 ## Public screenshot driver for the Pokegear, reached the way a player reaches
-## it: START, the POKEGEAR row, and then A on the card list. What it is for is
-## the panel-over-panel stack, so the picture has to be the card over the list.
+## it: START and the POKEGEAR row. The picture is `Pokegear_LoadGFX`'s own card
+## list, which is the layer a debug panel used to stand behind; a card opened
+## from it is a full screen of its own and has its own cases.
 func preview_pokegear() -> void:
 	if _world == null or _data == null:
 		return
@@ -1782,8 +1783,6 @@ func preview_pokegear() -> void:
 		## The row opens the overlay through the same signal a press does, so
 		## the card list is up by the time this returns.
 		_start_menu_host.handle_button(Gen2Button.A)
-	if _service_host != null:
-		_service_host.handle_button(Gen2Button.A)
 
 
 ## Public screenshot drivers for `SaveMenu`, one per box it puts up:
@@ -3513,8 +3512,9 @@ func _open_phone_list() -> void:
 	_open_service_overlay(&"phone_list")
 
 
-## The Pokegear's own card list, which is what the start menu's POKEGEAR entry
-## reaches. The phone list is one card behind it, not the whole device.
+## `PokeGear` itself, which is what the start menu's POKEGEAR entry reaches: the
+## clock card, with the rest a `Pokegear_SwitchPage` away. The phone list opens
+## on one card instead of the whole device.
 func _open_pokegear() -> void:
 	_open_service_overlay(&"pokegear")
 

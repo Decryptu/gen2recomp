@@ -43,7 +43,7 @@ func test_the_d_pad_walks_the_window_and_everything_else_is_swallowed() -> void:
 
 
 ## A cache with no region map answers false rather than drawing a screen of
-## blanks, which is what keeps the Pokegear's card list open over it.
+## blanks, which is what leaves the Pokegear's own card standing.
 func test_a_cache_without_the_region_map_refuses_to_open() -> void:
 	assert_false(_screen.open(null, 1))
 	assert_false(_screen.visible)

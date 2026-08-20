@@ -94,14 +94,13 @@ func _process(_delta: float) -> bool:
 	_frames += 1
 	if _frames == 3:
 		if _kind == &"town_map":
-			# The Pokegear's card list, then MAP, which is the live path the
-			# region map is reached by.
+			# The Pokegear on its clock card, then one `Pokegear_SwitchPage`
+			# right onto MAP, which is the live path the region map is reached by.
 			_screen._open_pokegear()
-			for button: int in [Gen2Button.DOWN, Gen2Button.A]:
-				_screen._service_host.handle_button(button)
+			_screen._service_host.handle_button(Gen2Button.RIGHT)
 		elif _kind == &"pokegear":
-			# The card list alone: `presses` picks the card, which is the live
-			# path each of the other three is reached by.
+			# The clock card `.InitTilemap` opens on: `presses` walks
+			# `Pokegear_SwitchPage` to whichever of the others is wanted.
 			_screen._open_pokegear()
 		elif _kind == &"trainer_card":
 			_screen._open_trainer_card()

@@ -26,6 +26,11 @@ func before_each() -> void:
 	## shared instance both start clean.
 	Gen2OptionsStore.use_test_path()
 	DirAccess.remove_absolute(Gen2OptionsStore.path())
+	## A mod option is written to user://mod_options.json on the press, so a run
+	## that moved a row would otherwise start the next one from its own answer
+	## and step away from it instead of onto it.
+	DirAccess.remove_absolute(Gen2ModOptions.PATH)
+	Gen2ModOptions.reload()
 
 
 func after_each() -> void:
@@ -141,11 +146,9 @@ func test_mod_settings_use_the_hardware_option_screen() -> void:
 	host.handle_button(Gen2Button.A)
 	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.MODS)
 	assert_true((host.get("_view") as TextureRect).visible)
-	assert_false((host.get("_center") as Control).visible)
 	host.handle_button(Gen2Button.A)
 	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.MOD_OPTIONS)
 	assert_true((host.get("_view") as TextureRect).visible)
-	assert_false((host.get("_center") as Control).visible)
 
 	Gen2ModHost.reset()
 
@@ -245,8 +248,6 @@ func test_pack_lists_a_granted_item() -> void:
 	await get_tree().process_frame
 	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK)
 	assert_true((host.get("_view") as TextureRect).visible)
-	assert_false((host.get("_center") as Control).visible)
-	assert_false((host.get("_pack_view") as TextureRect).visible)
 	var items_pocket: Dictionary = host.get("_pack_pockets")[0]
 	assert_eq(items_pocket["pocket"], Gen2WorldPack.TYPE_ITEM)
 	var items: Array = items_pocket["items"]
@@ -270,15 +271,16 @@ func test_menu_account_draws_the_entry_description_and_off_takes_it_away() -> vo
 	await get_tree().process_frame
 	var host: Gen2StartMenuScreen = _world_screen._start_menu_host
 	var menu: Gen2WorldStartMenu = host.get("_menu")
-	assert_eq(host.get("_status").text, menu.selected_description())
-	assert_ne(host.get("_status").text, "")
+	assert_ne(menu.selected_description(), "")
+	var with_box: Image = host.call("_hardware_image")
+	assert_not_null(with_box)
 
-	host.handle_button(Gen2Button.DOWN)
-	assert_eq(host.get("_status").text, menu.selected_description())
-
+	## The same row with MENU ACCOUNT off is the list without `.MenuDesc`' box,
+	## which is a different picture on the same cursor.
 	options.menu_account = false
-	host.handle_button(Gen2Button.DOWN)
-	assert_eq(host.get("_status").text, "", "the box is gone")
+	var without_box: Image = host.call("_hardware_image")
+	assert_not_null(without_box)
+	assert_ne(with_box.get_data(), without_box.get_data(), "the box is gone")
 
 
 ## The pack's wording is the cartridge's, read out of the cache rather than
@@ -291,11 +293,11 @@ func test_the_toss_boxes_read_the_cartridges_own_words() -> void:
 	_world_screen._world.state.apply_changes({}, {}, {"items": {7: 5}})
 	var host: Gen2StartMenuScreen = await _open_pack()
 	_choose_action(host, Gen2WorldPack.ACTION_TOSS)
-	assert_eq(host.get("_status").text, "Throw away how\nmany?")
+	assert_eq(host.call("box_text"), "Throw away how\nmany?")
 
 	host.handle_button(Gen2Button.DOWN)
 	host.handle_button(Gen2Button.A)
-	assert_eq(host.get("_summary").text, "Throw away 5\nPOTION(S)?")
+	assert_eq(host.call("box_text"), "Throw away 5\nPOTION(S)?")
 
 	host.handle_button(Gen2Button.A)
 	assert_eq(String(host.get("_pack_result")), "Threw away\nPOTION(S).")
@@ -638,8 +640,8 @@ func test_a_full_moveset_opens_forget_move_and_a_choice_replaces_that_slot() -> 
 
 	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_FORGET_ASK)
 	assert_true(
-		String(host.get("_summary").text).contains("can't learn more than four moves"),
-		String(host.get("_summary").text)
+		String(host.call("box_text")).contains("can't learn more than four moves"),
+		String(host.call("box_text"))
 	)
 
 	## Yes is YesNoBox's default, which opens the list.
@@ -674,7 +676,10 @@ func test_choosing_an_hm_row_refuses_and_keeps_the_list_open() -> void:
 	await get_tree().process_frame
 
 	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_FORGET, "the list stays open")
-	assert_eq(String(host.get("_status").text), "HM moves can't be forgotten now.")
+	assert_eq(String(host.call("box_text")), "HM moves can't be forgotten now.")
+	## And moving the cursor puts `ListMoves`' own question back.
+	host.handle_button(Gen2Button.DOWN)
+	assert_eq(String(host.call("box_text")), Gen2MoveForget.which_text())
 	assert_eq(_world_screen._injected_save.party[0].moves, [1, 0x39, 3, 4])
 
 
@@ -691,8 +696,8 @@ func test_refusing_to_forget_reaches_stop_learning_and_teaches_nothing() -> void
 	await get_tree().process_frame
 	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_STOP_LEARNING)
 	assert_true(
-		String(host.get("_summary").text).begins_with("Stop learning"),
-		String(host.get("_summary").text)
+		String(host.call("box_text")).begins_with("Stop learning"),
+		String(host.call("box_text"))
 	)
 
 	host.handle_button(Gen2Button.A)
@@ -1347,7 +1352,8 @@ func test_give_hands_the_item_to_the_chosen_party_member() -> void:
 	var host: Gen2StartMenuScreen = await _open_pack()
 	_choose_action(host, Gen2WorldPack.ACTION_GIVE)
 	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_TARGET)
-	assert_eq(host.get("_title").text, "GIVE TO")
+	## `PartyMenuStrings`' own row for `GiveItem`, which is what the page prints.
+	assert_eq(String(host.call("_target_prompt")), Gen2PartyScreen.PROMPT_TO_WHICH)
 
 	host.handle_button(Gen2Button.A)
 	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_RESULT)
@@ -1372,7 +1378,7 @@ func test_a_full_hand_asks_before_the_swap_and_no_takes_nothing() -> void:
 	host.handle_button(Gen2Button.A)
 	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_GIVE_SWAP)
 	assert_eq(
-		host.get("_summary").text,
+		String(host.call("box_text")),
 		Gen2WorldPack.ask_swap_text(_first_member_name(save), "REPEL")
 	)
 

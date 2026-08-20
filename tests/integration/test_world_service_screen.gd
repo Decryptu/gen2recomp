@@ -147,8 +147,8 @@ func test_mart_overlay_uses_production_input_and_returns_to_script() -> void:
 
 	var host: Gen2WorldServiceScreen = _world_screen._service_host
 	assert_not_null(host)
-	## `BuyMenu` owns the whole screen, so the panel steps aside for it.
-	assert_false(host._panel.visible)
+	## `BuyMenu` owns the whole screen, so this host's own layer steps aside.
+	assert_false(host._service_hardware.visible)
 	assert_not_null(host._mart_hardware)
 	assert_eq(host._mart_stage, Gen2WorldServiceScreen.MART_LIST)
 	## One item and CANCEL, which is the row `ScrollingMenu` draws past the
@@ -287,7 +287,7 @@ func test_menu_overlay_cancel_resumes_with_false_script_value() -> void:
 
 	var host: Gen2WorldServiceScreen = _world_screen._service_host
 	assert_not_null(host)
-	assert_eq(host._title.text, "MENU")
+	assert_eq(host._title, "MENU")
 	assert_eq(host.selected_index(), 0)
 	assert_true(host.handle_button(Gen2Button.B))
 	await get_tree().process_frame
@@ -303,13 +303,10 @@ func test_two_dimensional_menu_uses_cached_grid_and_default_cursor() -> void:
 
 	var host: Gen2WorldServiceScreen = _world_screen._service_host
 	assert_not_null(host)
-	assert_eq(host._title.text, "MENU")
+	assert_eq(host._title, "MENU")
 	assert_eq(host.selected_index(), 1)
-	assert_eq(host._options.get_child_count(), 1)
-	var grid: GridContainer = host._options.get_child(0) as GridContainer
-	assert_not_null(grid)
-	assert_eq(grid.columns, 2)
-	assert_eq(grid.get_child_count(), 4)
+	assert_eq(host._menu.columns, 2)
+	assert_eq(host._menu.options.size(), 4)
 
 	assert_true(host.handle_button(Gen2Button.LEFT))
 	assert_eq(host.selected_index(), 0)
@@ -368,10 +365,7 @@ func test_phone_list_shows_registered_numbers_and_can_close() -> void:
 	assert_eq(host._mode, Gen2WorldServiceScreen.MODE.CARD)
 	assert_eq(host._pokegear.card(), Gen2PokegearScreen.CARD_PHONE)
 	assert_eq(host._pokegear.selected_contact(), 0)
-	## B leaves the card for the Pokegear's own card list, and the second one
-	## closes the device.
-	assert_true(host.handle_button(Gen2Button.B))
-	assert_eq(host._mode, Gen2WorldServiceScreen.MODE.POKEGEAR)
+	## B on a card is that card's own `.quit`, which leaves the Pokegear.
 	assert_true(host.handle_button(Gen2Button.B))
 	await get_tree().process_frame
 	assert_null(_world_screen._service_host)
@@ -449,8 +443,6 @@ func test_pokegear_clock_card_renders_source_time_and_returns_to_cards() -> void
 	await get_tree().process_frame
 	var host: Gen2WorldServiceScreen = _world_screen._service_host
 	assert_not_null(host)
-	assert_eq(host._mode, Gen2WorldServiceScreen.MODE.POKEGEAR)
-	assert_true(host.handle_button(Gen2Button.A))
 	assert_eq(host._mode, Gen2WorldServiceScreen.MODE.CARD)
 	assert_eq(host._pokegear.card(), Gen2PokegearScreen.CARD_CLOCK)
 	## `Pokegear_UpdateClock` writes the weekday and `PrintHoursMins`' reading
@@ -458,9 +450,34 @@ func test_pokegear_clock_card_renders_source_time_and_returns_to_cards() -> void
 	var map: PackedInt32Array = host._pokegear._tilemap()
 	assert_eq(_row_text(map, Gen2TownMapPage.CLOCK_DAY_AT, 9), "WEDNESDAY")
 	assert_eq(_row_text(map, Gen2TownMapPage.CLOCK_TIME_AT, 8), "12:07 AM")
-	## Any button quits the clock card, which lands back on the card list.
+	## Any button quits the clock card, and `.quit` leaves the Pokegear.
 	assert_true(host.handle_button(Gen2Button.A))
-	assert_eq(host._mode, Gen2WorldServiceScreen.MODE.POKEGEAR)
+	await get_tree().process_frame
+	assert_null(_world_screen._service_host)
+
+
+## The window-resolution panel this host used to keep beside its hardware layer
+## is gone, and the layer that is left is shown from one rule rather than set by
+## hand at each entrance, which is what left the old one standing behind the
+## mode's own boxes. An overlay owns all 160x144, so nothing is drawn under it.
+func test_only_one_service_layer_is_ever_on_screen() -> void:
+	_write_pc_request()
+	await _open_world()
+	_world_screen._world.current_map.events["coord_events"][0]["script"] = 0x6190
+	await _queue_service()
+	var host: Gen2WorldServiceScreen = _world_screen._service_host
+	assert_not_null(host)
+	assert_true(host._service_hardware.visible, "the hardware layer draws the mode")
+	## DEPOSIT ITEM's own list is still the one layer.
+	host.handle_button(Gen2Button.DOWN)
+	host.handle_button(Gen2Button.A)
+	assert_eq(host._mode, Gen2WorldServiceScreen.MODE.PC_ITEM_LIST)
+	assert_true(host._service_hardware.visible)
+	## A screen of its own owns all 160x144, so nothing is drawn under it.
+	host._open_town_map(false)
+	assert_false(host._service_hardware.visible)
+	host._town_map.close()
+	await get_tree().process_frame
 
 
 ## The other half of the same rule: the radio card is what writes
@@ -627,7 +644,7 @@ func test_apricorn_overlay_gives_kurt_the_chosen_quantity_and_resumes() -> void:
 
 	var host: Gen2WorldServiceScreen = _world_screen._service_host
 	assert_not_null(host)
-	assert_eq(host._title.text, "APRICORNS")
+	assert_eq(host._title, "APRICORNS")
 	assert_true(host.handle_button(Gen2Button.DOWN))
 	assert_true(host.handle_button(Gen2Button.A))
 	assert_true(host.handle_button(Gen2Button.UP))
