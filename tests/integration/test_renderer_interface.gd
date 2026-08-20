@@ -710,3 +710,47 @@ func test_a_mods_hidden_item_request_runs_the_maps_own_script_when_the_world_is_
 	assert_eq(Gen2ModHost.instance().take_hidden_item_requests(), [])
 	_world_screen.advance_frames(3)
 	assert_eq(world.state.items().get(3, 0), 0, "The receipt has not been pressed past.")
+
+
+## A renderer that counts what it was asked to redraw, which is the only way to
+## say WHEN a change reached the picture rather than whether the pose is right.
+const COUNTING_SOURCE: String = """extends Node2D
+
+var refreshes: int = 0
+
+func set_world(_world, _animation = null) -> void:
+	pass
+
+func set_time_of_day(_time_of_day: int) -> void:
+	pass
+
+func refresh() -> void:
+	refreshes += 1
+
+func refresh_animation() -> void:
+	pass
+"""
+
+
+## A consumed press has to reach the picture ON THE FRAME OF THE PRESS. The actor
+## layer re-collects where it consumes one, so nothing after it sees a change to
+## redraw for: without this the emote waits for the next unrelated change, which
+## for a mon icon is its own two-frame flip nine frames later.
+func test_a_consumed_press_redraws_on_the_frame_it_was_pressed() -> void:
+	var actor: Object = _script(PET_ACTOR_SOURCE).new()
+	assert_true(Gen2ModHost.instance().register_world_actor(&"pet", actor)["ok"])
+	var renderer: Node = await _open_world(COUNTING_SOURCE)
+	_world_screen.set_process(false)
+	_world_screen._world.player_facing = Gen2WorldSprite.FACING_DOWN
+
+	var before: int = int(renderer.get("refreshes"))
+	assert_true(_world_screen.interact())
+	assert_gt(
+		int(renderer.get("refreshes")), before,
+		"the press drew nothing on its own frame"
+	)
+	## And the frames after it do not depend on an unrelated change to catch up:
+	## the emote is already on screen, so the icon's flip is all that is left.
+	assert_eq(
+		int(_world_screen._actors.sprites()[0]["emote"]), Gen2WorldActors.EMOTE_HEART
+	)
