@@ -28,6 +28,15 @@ const CELL_BLACK: int = 2
 ## `%11100100`, the order that draws every colour as itself.
 const IDENTITY: int = 0xE4
 
+## Which map objects are still in OAM, which is the one thing the transition does
+## to the sprites over it. Nothing in the loop writes shadow OAM, so the sprites
+## `.InitGFX`'s `UpdateSprites` left stand over the wedges until each outro's own
+## setup runs `RespawnPlayerAndOpponent`, which hides every object but the player
+## and `hLastTalked`, and `StartTrainerBattle_Finish` runs `ClearSprites`.
+const SPRITES_ALL: int = 0
+const SPRITES_BATTLERS: int = 1
+const SPRITES_NONE: int = 2
+
 ## `ld a, [wBattleMonLevel] / add 3`: the lead has to be more than this far under
 ## the opponent for the stronger pair of animations.
 const STRONGER_MARGIN: int = 3
@@ -92,17 +101,23 @@ const WEDGES: Dictionary = {
 	4: [4, 1, 4, 0, 3, 1, 3, 0, 2, 1, 2, 0, 1, -1],
 	5: [4, 0, 3, 0, 3, 0, 2, 0, 2, 0, 1, 0, 1, 0, 1, -1],
 }
-## `ld c, 2 / DelayFrames` between wedges, and the three frames the walk spends
-## after the last one.
+## `ld c, 2 / DelayFrames` between wedges, and the three `DelayFrame`s
+## `.end` spends before it hands to `BATTLETRANSITION_FINISH`.
+## `StartTrainerBattle_SpeckleToBlack.done` spends the same three; the zoom and
+## the wavy outros hand on with none.
 const SPIN_STEP_FRAMES: int = 2
 const SPIN_END_FRAMES: int = 3
 
 ## `StartTrainerBattle_ZoomToBlack.boxes`: width, height and the top-left corner
-## of each, one `WaitBGMap` apart.
+## of each. The nine are one call rather than nine, with a `WaitBGMap` between
+## them: measured with `wEnvironment` forced to CAVE and the opponent above the
+## lead, the whole outro is the frames 96 to 132 of that trace and each box is
+## four of them.
 const ZOOM_BOXES: Array = [
 	[4, 2, 8, 8], [6, 4, 7, 7], [8, 6, 6, 6], [10, 8, 5, 5], [12, 10, 4, 4],
 	[14, 12, 3, 3], [16, 14, 2, 2], [18, 16, 1, 1], [20, 18, 0, 0],
 ]
+const ZOOM_BOX_FRAMES: int = 4
 
 ## `StartTrainerBattle_SetUpForRandomScatterOutro`'s `ld a, $10`, and the twelve
 ## tiles a frame of `..._SpeckleToBlack` blacks out.
@@ -110,13 +125,23 @@ const SCATTER_FRAMES: int = 0x10
 const SCATTER_PER_FRAME: int = 12
 
 ## `StartTrainerBattle_SineWave`'s own `cp $60`, and the two-scanline step its
-## loop walks the screen with.
+## `ld e, 0 / add 2` loop walks the screen with.
 const SINE_FRAMES: int = 0x60
 const SINE_STEP: int = 2
 const SCREEN_LINES: int = 144
 
-## The two frames `LoadPokeBallGraphics` spends before the next scene.
-const BALL_FRAMES: int = 2
+## What a `.DoSineWave` call costs. It writes all 144 `wLYOverrides` through
+## `calc_sine_wave`, whose multiply loop is longer the larger the amplitude, so
+## a call late in the outro spends more frames than an early one. Measured on the
+## same forced-CAVE trace: the fifteen working calls land on frames 97, 99, 101,
+## 103, 105, 107, 110, 113, 116, 119, 122, 125, 128, 131 and 135, the `cp $60`
+## that ends it on 138 and `..._Finish` on 139.
+const SINE_STEP_FRAMES: Array[int] = [2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 4, 3]
+
+## The three frames `LoadPokeBallGraphics` spends before the next scene: its own
+## `DelayFrame` and the two `BattleStart_CopyTilemapAtOnce` behind it costs. On
+## the Route 30 trace it runs on frame 813 and `..._SetUpBGMap` on 817.
+const BALL_FRAMES: int = 3
 
 ## `DoBattleTransition.InitGFX` before the jumptable, and `.done` after it.
 ##
@@ -125,13 +150,20 @@ const BALL_FRAMES: int = 2
 ## filled with, `BattleStart_CopyTilemapAtOnce`, and then the palette wipe at the
 ## end. The counts are measured against a real cartridge rather than derived,
 ## because a `WaitBGMap` is worth whatever the copy in front of it left.
+## `.InitGFX` is 19 frames on that trace, 793 to 811, and
+## `..._DetermineWhichAnimation` is the twentieth. The tail is
+## `StartTrainerBattle_Finish` on 959, the loop's own `DelayFrame` behind it and
+## `.done`'s two, which is the screen fully black on 962.
 const LEAD_FRAMES: int = 19
-const TAIL_FRAMES: int = 3
+const TAIL_FRAMES: int = 4
 
 var _scene: Array = []
 var _step: int = 0
 var _counter: int = 0
 var _sine_offset: int = 0
+## `ld d, [hl]`: the amplitude a frame's wave is drawn at is the counter as it
+## stood before that frame's own step.
+var _sine_amplitude: int = 0
 var _delay: int = 0
 ## Whether the scene that set [member _delay] had already handed on: a scene's
 ## own frames belong to it rather than to the one it hands to.
@@ -141,6 +173,7 @@ var _trainer: bool = false
 var _darkness: bool = false
 var _order: int = IDENTITY
 var _ball_drawn: bool = false
+var _sprites: int = SPRITES_ALL
 var _cells: PackedByteArray = PackedByteArray()
 var _sine: PackedByteArray = PackedByteArray()
 var _rng: RandomNumberGenerator = null
@@ -197,6 +230,12 @@ func ball_drawn() -> bool:
 	return _ball_drawn
 
 
+## Which map objects the sprites are still drawn from: one of [constant
+## SPRITES_ALL], [constant SPRITES_BATTLERS] and [constant SPRITES_NONE].
+func sprites() -> int:
+	return _sprites
+
+
 ## `wLYOverrides`, the per-scanline `rSCX` the wavy outro writes. Empty for the
 ## three that write none.
 func raster_offsets() -> PackedInt32Array:
@@ -204,9 +243,10 @@ func raster_offsets() -> PackedInt32Array:
 	if StringName(_scene[mini(_step, _scene.size() - 1)]) != &"sine" or _sine.is_empty():
 		return out
 	out.resize(SCREEN_LINES)
-	var amplitude: int = _counter
+	## `ld e, 0` before the loop: the phase is the scanline alone. The wave does
+	## not travel down the screen; only its amplitude grows.
 	for line: int in SCREEN_LINES:
-		out[line] = _sine_wave(_sine_offset + line * SINE_STEP, amplitude)
+		out[line] = _sine_wave(line * SINE_STEP, _sine_amplitude)
 	return out
 
 
@@ -244,23 +284,33 @@ func _run() -> void:
 		&"next":
 			_next()
 		&"wavy_setup":
+			_respawn()
 			_counter = 0
 			_sine_offset = 0
 			_next()
 		&"sine":
 			_sine_wave_step()
 		&"spin_setup":
+			_respawn()
 			_counter = 0
 			_next()
 		&"spin":
 			_spin_step()
 		&"scatter_setup":
+			_respawn()
 			_counter = SCATTER_FRAMES
 			_next()
 		&"scatter":
 			_scatter_step()
 		&"zoom":
+			_respawn()
 			_zoom_step()
+
+
+## `RespawnPlayerAndOpponent`, which every one of the four outros opens with:
+## `HideAllObjects`, then the player and, in a scripted battle, `hLastTalked`.
+func _respawn() -> void:
+	_sprites = SPRITES_BATTLERS
 
 
 func _next() -> void:
@@ -310,13 +360,18 @@ func _flash() -> void:
 
 
 ## `StartTrainerBattle_SineWave`, whose counter is the amplitude and whose
-## offset walks the phase.
+## offset is what steps it.
 func _sine_wave_step() -> void:
 	if _counter >= SINE_FRAMES:
 		_finish()
 		return
-	_sine_offset = (_sine_offset + 1) & 0xFF
+	## `ld a, [hl] / inc [hl]` reads the offset before incrementing it, so the
+	## counter is stepped by the old one: 0, 1, 3, 6, 10 and on up the triangular
+	## numbers, which is the run a real cartridge walks.
+	_sine_amplitude = _counter
 	_counter = (_counter + _sine_offset) & 0xFF
+	_sine_offset = (_sine_offset + 1) & 0xFF
+	_delay = SINE_STEP_FRAMES[mini(_sine_offset - 1, SINE_STEP_FRAMES.size() - 1)] - 1
 
 
 ## `calc_sine_wave`: `d * sin(a * pi/32)` out of the cartridge's own table, as a
@@ -407,14 +462,20 @@ func _zoom_step() -> void:
 		for column: int in int(box[0]):
 			_write(int(box[3]) + column, int(box[2]) + row, CELL_BLACK)
 	_counter += 1
+	_delay = ZOOM_BOX_FRAMES - 1
 
 
-## `StartTrainerBattle_Finish`, and `DoBattleTransition.done` behind it: every
-## background palette is filled with zero, which is what takes whatever the
-## outro left to black.
+## `StartTrainerBattle_Finish`, and `DoBattleTransition.done` behind it:
+## `ClearSprites` empties shadow OAM, and every background palette is filled with
+## zero, which is what takes whatever the outro left to black.
 func _finish() -> void:
-	_delay = TAIL_FRAMES
+	## Added rather than assigned: `..._SpinToBlack.end` and
+	## `..._SpeckleToBlack.done` each spend three `DelayFrame`s of their own
+	## before writing `BATTLETRANSITION_FINISH`, and those are the outro's frames
+	## rather than the tail's.
+	_delay += TAIL_FRAMES
 	_finished = true
+	_sprites = SPRITES_NONE
 	_order = IDENTITY
 	_cells.fill(CELL_BLACK)
 

@@ -12,6 +12,9 @@ extends SceneTree
 ##
 ##   Godot --path . -s res://tools/preview_world.gd -- crystal 26 2 /tmp/out.png live [kind] [x y] [WxH] [touch]
 ##
+## `kind` may carry the player's own cell as `<kind>@x,y`, which is what a kind
+## reading the two numbers as something else needs: `battle_transition@5,7`.
+##
 ## `WxH` is the window to photograph in, for the two shapes a phone has, and
 ## `touch` draws the on-screen controller with it, which is the only way to see
 ## how [Gen2GameFrame] splits a portrait screen:
@@ -108,6 +111,11 @@ var _kind: StringName = &"effects"
 ## The two numbers after the kind. Most kinds read them as the cell the player
 ## stands on; a few read them as their own arguments.
 var _cell := Vector2i(-1, -1)
+## `<kind>@x,y`: the cell for a kind whose own two numbers are not one, which is
+## `battle_transition`. `battle_transition@5,7` photographs the animation with
+## the player standing on that cell, which is how the grass over a sprite's legs
+## is photographed with the transition already written over it.
+var _kind_cell := Vector2i(-1, -1)
 
 
 func _initialize() -> void:
@@ -124,7 +132,14 @@ func _initialize() -> void:
 			quit(1)
 			return
 		_output_path = args[3]
-		_kind = StringName(args[5]) if args.size() >= 6 else &"effects"
+		var kind_arg: String = args[5] if args.size() >= 6 else "effects"
+		if kind_arg.contains("@"):
+			var halves: PackedStringArray = kind_arg.split("@")
+			kind_arg = halves[0]
+			var at: PackedStringArray = halves[1].split(",")
+			if at.size() == 2:
+				_kind_cell = Vector2i(int(at[0]), int(at[1]))
+		_kind = StringName(kind_arg)
 		if args.size() >= 9:
 			var shape: PackedStringArray = args[8].split("x")
 			if shape.size() == 2:
@@ -174,7 +189,9 @@ func _build_live(data: GameData, group: int, number: int, cell: Vector2i) -> voi
 	_cell = cell
 	## The transition reads them as a frame count and a branch rather than as a
 	## cell, so the player is left where the map puts them.
-	if cell.x >= 0 and _kind != &"battle_transition":
+	if _kind_cell.x >= 0:
+		_screen.start_cell = _kind_cell
+	elif cell.x >= 0 and _kind != &"battle_transition":
 		_screen.start_cell = cell
 	## Pinned so two captures of the same map are the same picture: the seed the
 	## screen resolves is what a wandering NPC's own generator is built from.

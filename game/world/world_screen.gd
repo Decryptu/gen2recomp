@@ -2206,8 +2206,6 @@ func _advance_battle_transition() -> void:
 	_battle_transition_request = {}
 	if _renderer != null and _renderer.has_method("clear_transition"):
 		_renderer.clear_transition()
-	if _renderer != null and _renderer.has_method(Gen2ModHost.RENDERER_FADE_METHOD):
-		_renderer.call(Gen2ModHost.RENDERER_FADE_METHOD, Gen2WorldPalette.FADE_IDENTITY, false)
 	_open_battle_host(request)
 
 
@@ -2217,10 +2215,6 @@ func _advance_battle_transition() -> void:
 func _apply_battle_transition() -> void:
 	if _renderer == null or _battle_transition == null:
 		return
-	if _renderer.has_method(Gen2ModHost.RENDERER_FADE_METHOD):
-		_renderer.call(
-			Gen2ModHost.RENDERER_FADE_METHOD, _battle_transition.palette_order(), false
-		)
 	if not _renderer.has_method("set_transition"):
 		return
 	_renderer.set_transition(
@@ -2228,7 +2222,15 @@ func _apply_battle_transition() -> void:
 		_data.tile_indices("battle_transition") if _data != null else PackedByteArray(),
 		_data.battle_transition_palette(
 			_render_time_of_day() == Gen2WorldPalette.TIME_DARK
-		) if _battle_transition.ball_drawn() and _data != null else PackedColorArray()
+		) if _battle_transition.ball_drawn() and _data != null else PackedColorArray(),
+		_battle_transition.sprites(),
+		## `hLastTalked`, which `RespawnPlayerAndOpponent` keeps beside the
+		## player. A wild encounter has none and leaves the player alone.
+		int(_battle_transition_request.get("values", {}).get("object_index", -1)),
+		## `StartTrainerBattle_Flash` writes `wBGP` and calls `DmgToCgbBGPals`
+		## alone, so this is the background's order and not the map fade's:
+		## the sprites standing over the wedges keep their own colours.
+		_battle_transition.palette_order(),
 	)
 
 

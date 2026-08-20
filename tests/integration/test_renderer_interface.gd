@@ -202,6 +202,9 @@ func test_a_renderer_rebuilt_mid_scene_stays_below_the_live_text_box() -> void:
 	assert_eq(_world_screen._text_box, box, "the same live box node")
 	assert_eq(box.texture, texture, "with the glyphs it was already showing")
 	assert_true(box.visible)
+	## `_build_renderer` drops the old view with `queue_free`, which the game
+	## serves at the end of its frame and a test has to spend one to see.
+	await get_tree().process_frame
 
 
 ## The same rule in the battle screen, whose box is never hidden at all.
@@ -213,6 +216,7 @@ func test_a_battle_renderer_rebuilt_mid_scene_stays_below_the_interface() -> voi
 	var children: Array = viewport.get_children()
 	assert_eq(children.find(_battle_screen._renderer), 0, "the renderer is the floor")
 	assert_true(children.find(_battle_screen._box) > 0)
+	await get_tree().process_frame
 
 
 ## A page turn hides the box and the next event shows it again inside one call,
@@ -438,3 +442,87 @@ func test_a_visible_encounter_provider_is_driven_validated_drawn_and_fought() ->
 	assert_eq(
 		int((provider.get("context") as Dictionary)["generation"]), generation + 1
 	)
+
+
+## `StartTrainerBattle_Flash` writes `wBGP` and calls `DmgToCgbBGPals` alone,
+## so its three passes are a background order: the map, the Poke Ball's own tile
+## and the wedges take it, and the sprites standing over them do not. Measured
+## on a real Route 30 trainer, where the player's own 74 black, 35 red and 31
+## skin pixels are the same on every frame of the flash while the background
+## behind them walks the whole list.
+func test_the_transition_flash_is_the_background_s_order_and_not_the_sprites() -> void:
+	var packed: PackedScene = load("res://game/world/world_screen.tscn")
+	_world_screen = packed.instantiate() as Gen2WorldScreen
+	_world_screen.map_group = Fixture.MAP_GROUP
+	_world_screen.map_number = Fixture.MAP_NUMBER
+	_world_screen.start_cell = Vector2i(7, 6)
+	_world_screen.set_data(_data)
+	add_child(_world_screen)
+	await get_tree().process_frame
+	_world_screen.set_process(false)
+	var renderer: Gen2WorldRenderer = _world_screen._renderer
+
+	var identity: PackedByteArray = _player_sprite_bytes(renderer)
+	var orders: Dictionary = {}
+	var floods: Dictionary = {}
+	## Every frame of the first flash pass, which is where the whole list is
+	## walked; `preview_battle_transition` drives the animation and nothing else.
+	for frame: int in range(24, 49):
+		_world_screen.preview_battle_transition(frame, true)
+		var order: int = _world_screen._battle_transition.palette_order()
+		orders[order] = true
+		floods[order] = renderer.flood_palette()
+		assert_eq(
+			_player_sprite_bytes(renderer), identity,
+			"the player keeps its own colours through order $%02X" % order
+		)
+	assert_gt(orders.size(), 4, "the flash walks more than one order")
+	var flood: PackedColorArray = floods[Gen2BattleTransition.IDENTITY]
+	assert_eq(flood.size(), 4, "`.copypals` fills one palette")
+	for order: int in floods:
+		if order == Gen2BattleTransition.IDENTITY:
+			continue
+		assert_ne(
+			floods[order], flood,
+			"$%02X reorders the background's own four colours" % order
+		)
+
+
+func _player_sprite_bytes(renderer: Gen2WorldRenderer) -> PackedByteArray:
+	var texture: Texture2D = renderer._actor_texture(
+		_world_screen._world.player_sprite(), _world_screen._world.player_palette(),
+		_world_screen._world.player_facing, 0
+	)
+	return PackedByteArray() if texture == null else texture.get_image().get_data()
+
+
+## A cell `DoBattleTransition` has written is the background under a sprite
+## standing in grass, so the map's own priority tile is not drawn there:
+## `.InitSprite`'s OAM_PRIO is a test against whatever the tilemap holds now.
+func test_the_grass_over_a_sprite_leaves_the_transition_s_own_cells_to_it() -> void:
+	var renderer := Gen2WorldRenderer.new()
+	var whole := Rect2(Vector2(64, 68), Vector2(8, 8))
+	assert_eq(
+		renderer._priority_pieces(whole), [whole] as Array[Rect2],
+		"with no transition up the map owns the lot"
+	)
+	var cells := PackedByteArray()
+	cells.resize(Gen2BattleTransition.COLUMNS * Gen2BattleTransition.ROWS)
+	## Screen cell (8, 8) alone, which is the left half of a rectangle spanning
+	## cells 8 and 9 of row 8.
+	cells[8 * Gen2BattleTransition.COLUMNS + 8] = Gen2BattleTransition.CELL_BLACK
+	renderer.set_transition(cells, PackedByteArray(), PackedColorArray())
+	assert_eq(
+		renderer._priority_pieces(Rect2(Vector2(64, 64), Vector2(8, 8))), [] as Array[Rect2],
+		"the cell it took is its own"
+	)
+	assert_eq(
+		renderer._priority_pieces(Rect2(Vector2(64, 64), Vector2(16, 8))),
+		[Rect2(Vector2(72, 64), Vector2(8, 8))] as Array[Rect2],
+		"the cell beside it is still the map's"
+	)
+	assert_eq(
+		renderer._priority_pieces(whole), [Rect2(Vector2(64, 72), Vector2(8, 4))] as Array[Rect2],
+		"a rectangle straddling the grid is split on it, not dropped whole"
+	)
+	renderer.free()

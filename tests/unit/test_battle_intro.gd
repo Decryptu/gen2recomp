@@ -287,6 +287,12 @@ func test_the_flash_and_the_spin_take_the_cartridge_count() -> void:
 			break
 		frames += 1
 		spent[scene] = int(spent.get(scene, 0)) + 1
+	## The whole animation, against a real Route 30 trainer, where every one of
+	## these is a frame the oracle timed a routine on: `DoBattleTransition` 793,
+	## `..._DetermineWhichAnimation` 812, `..._LoadPokeBallGraphics` 813,
+	## `..._SetUpBGMap` 817, the first `..._Flash` 818, `..._SetUpForSpinOutro`
+	## 894, `..._Finish` 959, and the screen fully black on 962.
+	assert_eq(frames, 170, "`DoBattleTransition` on 793 and the screen black on 962")
 	assert_eq(int(spent.get(&"flash", 0)), 75, "three passes of 25")
 	assert_eq(
 		int(spent.get(&"spin", 0)),
@@ -299,5 +305,100 @@ func test_the_flash_and_the_spin_take_the_cartridge_count() -> void:
 	)
 	assert_eq(
 		int(spent.get(&"ball", 0)), Gen2BattleTransition.BALL_FRAMES + 1,
-		"LoadPokeBallGraphics and the two frames behind it"
+		"LoadPokeBallGraphics and the three frames behind it"
 	)
+
+
+## The two outros a cave battle takes, which the same oracle measured with
+## `wEnvironment` forced to CAVE: the wavy one runs `..._SineWave` sixteen times
+## over frames 97 to 138 and the zoom is one `..._ZoomToBlack` call over 96 to
+## 132, nine boxes four frames apart.
+func test_the_cave_outros_take_the_cartridge_count() -> void:
+	var wavy: Dictionary = _scene_frames(false, true)
+	assert_eq(int(wavy["sine"]), 42, "97 to 138 inclusive")
+	assert_eq(int(wavy["calls"].get(&"sine", 0)), 16, "fifteen waves and the `cp $60`")
+	var zoom: Dictionary = _scene_frames(true, true)
+	assert_eq(
+		int(zoom["zoom"]),
+		Gen2BattleTransition.ZOOM_BOXES.size() * Gen2BattleTransition.ZOOM_BOX_FRAMES + 1,
+		"96 to 132 inclusive"
+	)
+
+
+## `.DoSineWave` reads the offset before incrementing it, so the counter walks
+## the triangular numbers. A real cartridge holds 0, 1, 3, 6, 10, 15, 21, 28, 36,
+## 45, 55, 66, 78, 91 and 105, and 105 is what ends the outro.
+func test_the_wavy_outro_walks_the_triangular_numbers() -> void:
+	var transition: Gen2BattleTransition = Gen2BattleTransition.create(
+		false, true, false, false, null, _sine_table()
+	)
+	var seen: Array[int] = []
+	while transition.advance_frame():
+		if transition.scene() == &"sine" and not seen.has(transition._sine_amplitude):
+			seen.append(transition._sine_amplitude)
+	assert_eq(seen, [0, 1, 3, 6, 10, 15, 21, 28, 36, 45, 55, 66, 78, 91])
+
+
+## Frames and calls per scene, read before each step so a frame is counted
+## against the scene that ran on it.
+func _scene_frames(stronger: bool, cave: bool) -> Dictionary:
+	var transition: Gen2BattleTransition = Gen2BattleTransition.create(
+		stronger, cave, false, false, null, _sine_table()
+	)
+	var spent: Dictionary = {}
+	var calls: Dictionary = {}
+	var was_delayed: bool = false
+	var frames: int = 0
+	while frames < 4000:
+		var scene: StringName = transition.scene()
+		was_delayed = transition._delay > 0
+		if not transition.advance_frame():
+			break
+		frames += 1
+		spent[scene] = int(spent.get(scene, 0)) + 1
+		if not was_delayed:
+			calls[scene] = int(calls.get(scene, 0)) + 1
+	spent["calls"] = calls
+	return spent
+
+
+## Nothing in `DoBattleTransition.loop` writes shadow OAM, so the sprites
+## `.InitGFX`'s `UpdateSprites` left stand over the wedges. Each outro's own
+## setup runs `RespawnPlayerAndOpponent`, which hides every map object but the
+## player and `hLastTalked`, and `StartTrainerBattle_Finish` runs `ClearSprites`.
+## Measured on a real Route 30 trainer: 14 OAM slots through the whole flash, 8
+## from the frame `..._SetUpForSpinOutro` runs, and none from `..._Finish`.
+func test_the_sprites_stand_over_the_wedges_until_the_outro_hides_them() -> void:
+	for stronger: bool in [false, true]:
+		for cave: bool in [false, true]:
+			var rng := RandomNumberGenerator.new()
+			rng.seed = 7
+			var transition: Gen2BattleTransition = Gen2BattleTransition.create(
+				stronger, cave, true, false, rng, _sine_table()
+			)
+			var seen: Array[int] = []
+			var flash_sprites: Array[int] = []
+			var frames: int = 0
+			while frames < 4000:
+				var scene: StringName = transition.scene()
+				if not transition.advance_frame():
+					break
+				frames += 1
+				if not seen.has(transition.sprites()):
+					seen.append(transition.sprites())
+				if scene in [&"init", &"ball", &"bgmap", &"flash"]:
+					flash_sprites.append(transition.sprites())
+			assert_eq(
+				seen,
+				[
+					Gen2BattleTransition.SPRITES_ALL,
+					Gen2BattleTransition.SPRITES_BATTLERS,
+					Gen2BattleTransition.SPRITES_NONE,
+				],
+				"every object, then the two battlers, then none, in that order"
+			)
+			for sprites: int in flash_sprites:
+				assert_eq(
+					sprites, Gen2BattleTransition.SPRITES_ALL,
+					"the flash hides nothing: `RespawnPlayerAndOpponent` is the outro's"
+				)
