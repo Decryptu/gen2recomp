@@ -171,6 +171,9 @@ var _world_renderers: Dictionary = {}
 ## loaded, the way its entry object is: an actor carries the mod's own state
 ## between frames. See [method register_world_actor].
 var _world_actors: Dictionary = {}
+## Cells a mod asked the host to pick a hidden item up from. See
+## [method request_hidden_item].
+var _hidden_item_requests: Array[Vector2i] = []
 ## Mod id to the visible-encounter provider it registered, held the way an actor
 ## is. See [method register_visible_encounters].
 var _visible_encounters: Dictionary = {}
@@ -263,6 +266,12 @@ func create_world_renderer() -> Node:
 ## methods in [constant Gen2WorldActors.ACTOR_METHODS]; a registration missing
 ## one is refused here, where the mod's name is still in hand.
 ##
+## Two more are OPTIONAL and offered only to an actor that defines them, so every
+## actor already written keeps working: [constant
+## Gen2WorldActors.ACTOR_INTERACT_METHOD], offered a press of A no cartridge
+## branch answered, and [constant Gen2WorldActors.ACTOR_REQUESTS_METHOD], the
+## one-shot outbox the host drains once a world frame.
+##
 ## What an actor draws is presentation and takes part in nothing else. See
 ## [Gen2WorldActors] for the contract and `docs/MODS.md` for the entry shape.
 func register_world_actor(id: StringName, actor: Object) -> Dictionary:
@@ -283,6 +292,36 @@ func register_world_actor(id: StringName, actor: Object) -> Dictionary:
 		return {"ok": false, "reason": &"duplicate_actor", "detail": String(id)}
 	_world_actors[id] = actor
 	return {"ok": true, "id": id}
+
+
+## Asks the world screen to pick up the hidden item at [param cell] on the map
+## the player is on. A REQUEST and never the act: taking one writes the bag, the
+## event flag and the save, and runs `hiddenitem`'s own `verbosegiveitem` with
+## its FOUND text, its fanfare and its pack-full branch, none of which a mod may
+## do. So the mod names a cell, exactly as a visible-encounter provider names the
+## entry the host then starts a wild battle from.
+##
+## Queued rather than answered: the screen validates the cell against
+## [method Gen2WorldAPI.hidden_items] and runs the map's own script on the next
+## world frame it is idle for, so an ask inside a battle, a text box or a warp is
+## spent when the world can spend it. Which cell to name is the mod's business.
+func request_hidden_item(cell: Vector2i) -> void:
+	_hidden_item_requests.append(cell)
+
+
+## Drained by [Gen2WorldScreen], once, on the frame it spends them.
+func take_hidden_item_requests() -> Array[Vector2i]:
+	var out: Array[Vector2i] = _hidden_item_requests
+	_hidden_item_requests = []
+	return out
+
+
+## What a drain could not spend this frame, put back in front of anything asked
+## for since, so an ask is never lost by the frame it happened to land on.
+func requeue_hidden_items(cells: Array[Vector2i]) -> void:
+	if cells.is_empty():
+		return
+	_hidden_item_requests = cells + _hidden_item_requests
 
 
 func world_actor_ids() -> Array:

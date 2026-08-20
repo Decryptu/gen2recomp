@@ -5667,21 +5667,77 @@ static func _escape_rope_failure(reason: StringName) -> Dictionary:
 ## `wXCoord + SCREEN_WIDTH / 4` and `wYCoord + SCREEN_HEIGHT / 4`, accepted while
 ## the difference stays below half a screen: four cells up and left of the
 ## player, four down and five right.
+## Every BGEVENT_ITEM on the current map, as `{cell, item, flag, taken}`, whether
+## or not it has been picked up: `taken` is [method event_flag_active] on its own
+## flag, which is the Itemfinder's own test. A read and scene-free, like
+## [method visible_encounter_cells], so a probe can walk a map and print them
+## with no game running.
+##
+## The map's own events and nothing past them; a connection's belong to the
+## connected map. An event whose three bytes do not decode is dropped rather than
+## offered with a zero item, the way [method _hidden_item_record] refuses one.
+func hidden_items() -> Array:
+	var out: Array = []
+	if current_map == null:
+		return out
+	var rows: Array = current_map.events.get("bg_events", [])
+	for index: int in rows.size():
+		var bg_event: Dictionary = (rows[index] as Dictionary).duplicate(true)
+		if int(bg_event.get("type", -1)) != BGEVENT_ITEM:
+			continue
+		## `event_index` the way [method events_at] stamps it: it is the only
+		## stable name a background event has, and [Gen2WorldCatalog] addresses a
+		## patched item under a tile by it. Without it every record on a map
+		## reads index 0 and a mod is told the wrong item.
+		bg_event["event_index"] = index
+		var record: Dictionary = _hidden_item_record(bg_event)
+		if not bool(record.get("ok", false)):
+			continue
+		out.append({
+			"cell": Vector2i(int(bg_event.get("x", 0)), int(bg_event.get("y", 0))),
+			"item": int(record["item"]),
+			"flag": int(record["flag"]),
+			"taken": event_flag_active(int(record["flag"])),
+		})
+	return out
+
+
+## The map's own hidden-item script at [param cell], queued and run through the
+## ordinary path, so the bag write, the event flag, the save, `verbosegiveitem`'s
+## FOUND text, its fanfare and its pack-full branch are all the host's exactly as
+## a player walking onto the cell would get them. Answers the script results the
+## way [method interact] does, and an empty array when the cell holds no hidden
+## item, when it has already been taken, or when a script is already running.
+func take_hidden_item(cell: Vector2i) -> Array:
+	if current_map == null or _active_script != null or not _script_queue.is_empty():
+		return []
+	## [method events_at] rather than the raw list: it is what stamps `kind` and
+	## `event_index`, both of which the request below is built from.
+	for event: Dictionary in events_at(cell):
+		if event.get("kind", &"") != &"bg_events" or int(event.get("type", -1)) != BGEVENT_ITEM:
+			continue
+		## The same gate `_active_events_at` applies to a background event, so a
+		## flag already set answers nothing rather than giving the item twice.
+		if not _bg_event_condition_active(event):
+			continue
+		var request: Dictionary = _hidden_item_request_for_event(event)
+		if request.is_empty():
+			continue
+		_enqueue_script(request)
+		return run_event_queue(false)
+	return []
+
+
 func hidden_item_nearby() -> bool:
 	if current_map == null:
 		return false
-	for event: Variant in current_map.events.get("bg_events", []):
-		var bg_event: Dictionary = event
-		if int(bg_event.get("type", -1)) != BGEVENT_ITEM:
+	for entry: Dictionary in hidden_items():
+		if bool(entry["taken"]):
 			continue
-		var offset: Vector2i = player_cell - Vector2i(
-			int(bg_event.get("x", 0)), int(bg_event.get("y", 0))
-		)
+		var offset: Vector2i = player_cell - (entry["cell"] as Vector2i)
 		if offset.x < -5 or offset.x > 4 or offset.y < -4 or offset.y > 4:
 			continue
-		var record: Dictionary = _hidden_item_record(bg_event)
-		if bool(record.get("ok", false)) and not event_flag_active(int(record["flag"])):
-			return true
+		return true
 	return false
 
 

@@ -37,6 +37,7 @@ func register(host: Gen2ModHost, manifest: Gen2ModManifest) -> void:
 	_add_an_item_and_its_shelf(host, manifest.id)
 	_add_a_control(host, manifest.id)
 	_populate_the_map(host, manifest.id)
+	_walk_something_behind_the_player(host, manifest.id)
 	_rebalance(host, manifest.id)
 	_watch(host, manifest.id)
 
@@ -202,6 +203,15 @@ func _populate_the_map(host: Gen2ModHost, id: StringName) -> void:
 	host.register_visible_encounters(id, Population.new())
 
 
+## One sprite in the world, petted and picking things up (`api_version` 7).
+##
+## An actor is PRESENTATION: it occupies no cell, blocks nothing and is in no
+## snapshot. The three methods below it are required; `interact`, `take_requests`
+## and a `sprites()` entry's `emote` are the optional three that make it a pet.
+func _walk_something_behind_the_player(host: Gen2ModHost, id: StringName) -> void:
+	host.register_world_actor(id, Pet.new())
+
+
 ## Rewriting how an event is PRESENTED, without changing what happened
 ## (`api_version` 4).
 ##
@@ -222,6 +232,74 @@ func _dress_world_event(result: Dictionary) -> Dictionary:
 		event["text"] = String(event.get("text", "")).replace("PIKACHU", "VOLTLING")
 		result["event"] = event
 	return result
+
+
+## A Pokemon walking one cell behind the player, which is what a follower mod is,
+## and every optional half of the actor contract in one object.
+class Pet:
+	extends RefCounted
+
+	## How long the heart stays up after a press, in world frames. The mod owns
+	## the duration because the emote is a pose the host draws while it is asked
+	## for, rather than an edge the host times.
+	const HEART_FRAMES: int = 60
+	const CYNDAQUIL: int = 155
+
+	var _world: Gen2WorldAPI = null
+	var _heart: int = 0
+	var _outbox: Array = []
+
+	func set_world(world: Gen2WorldAPI) -> void:
+		_world = world
+
+	func advance_frame() -> void:
+		_heart = maxi(0, _heart - 1)
+		_pick_up_what_it_walked_over()
+
+	func sprites() -> Array:
+		if _world == null:
+			return []
+		var entry: Dictionary = {
+			"icon": _world.data.mon_menu_icon(CYNDAQUIL),
+			"facing": _world.player_facing,
+			"position_cells": Vector2(_cell()),
+		}
+		if _heart > 0:
+			entry["emote"] = Gen2WorldActors.EMOTE_HEART
+		return [entry]
+
+	## Offered only a press no cartridge object, background event or tile branch
+	## answered, so this can never shadow one. Answering true consumes it.
+	func interact(cell: Vector2i, _facing: int) -> bool:
+		if _world == null or cell != _cell():
+			return false
+		_heart = HEART_FRAMES
+		## A mod may not play a sound, so it asks and the host spends it.
+		_outbox.append({"kind": Gen2WorldActors.REQUEST_CRY, "species": CYNDAQUIL})
+		return true
+
+	## The one-shot outbox, drained once a world frame and emptied by the drain.
+	func take_requests() -> Array:
+		var out: Array = _outbox
+		_outbox = []
+		return out
+
+	## And the other half a follower wants: a hidden item under the cell it is
+	## standing on. The mod reads the map and names the cell; taking one is the
+	## HOST's, because it writes the bag, the flag and the save.
+	func _pick_up_what_it_walked_over() -> void:
+		if _world == null:
+			return
+		for record: Dictionary in _world.hidden_items():
+			if bool(record["taken"]) or (record["cell"] as Vector2i) != _cell():
+				continue
+			Gen2ModHost.instance().request_hidden_item(record["cell"])
+			return
+
+	## One cell behind the player, which is where a follower walks: the faced
+	## cell reflected through the player, so no direction table is needed here.
+	func _cell() -> Vector2i:
+		return _world.player_cell - (_world.facing_cell() - _world.player_cell)
 
 
 ## The population itself. A separate object because a provider is a RefCounted

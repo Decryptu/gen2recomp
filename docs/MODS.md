@@ -36,7 +36,7 @@ user://mods/<id>/
 | `id` | Lowercase `[a-z0-9][a-z0-9_-]*`; addresses the directory and registry keys |
 | `name` | Shown to the player |
 | `version` | The mod's own version, not the host's |
-| `api_version` | Between `Gen2ModManifest.MIN_API_VERSION` and `API_VERSION`. Declare the oldest host you need: 6 for `occupied` in the visible-encounter context, 5 for the run's rules, 4 for types, matchups, mod art and event mutators, 3 for mart rows and named axes, 2 for visible encounters, 1 for everything else |
+| `api_version` | Between `Gen2ModManifest.MIN_API_VERSION` and `API_VERSION`. Declare the oldest host you need: 7 for an actor's `interact`, `emote` and outbox and for hidden-item requests, 6 for `occupied` in the visible-encounter context, 5 for the run's rules, 4 for types, matchups, mod art and event mutators, 3 for mart rows and named axes, 2 for visible encounters, 1 for everything else |
 | `entry` | A `.gd` path inside the mod directory, or inside the pack when there is one |
 | `pack` | Optional `.pck` or `.zip` beside `mod.json`, holding the mod's files |
 | `description` | Optional |
@@ -808,6 +808,26 @@ view. Three methods, refused by name at registration the way a renderer's are:
 | `advance_frame()` | Once per world frame, after the player's step advanced |
 | `sprites() -> Array` | What to draw now. A read: it is asked once a frame however many times the screen redraws |
 
+Two more are **optional** (`api_version` 7) and offered only to an actor that
+defines them, so every actor already written keeps working:
+
+| Method | Called when |
+|---|---|
+| `interact(cell: Vector2i, facing: int) -> bool` | A press of A that no cartridge object, background event or tile branch answered. `cell` is the player's faced cell and `facing` the player's own; the first actor answering true consumes the press |
+| `take_requests() -> Array` | The actor's one-shot outbox, drained once a world frame and emptied by the drain |
+
+`interact` is offered **only** after `Gen2WorldAPI.interact()` answered nothing at
+all, so a mod can never shadow a cartridge interaction. Only the actor's own pose
+changes, so no player event is spent, and a pose the press changed is on screen
+on the frame it was pressed.
+
+`take_requests` is where an **edge** goes; `sprites()` is where a **pose** goes.
+The one kind so far is `{"kind": &"cry", "species": n}`, played through the same
+player a script's `cry` command and the Pokedex CRY button use. A mod may not
+play a sound, so it asks and the host spends it, which is the bargain the shiny
+pulse already has; no dedup window is needed, since the mod asks once. Anything
+else in the outbox is dropped.
+
 Each entry of `sprites()` is a dictionary naming cartridge art and nothing else:
 
 | Key | Meaning |
@@ -816,6 +836,8 @@ Each entry of `sprites()` is a dictionary naming cartridge art and nothing else:
 | `sprite` | An `OverworldSprites` row instead, for an NPC or an object picture |
 | `facing` | `Gen2WorldSprite.FACING_*`. Right is the left picture mirrored, as on the cartridge |
 | `position_cells` | Where to draw it, in fractional walk cells, the unit `player_position_cells()` is in |
+| `colors` | Optional. Four colours to draw the sprite in instead of the map's own sprite palette. What a visible encounter wears, so a shiny one is a shiny one before the battle starts |
+| `emote` | Optional (`api_version` 7). `Gen2WorldActors.EMOTE_SHOCK` through `EMOTE_GRASS_RUSTLE`, drawn two rows above the sprite exactly as `SpawnEmote` puts one over a map object. State rather than an edge: it is up for as long as the entry keeps asking, so the mod owns the duration and the host owns the pixels, and a renderer reading `set_actors` gets it for free. An index outside the twelve is no emote rather than a wrong sheet |
 
 The host resolves the strip, the palette, the time of day and the icon's own
 two-frame animation (`.Frameset_PartyMon`'s rate), so a mod never composes
@@ -913,6 +935,43 @@ What the host does with a valid population:
 A world renderer that wants to draw the sparkle itself takes the optional
 `set_encounters(encounters: Gen2WorldEncounters)`; the population itself already
 arrives through `set_actors`.
+
+## Hidden items a mod can see, and ask for
+
+A mod that wants something of its own to pick a hidden item up, a follower
+walking over one or a detector drawing them, reads them and **asks** for one
+(`api_version` 7). It never takes one: taking one writes the bag, the event flag
+and the save, and runs `hiddenitem`'s own `verbosegiveitem` with its FOUND text,
+its fanfare and its pack-full branch, all of which is world state a mod must not
+write.
+
+`Gen2WorldAPI.hidden_items()` is the read: one entry per `BGEVENT_ITEM` on the
+current map, taken or not. Scene-free, like `visible_encounter_cells()` beside
+it, so a probe can walk a map and print them with no game running.
+
+| Key | Meaning |
+|---|---|
+| `cell` | Where the record sits |
+| `item` | The item it gives, with the gameplay catalog's patch already applied |
+| `flag` | Its own event flag, which is the site's completion |
+| `taken` | `event_flag_active(flag)`. The Itemfinder's own test |
+
+`Gen2ModHost.request_hidden_item(cell)` is the ask. The mod names a cell and
+reads nothing back: the host validates it against that same list and, on the
+next world frame nothing else owns, runs the map's **own** script through the
+ordinary path, so the text box, the fanfare and the pacing are the world
+screen's exactly as they are for a player walking onto the cell. It is the same
+bargain a visible-encounter provider has with a wild battle: the mod names the
+entry, the host runs it.
+
+- An ask for a cell with no record, or one whose flag is already set, does
+  nothing. `CheckBGEventFlag` is the host's test, not the mod's.
+- One is spent per frame, since the first one's script owns the world until its
+  box is pressed past; the rest wait in the queue in order.
+- An ask made inside a battle, a text box, a warp or an overlay is spent when the
+  world can spend it rather than dropped.
+
+Which cell to name is the mod's own business.
 
 ## Measured against the voxel mod
 

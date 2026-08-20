@@ -20,7 +20,11 @@ const FILENAME: String = "mod.json"
 ## 5 added [member Gen2WorldAPI.rules], the run's own divergence flags.
 ## 6 added `occupied` to the visible-encounter context, which is the only way a
 ## provider can tell that a cell has an NPC or an item ball standing on it.
-const API_VERSION: int = 6
+## 7 gave a world actor an optional `interact` and an optional `take_requests`
+## outbox, an optional `emote` on a `sprites()` entry, and the host
+## [method Gen2ModHost.request_hidden_item] over
+## [method Gen2WorldAPI.hidden_items].
+const API_VERSION: int = 7
 ## The oldest contract this host still answers. See [constant API_VERSION].
 const MIN_API_VERSION: int = 1
 ## Ids address directories and registry keys, so they stay to a plain lowercase

@@ -20,6 +20,34 @@ extends RefCounted
 
 ## Checked at registration, where the mod's name is still in hand.
 const ACTOR_METHODS: Array[String] = ["set_world", "advance_frame", "sprites"]
+## Optional, offered only to an actor that defines it. See [method interact].
+const ACTOR_INTERACT_METHOD: String = "interact"
+## Optional, drained once a world frame. See [method take_requests].
+const ACTOR_REQUESTS_METHOD: String = "take_requests"
+
+## constants/script_constants.asm's EMOTE_* order, which is
+## [constant RomLayout.EMOTE_NAMES]' too. Named here so a mod asking for one over
+## its own sprite names it rather than counting the array. The last four are the
+## engine's own overlays rather than `showemote` arguments, and a mod naming one
+## gets that sheet drawn where the bubble would be.
+const EMOTE_NONE: int = -1
+const EMOTE_SHOCK: int = 0
+const EMOTE_QUESTION: int = 1
+const EMOTE_HAPPY: int = 2
+const EMOTE_SAD: int = 3
+const EMOTE_HEART: int = 4
+const EMOTE_BOLT: int = 5
+const EMOTE_SLEEP: int = 6
+const EMOTE_FISH: int = 7
+const EMOTE_SHADOW: int = 8
+const EMOTE_ROD: int = 9
+const EMOTE_BOULDER_DUST: int = 10
+const EMOTE_GRASS_RUSTLE: int = 11
+
+## The kinds [method take_requests] passes on. Anything else a mod puts in its
+## outbox is dropped here rather than reaching the screen.
+const REQUEST_CRY: StringName = &"cry"
+const REQUEST_KINDS: Array[StringName] = [REQUEST_CRY]
 
 ## `.Frameset_PartyMon`: two OAM sets of eight, nine passes each because
 ## `GetSpriteAnimFrame` returns the entry on the pass that loads the duration
@@ -79,9 +107,69 @@ func advance_frame() -> bool:
 	return _changed(before, _sprites)
 
 
-## { sprite, facing, frame, position_cells, colors }, sorted by the row stood on
-## and then by registration order, the way the map's own objects are. `colors` is
-## empty for everything but a visible encounter.
+## A press of A that no cartridge object, background event or tile branch
+## answered, offered to the actors in registration order; the first answering
+## true consumes it. [param cell] is the player's faced cell and [param facing]
+## the player's own, so an actor tests its own pose and the host never has to
+## invent an occupancy notion for a sprite that occupies nothing.
+##
+## Offered ONLY after [method Gen2WorldAPI.interact] answered nothing, so no
+## cartridge interaction can ever be shadowed by a mod. An actor without the
+## method is offered nothing.
+func interact(cell: Vector2i, facing: int) -> bool:
+	for actor: Object in _actors:
+		if not actor.has_method(ACTOR_INTERACT_METHOD):
+			continue
+		if bool(actor.call(ACTOR_INTERACT_METHOD, cell, facing)):
+			## The press is spent, so what the actor changed about its own pose
+			## is on screen this frame rather than on the next advance.
+			_collect()
+			return true
+	return false
+
+
+## An actor's one-shot outbox, drained once a world frame and emptied by the
+## drain. A pose belongs in [method sprites], which is a read asked once a frame
+## however many times the screen redraws; an edge belongs here, asked for once
+## and spent once.
+##
+## Every entry is validated against [constant REQUEST_KINDS] here, so the screen
+## is handed requests it can spend rather than whatever a mod wrote.
+func take_requests() -> Array:
+	var out: Array = []
+	for actor: Object in _actors:
+		if not actor.has_method(ACTOR_REQUESTS_METHOD):
+			continue
+		var answered: Variant = actor.call(ACTOR_REQUESTS_METHOD)
+		if not answered is Array:
+			continue
+		for entry: Variant in answered as Array:
+			var request: Dictionary = _resolve_request(entry)
+			if not request.is_empty():
+				out.append(request)
+	return out
+
+
+func _resolve_request(entry: Variant) -> Dictionary:
+	if not entry is Dictionary:
+		return {}
+	var row: Dictionary = entry as Dictionary
+	var kind := StringName(row.get("kind", &""))
+	if not REQUEST_KINDS.has(kind):
+		return {}
+	if kind == REQUEST_CRY:
+		var species: int = int(row.get("species", 0))
+		# The record lookup is the real gate; this only keeps a zero out of it.
+		if species <= 0:
+			return {}
+		return {"kind": kind, "species": species}
+	return {}
+
+
+## { sprite, facing, frame, position_cells, colors, emote }, sorted by the row
+## stood on and then by registration order, the way the map's own objects are.
+## `colors` is empty for everything but a visible encounter, and `emote` is
+## [constant EMOTE_NONE] unless the entry asked for one.
 func sprites() -> Array:
 	return _sprites
 
@@ -136,7 +224,20 @@ func _resolve(entry: Variant, order: int) -> Dictionary:
 		# only way a shiny one is a shiny one before the battle starts. A view
 		# that does not read this draws the ordinary palette and is not wrong.
 		"colors": row.get("colors", PackedColorArray()),
+		# `SpawnEmote`'s bubble, two rows above the sprite. State rather than an
+		# edge: it is up for as long as the entry keeps asking, so the mod owns
+		# the duration and the host owns the pixels.
+		"emote": _resolve_emote(row),
 	}
+
+
+## An out-of-range index is no emote rather than a wrong sheet, the way art the
+## cache does not carry is dropped rather than drawn as a placeholder.
+func _resolve_emote(row: Dictionary) -> int:
+	var emote: int = int(row.get("emote", EMOTE_NONE))
+	if emote < 0 or emote >= RomLayout.EMOTE_NAMES.size():
+		return EMOTE_NONE
+	return emote
 
 
 ## A mon icon steps through its two at `.Frameset_PartyMon`'s rate; anything else
@@ -168,6 +269,7 @@ func _changed(before: Array, after: Array) -> bool:
 		if was["position_cells"] != now["position_cells"] \
 			or int(was["facing"]) != int(now["facing"]) \
 			or int(was["frame"]) != int(now["frame"]) \
+			or int(was["emote"]) != int(now["emote"]) \
 			or (was["sprite"] as Gen2WorldSprite).number \
 				!= (now["sprite"] as Gen2WorldSprite).number:
 			return true

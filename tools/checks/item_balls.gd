@@ -90,6 +90,7 @@ func run(r: RefCounted) -> void:
 		_verify_hm07(data, game_id)
 		_verify_route_44(data, game_id)
 		_verify_hidden_items(data, game_id)
+		_sweep_the_public_read(data, game_id)
 
 
 ## The one that unblocks the route: picking HM07 up puts Waterfall in the bag,
@@ -248,6 +249,72 @@ func _verify_hidden_items(data: GameData, game_id: StringName) -> void:
 				and int(world.state.items().get(item, 0)) == 1,
 			"%s: the hidden item on %s can be picked up twice." % [game_id, cell]
 		)
+
+
+## `Gen2WorldAPI.hidden_items()` over EVERY map of the cartridge, which is the
+## only thing that can say the public read agrees with the dispatch the two
+## cases above drive one map at a time.
+##
+## What it proves, over every record rather than the two driven above: each one
+## decodes on a fresh state, none of them reads as already taken, and the read
+## and the ask agree on the item and the flag for every one of them.
+##
+## What it does NOT prove, and the reason is worth keeping so it is not chased
+## again: `_hidden_item_record` addresses the gameplay catalog's patch by
+## `event_index`, and on an unpatched cache `_catalogued_item` falls back to the
+## record's own byte, so a wrong index is inert over the whole corpus. It bites
+## only where a mod has moved what is in a hidden item, and the read is stamped
+## by `events_at()`'s own rule rather than by a second copy of it for that
+## reason. Maps carrying more than one record are counted below because that is
+## the population such a patch would be visible on.
+func _sweep_the_public_read(data: GameData, game_id: StringName) -> void:
+	var maps: int = 0
+	var records: int = 0
+	var multiples: int = 0
+	for map: Gen2WorldMap in data.world_maps():
+		var id := Vector2i(map.group, map.number)
+		var world: Gen2WorldAPI = Gen2WorldAPI.open(
+			data, id.x, id.y, Vector2i.ZERO, Gen2WorldState.new()
+		)
+		if world == null or world.current_map == null:
+			continue
+		maps += 1
+		var listed: Array = world.hidden_items()
+		if listed.size() > 1:
+			multiples += 1
+		for record: Dictionary in listed:
+			records += 1
+			var cell: Vector2i = record["cell"]
+			if bool(record["taken"]):
+				_r.fail("%s: %s %s is taken on a fresh state." % [game_id, id, cell])
+				continue
+			## The ask and the press must decode the same record. `take_hidden_item`
+			## runs it, so a fresh world per record rather than one per map.
+			var asked: Gen2WorldAPI = Gen2WorldAPI.open(
+				data, id.x, id.y, Vector2i.ZERO, Gen2WorldState.new()
+			)
+			var results: Array = asked.take_hidden_item(cell)
+			if not _r.check(
+				results.size() == 1
+					and StringName(results[0].get("source", {}).get("kind", &"")) == &"hidden_item",
+				"%s: %s %s did not run as a hidden item when asked for." % [game_id, id, cell]
+			):
+				continue
+			var source: Dictionary = results[0].get("source", {})
+			_r.check(
+				int(source.get("item", -1)) == int(record["item"])
+					and int(source.get("flag", -1)) == int(record["flag"]),
+				"%s: %s %s reads item $%02x flag %d and runs item $%02x flag %d." % [
+					game_id, id, cell, int(record["item"]), int(record["flag"]),
+					int(source.get("item", -1)), int(source.get("flag", -1)),
+				]
+			)
+	_r.check(records > 0, "%s: no hidden item was listed on any map." % game_id)
+	## Without a map carrying two, the `event_index` invariant above is untested.
+	_r.check(multiples > 0, "%s: no map carries two hidden items." % game_id)
+	print("  %s hidden_items: %d maps, %d records, %d maps with more than one" % [
+		game_id, maps, records, multiples,
+	])
 
 
 func _open(data: GameData, id: Array, cell: Vector2i) -> Gen2WorldAPI:

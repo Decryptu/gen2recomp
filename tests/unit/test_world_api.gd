@@ -7061,3 +7061,85 @@ func test_opening_a_world_carries_and_installs_its_rules() -> void:
 	assert_not_null(plain.rules, "a world opened without rules plays the installed set")
 	assert_false(Gen2Rules.hardware(&"belly_drum_boosts_below_half_hp"))
 	Gen2Rules.install(null)
+
+
+## The public read a mod plans a pickup from: every BGEVENT_ITEM on the map,
+## taken or not, and never the Itemfinder's one bool over its own window.
+func test_hidden_items_lists_every_record_on_the_map_with_its_flag() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	scripts["48:6200"] = [30, 0, 3, Gen2WorldScript.END]
+	scripts["48:6208"] = [31, 0, 4, Gen2WorldScript.END]
+	# A third whose item byte is zero: it decodes to nothing and is dropped
+	# rather than offered with a zero item.
+	scripts["48:6210"] = [32, 0, 0, Gen2WorldScript.END]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var data: GameData = GameData.open_directory(_directory)
+	var world := Gen2WorldAPI.open(data, 1, 1, Vector2i(8, 7))
+	world.current_map.events["bg_events"] = [
+		{"x": 8, "y": 6, "type": Gen2WorldAPI.BGEVENT_ITEM, "script": 0x6200},
+		{"x": 2, "y": 2, "type": Gen2WorldAPI.BGEVENT_ITEM, "script": 0x6208},
+		{"x": 3, "y": 3, "type": Gen2WorldAPI.BGEVENT_ITEM, "script": 0x6210},
+		{"x": 4, "y": 4, "type": Gen2WorldAPI.BGEVENT_READ, "script": 0x6200},
+	]
+	world.set_event_flag(31)
+
+	var listed: Array = world.hidden_items()
+	assert_eq(listed.size(), 2, JSON.stringify(listed))
+	assert_eq(listed[0]["cell"], Vector2i(8, 6))
+	assert_eq(int(listed[0]["item"]), 3)
+	assert_eq(int(listed[0]["flag"]), 30)
+	assert_false(bool(listed[0]["taken"]))
+	assert_eq(listed[1]["cell"], Vector2i(2, 2))
+	assert_true(bool(listed[1]["taken"]), "A set flag is listed as taken, not dropped.")
+	# The Itemfinder is the same walk narrowed to its window and the untaken.
+	world.player_cell = Vector2i(8, 6)
+	assert_true(world.hidden_item_nearby())
+	world.set_event_flag(30)
+	assert_false(world.hidden_item_nearby())
+
+
+## The mod names a cell; the map's own script runs through the ordinary path, so
+## the box, the flag, the bag and the pack-full branch are all the host's.
+func test_take_hidden_item_runs_the_maps_own_script_from_a_named_cell() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	scripts["48:6218"] = [33, 0, 3, Gen2WorldScript.END]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var data: GameData = GameData.open_directory(_directory)
+	var world := Gen2WorldAPI.open(data, 1, 1, Vector2i(8, 7))
+	world.current_map.events["bg_events"] = [
+		{"x": 2, "y": 5, "type": Gen2WorldAPI.BGEVENT_ITEM, "script": 0x6218},
+	]
+	# Nowhere near the player and not the cell being faced: naming it is the
+	# whole ask, which is what makes a follower's own cell reachable.
+	assert_true(world.interact().is_empty())
+	assert_true(world.take_hidden_item(Vector2i(4, 4)).is_empty(), "A cell with no record.")
+
+	var results: Array = world.take_hidden_item(Vector2i(2, 5))
+	assert_eq(results.size(), 1, JSON.stringify(results))
+	assert_eq(results[0]["source"]["kind"], &"hidden_item")
+	assert_eq(results[0]["event"]["text"], "Found\n%s!" % _item_name(3))
+	_receipt_sound(world, &"special_sound")
+	assert_eq(_receipt_notify(world, 3)[0]["status"], &"complete")
+	assert_eq(world.state.items().get(3, 0), 1)
+	assert_true(world.event_flag_active(33))
+	# And the flag it wrote closes it, the way a second A press on one is inert.
+	assert_true(world.take_hidden_item(Vector2i(2, 5)).is_empty())
+	assert_eq(world.state.items().get(3, 0), 1)
+
+
+## A request may not cut into a script that is already running.
+func test_take_hidden_item_refuses_while_a_script_is_running() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	scripts["48:6220"] = [34, 0, 3, Gen2WorldScript.END]
+	scripts["48:6228"] = [35, 0, 4, Gen2WorldScript.END]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var data: GameData = GameData.open_directory(_directory)
+	var world := Gen2WorldAPI.open(data, 1, 1, Vector2i(8, 7))
+	world.current_map.events["bg_events"] = [
+		{"x": 8, "y": 6, "type": Gen2WorldAPI.BGEVENT_ITEM, "script": 0x6220},
+		{"x": 2, "y": 5, "type": Gen2WorldAPI.BGEVENT_ITEM, "script": 0x6228},
+	]
+	world.player_facing = Gen2WorldSprite.FACING_UP
+	assert_eq(world.interact().size(), 1, "The faced record is waiting on its box.")
+	assert_true(world.take_hidden_item(Vector2i(2, 5)).is_empty())
+	assert_false(world.event_flag_active(35))
