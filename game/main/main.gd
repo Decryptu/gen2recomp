@@ -427,6 +427,9 @@ func preview_sheet(view: StringName) -> void:
 		&"touch":
 			select_page(&"settings")
 			_settings._open_touch_layout()
+		&"bugs":
+			select_page(&"settings")
+			_settings._open_rules_sheet()
 		&"binding":
 			select_page(&"settings")
 			var sheet: Gen2BindingSheet = Gen2BindingSheet.for_button(

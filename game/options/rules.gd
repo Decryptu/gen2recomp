@@ -37,6 +37,40 @@ const FLAGS: Dictionary = {
 	&"metal_powder_overflow": true,
 }
 
+## What each flag is, for a player choosing one. Keyed like [constant FLAGS] and
+## in its order: `title` names the bug and `detail` says what the CARTRIDGE does,
+## which is what the flag reproduces when it is on. Said without a source symbol,
+## because the symbols are beside the branches; this is the only wording a
+## settings screen has, so a second copy in the launcher would go stale.
+const FLAG_TEXT: Dictionary = {
+	&"belly_drum_boosts_below_half_hp": {
+		"title": "Belly Drum below half HP",
+		"detail": "Attack is raised by two stages before the HP is checked, so a"
+			+ " Belly Drum that fails for want of HP has already paid the boost.",
+	},
+	&"medium_slow_level_one_underflow": {
+		"title": "Medium Slow at level 1",
+		"detail": "The experience formula is run at level 1, where the medium slow"
+			+ " curve underflows and asks for about 16 million points.",
+	},
+	&"cautious_ai_abandons_remaining_moves": {
+		"title": "Cautious trainer AI",
+		"detail": "A trainer weighing its moves stops at the first one a roll"
+			+ " passes over, leaving the rest of them unscored.",
+	},
+	&"short_hp_bar_number_off_by_one": {
+		"title": "Short HP bar's number",
+		"detail": "The HP number printed while a short bar drains is rounded down"
+			+ " where the rest of the routine rounds up, so it reads one low."
+			+ " Never the bar itself.",
+	},
+	&"metal_powder_overflow": {
+		"title": "Metal Powder on Ditto",
+		"detail": "Boosting a Defense above 170 overflows, halves the attacker's"
+			+ " Attack instead and folds the defence back below where it started.",
+	},
+}
+
 ## `HANDOFF.md`'s mutual recoil faint row is deliberately NOT here: the award pass
 ## already refuses a fainted recipient, so clearing the participant as
 ## `UpdateFaintedPlayerMon` does changes no outcome that can be observed. It

@@ -1,6 +1,7 @@
 extends GutTest
 
-## Seeing and changing the controls from the launcher.
+## Seeing and changing settings from the launcher: the controls, and the rules
+## the game is played under.
 
 var _theme: Gen2LauncherTheme = null
 var _options: Gen2Options = null
@@ -216,5 +217,51 @@ func test_the_layout_editor_previews_the_controller_it_is_arranging() -> void:
 	assert_true(pad.visible)
 	assert_same(pad.layout(), _options.touch_layout, "it edits the live layout")
 
+	sheet.close()
+	await get_tree().process_frame
+
+
+## The Gameplay card names three modes and nothing else said what was in them,
+## while the per-flag overrides the model has always carried were reachable from
+## no screen at all. Both halves are read off one snapshot, so the line under the
+## row and the sheet's own list cannot disagree.
+func test_the_bug_rules_are_named_and_each_one_can_be_moved_by_hand() -> void:
+	var page: Gen2SettingsPage = Gen2SettingsPage.create(_theme, _host)
+	_host.add_child(page)
+	var opened: Dictionary = page.rules_snapshot()
+	assert_eq(StringName(opened["mode"]), Gen2Rules.MODE_CURRENT)
+	assert_string_contains(String(opened["summary"]), "of %d bugs" % Gen2Rules.FLAGS.size())
+	# Wording is what a player has instead of the source, so a flag added without
+	# it fails here rather than showing as a bare symbol.
+	assert_eq((opened["flags"] as Array).size(), Gen2Rules.FLAGS.size())
+	for row: Dictionary in opened["flags"] as Array:
+		assert_false(String(row["title"]).is_empty(), String(row["flag"]))
+		assert_false(String(row["detail"]).is_empty(), String(row["flag"]))
+
+	page._open_rules_sheet()
+	await get_tree().process_frame
+	var sheet: Gen2LauncherSheet = null
+	for child: Node in _host.get_children():
+		if child is Gen2LauncherSheet:
+			sheet = child
+	assert_not_null(sheet)
+	var switches: Array[Gen2LauncherToggle] = []
+	for entry: Node in sheet.body().get_children():
+		for control: Node in entry.get_children():
+			for half: Node in control.get_children():
+				if half is Gen2LauncherToggle:
+					switches.append(half)
+	assert_eq(switches.size(), Gen2Rules.FLAGS.size(), "one switch per bug")
+
+	var first: Dictionary = (opened["flags"] as Array)[0]
+	switches[0].button_pressed = not bool(first["on"])
+	var moved: Dictionary = page.rules_snapshot()
+	assert_eq(StringName(moved["mode"]), Gen2Rules.MODE_CUSTOM)
+	assert_ne(bool((moved["flags"] as Array)[0]["on"]), bool(first["on"]))
+
+	# And the sheet's own way back, which is the mode the player last picked
+	# rather than a reset to the shipped one.
+	page._options.rules.clear_flags()
+	assert_eq(StringName(page.rules_snapshot()["mode"]), Gen2Rules.MODE_CURRENT)
 	sheet.close()
 	await get_tree().process_frame
