@@ -14,6 +14,18 @@ extends Node
 ##
 ## Add one to a screen with [method attach] and call [method refresh] whenever
 ## what is on that screen changes.
+##
+## A modal over the screen takes the whole guard with it. Everything below is
+## still in the tree and still focusable, so without this the geometric search
+## joins a control in the modal to whatever happens to sit beside it on the page
+## behind, and one press walks out of the modal and scrolls the page. See
+## [constant MODAL_GROUP].
+
+## Nodes in this group are modal: while one is in the tree, it is the only part
+## of the screen the guard looks at. Named rather than typed so the guard owes
+## nothing to the launcher, and joined by whoever puts a layer over a screen
+## ([Gen2LauncherSheet] is the one that does today).
+const MODAL_GROUP: StringName = &"gen2_focus_modal"
 
 ## Where focus should land when there is somewhere better than the first control
 ## in tree order. A screen whose first control is a corner toggle would otherwise
@@ -71,11 +83,31 @@ func refresh() -> void:
 	if Gen2InputDevice.is_pointer(Gen2InputRuntime.instance().device()):
 		return
 	var viewport: Viewport = _root.get_viewport()
-	if viewport == null or viewport.gui_get_focus_owner() != null:
+	if viewport == null:
+		return
+	var focused: Control = viewport.gui_get_focus_owner()
+	var top: Control = _effective_root()
+	# Focus left behind on the page when a modal opened is focus outside the
+	# modal, so it is moved in rather than left where the arrows cannot see it.
+	if focused != null and (top == _root or top.is_ancestor_of(focused)):
 		return
 	var target: Control = _wanted()
 	if target != null:
 		target.grab_focus()
+
+
+## The part of the screen the guard is allowed to look at: the last modal added
+## under [member _root], or the whole screen when there is none. The last, so a
+## sheet opened over a sheet owns the arrows.
+func _effective_root() -> Control:
+	var top: Control = _root
+	for node: Node in _root.get_tree().get_nodes_in_group(MODAL_GROUP):
+		var control := node as Control
+		if control == null or not control.is_visible_in_tree():
+			continue
+		if control == _root or _root.is_ancestor_of(control):
+			top = control
+	return top
 
 
 func _wanted() -> Control:
@@ -87,7 +119,7 @@ func _wanted() -> Control:
 		and not _is_disabled(preferred)
 	):
 		return preferred
-	return first_focusable(_root)
+	return first_focusable(_effective_root())
 
 
 func _on_device_changed(_kind: StringName) -> void:
@@ -102,11 +134,12 @@ func move_focus(direction: Vector2) -> bool:
 	if _root == null or not _root.is_inside_tree() or direction == Vector2.ZERO:
 		return false
 	var viewport: Viewport = _root.get_viewport()
+	var top: Control = _effective_root()
 	var current: Control = viewport.gui_get_focus_owner()
-	if current == null or not _root.is_ancestor_of(current):
+	if current == null or not top.is_ancestor_of(current):
 		refresh()
 		return viewport.gui_get_focus_owner() != null
-	var best: Control = _neighbor(current, direction, focusable_controls(_root))
+	var best: Control = _neighbor(current, direction, focusable_controls(top))
 	if best == null:
 		return false
 	best.grab_focus()
@@ -119,7 +152,7 @@ func move_focus(direction: Vector2) -> bool:
 func _refresh_focus_neighbors() -> void:
 	if _root == null or not _root.is_inside_tree():
 		return
-	var controls: Array[Control] = focusable_controls(_root)
+	var controls: Array[Control] = focusable_controls(_effective_root())
 	for control: Control in controls:
 		_set_neighbor(control, &"left", _neighbor(control, Vector2.LEFT, controls))
 		_set_neighbor(control, &"right", _neighbor(control, Vector2.RIGHT, controls))

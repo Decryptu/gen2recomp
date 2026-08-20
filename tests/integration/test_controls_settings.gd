@@ -230,7 +230,9 @@ func test_the_bug_rules_are_named_and_each_one_can_be_moved_by_hand() -> void:
 	_host.add_child(page)
 	var opened: Dictionary = page.rules_snapshot()
 	assert_eq(StringName(opened["mode"]), Gen2Rules.MODE_CURRENT)
-	assert_string_contains(String(opened["summary"]), "of %d bugs" % Gen2Rules.FLAGS.size())
+	assert_string_contains(
+		String(opened["summary"]), "of %d bugs" % Gen2Rules.FLAGS.size()
+	)
 	# Wording is what a player has instead of the source, so a flag added without
 	# it fails here rather than showing as a bare symbol.
 	assert_eq((opened["flags"] as Array).size(), Gen2Rules.FLAGS.size())
@@ -265,3 +267,72 @@ func test_the_bug_rules_are_named_and_each_one_can_be_moved_by_hand() -> void:
 	assert_eq(StringName(page.rules_snapshot()["mode"]), Gen2Rules.MODE_CURRENT)
 	sheet.close()
 	await get_tree().process_frame
+
+
+## A sheet is a modal, and everything under it is still in the tree and still
+## focusable: without the guard treating it as the only screen, one press down
+## walked out of the sheet and scrolled the page behind it.
+func test_arrows_stay_inside_an_open_sheet() -> void:
+	var behind: Gen2SettingsPage = Gen2SettingsPage.create(_theme, _host)
+	_host.add_child(behind)
+	var guard: Gen2FocusGuard = Gen2FocusGuard.attach(_host)
+	await get_tree().process_frame
+	behind._open_rules_sheet()
+	await get_tree().process_frame
+	var sheet: Gen2LauncherSheet = _launcher_sheet()
+	assert_not_null(sheet)
+
+	var inside: Array[Control] = Gen2FocusGuard.focusable_controls(sheet)
+	assert_true(inside.size() > 1, "the sheet has somewhere to move")
+	inside[0].grab_focus()
+	for step: int in 12:
+		guard.move_focus(Vector2.DOWN)
+		var owner: Control = _host.get_viewport().gui_get_focus_owner()
+		assert_true(
+			owner == sheet or sheet.is_ancestor_of(owner),
+			"down %d stayed in the sheet" % step
+		)
+	for step: int in 12:
+		guard.move_focus(Vector2.UP)
+		var owner: Control = _host.get_viewport().gui_get_focus_owner()
+		assert_true(
+			owner == sheet or sheet.is_ancestor_of(owner), "up %d" % step
+		)
+	sheet.close()
+	await get_tree().process_frame
+
+
+## A [CenterContainer] grants a card whatever minimum size it asks for, so a
+## sheet with more rows than the window is tall used to hang its actions off the
+## bottom edge with no way to reach them. The rows are what gives now.
+func test_a_sheet_taller_than_the_window_keeps_its_actions_on_screen() -> void:
+	_host.size = Vector2(900, 420)
+	var page: Gen2SettingsPage = Gen2SettingsPage.create(_theme, _host)
+	_host.add_child(page)
+	page._open_rules_sheet()
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var sheet: Gen2LauncherSheet = _launcher_sheet()
+	assert_not_null(sheet)
+	var window := Rect2(Vector2.ZERO, _host.size)
+	assert_true(window.encloses(sheet._card.get_global_rect()), "the card fits")
+	# The rows are what scrolls; the title, the close button and the actions are
+	# the parts that must never leave, since one of them is the way out.
+	for control: Control in Gen2FocusGuard.focusable_controls(sheet._actions):
+		assert_true(
+			window.encloses(control.get_global_rect()), "an action is on screen"
+		)
+	assert_true(
+		window.encloses(Gen2FocusGuard.first_focusable(sheet._card).get_global_rect()),
+		"and the close button"
+	)
+	assert_true(sheet._scroll.get_v_scroll_bar().max_value > sheet._scroll.size.y)
+	sheet.close()
+	await get_tree().process_frame
+
+
+func _launcher_sheet() -> Gen2LauncherSheet:
+	for child: Node in _host.get_children():
+		if child is Gen2LauncherSheet:
+			return child
+	return null

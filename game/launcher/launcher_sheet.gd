@@ -6,13 +6,29 @@ extends Control
 ## Godot's own dialogs open a second window with its own decorations, which no
 ## amount of theming makes belong here and which mobile has no place to put. A
 ## sheet is drawn inside the launcher, so it is one look on every platform.
+##
+## It is sized against the window rather than against its own content: a
+## [CenterContainer] grants a card its minimum size whatever that is, so a sheet
+## with more rows than the window is tall used to hang its actions off the bottom
+## edge with no way to reach them. The body scrolls and the card is capped, so
+## the title, the actions and the close button are always on screen and the rows
+## between them are what gives.
 
 signal closed
+
+## The widest a sheet is drawn, and how much window is left around it when the
+## window is narrower or shorter than that.
+const MAX_WIDTH: float = 420.0
+const MARGIN: float = 24.0
 
 var _theme: Gen2LauncherTheme = null
 var _body: VBoxContainer = null
 var _actions: HBoxContainer = null
 var _card: Gen2LauncherCard = null
+var _scroll: Gen2LauncherScroll = null
+## The card's own chrome: the title row, the actions row and the padding, which
+## is what the body has to fit inside the window WITHOUT.
+var _column: VBoxContainer = null
 ## What had focus before the sheet opened, so closing puts it back rather than
 ## stranding a pad with nothing selected.
 var _restore_focus: Control = null
@@ -43,14 +59,13 @@ func _build(title: String) -> void:
 	add_child(centre)
 
 	_card = Gen2LauncherCard.floating(_theme, Gen2LauncherTheme.RADIUS_LG, 26, 34)
-	_card.custom_minimum_size = Vector2(420, 0)
 	centre.add_child(_card)
 
-	var column: VBoxContainer = Gen2LauncherUI.column(Gen2LauncherUI.GAP_LG)
-	_card.add_child(column)
+	_column = Gen2LauncherUI.column(Gen2LauncherUI.GAP_LG)
+	_card.add_child(_column)
 
 	var head: HBoxContainer = Gen2LauncherUI.row(Gen2LauncherUI.GAP_MD)
-	column.add_child(head)
+	_column.add_child(head)
 	var heading: Label = Gen2LauncherUI.title(_theme, title)
 	heading.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	head.add_child(heading)
@@ -61,12 +76,38 @@ func _build(title: String) -> void:
 	dismiss.pressed.connect(close)
 	head.add_child(dismiss)
 
+	_scroll = Gen2LauncherScroll.create()
+	_column.add_child(_scroll)
 	_body = Gen2LauncherUI.column(Gen2LauncherUI.GAP_MD)
-	column.add_child(_body)
+	_body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_scroll.add_child(_body)
 
 	_actions = Gen2LauncherUI.row(Gen2LauncherUI.GAP_SM)
 	_actions.alignment = BoxContainer.ALIGNMENT_END
-	column.add_child(_actions)
+	_column.add_child(_actions)
+
+	## The window, and the rows themselves: a sheet is filled after it is built,
+	## so the fit is redone when the body grows rather than only when it opens.
+	add_to_group(Gen2FocusGuard.MODAL_GROUP)
+	resized.connect(_fit)
+	_body.minimum_size_changed.connect(_fit)
+	_fit()
+
+
+## Fits the card inside the window: the width first, then whatever height is
+## left for the rows once the title and the actions have taken theirs. The scroll
+## pane asks for exactly its content while that fits, so a sheet small enough to
+## fit is drawn exactly as it was before it could scroll.
+func _fit() -> void:
+	if _card == null or _scroll == null or size == Vector2.ZERO:
+		return
+	var width: float = minf(MAX_WIDTH, size.x - MARGIN * 2.0)
+	_card.custom_minimum_size.x = maxf(width, 0.0)
+	var chrome: float = _card.get_combined_minimum_size().y - _scroll.custom_minimum_size.y
+	var room: float = size.y - MARGIN * 2.0 - chrome
+	_scroll.custom_minimum_size.y = maxf(
+		minf(_body.get_combined_minimum_size().y, room), 0.0
+	)
 
 
 func body() -> VBoxContainer:
