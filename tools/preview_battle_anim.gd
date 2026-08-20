@@ -11,6 +11,10 @@ extends SceneTree
 ## `<move>` is a move number, given to both Pokemon so either side's animation
 ## can be photographed; `<side>` is 0 for the player's own and 1 for the
 ## enemy's; `<frames>` is how many frames into the animation to stop.
+##
+## `<move> 0` photographs the entrance instead, which is `BattleStartMessage` and
+## the opening of `DoBattle` rather than a turn: a wild one, or a trainer's with
+## `<side>` at 1, and `<frames>` counted from the frame the pics stop sliding.
 ## `scene_off` clears the OPTION menu's battle-scene row first, which is what
 ## `CheckBattleScene` reads, and the capture should then show the field
 ## untouched.
@@ -96,12 +100,49 @@ func _process(_delta: float) -> bool:
 	return true
 
 
+## The entrance, stopped [member _frames_in] frames after the slide. `<side>` 1
+## opens a real trainer's fight instead of a wild one, which is the branch with
+## `SFX_SHINE`, a line of its own and two balls thrown rather than one.
+func _drive_entrance() -> bool:
+	if _side_is_enemy:
+		_screen.show_trainer(1, 0)
+	else:
+		_screen.show_matchup(16, 155, 20, 20)
+	while _screen.intro_running():
+		_screen.advance_frame()
+	for _frame: int in _frames_in:
+		if not _screen.frames_running() and _screen.entrance_running():
+			_screen.finish()
+			_screen.advance()
+			continue
+		_screen.advance_frame()
+	return true
+
+
+## Everything `DoBattle` spends before its first menu, so a turn driven after
+## this is a turn rather than the ball still being thrown.
+func _settle_entrance() -> void:
+	for _step: int in MAX_STEPS:
+		if not _screen.frames_running() and not _screen.entrance_running():
+			return
+		if _screen._audio_player != null:
+			_screen._audio_player.stop_all()
+		if _screen.frames_running():
+			_screen.advance_frame()
+			continue
+		_screen.finish()
+		_screen.advance()
+
+
 ## Settles the intro, teaches both Pokemon the move, takes the turn and walks the
 ## event queue to the first animation on the requested side.
 func _drive() -> bool:
+	if _move == 0:
+		return _drive_entrance()
 	_screen.show_matchup(16, 155, 20, 20)
 	while _screen.intro_running():
 		_screen.advance_frame()
+	_settle_entrance()
 
 	var battle: Gen2Battle = _screen._battle
 	for side: int in [Gen2Battle.PLAYER, Gen2Battle.ENEMY]:

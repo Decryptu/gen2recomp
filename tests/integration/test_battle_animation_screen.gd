@@ -41,11 +41,18 @@ func _open_battle() -> void:
 	add_child(_screen)
 	await get_tree().process_frame
 	_screen.show_matchup(16, 155, 5, 5)
-	var guard: int = 4000
-	while _screen.intro_running() and guard > 0:
-		_screen.advance_frame()
+	var guard: int = 8000
+	## The slide, then `BattleStartMessage` and `DoBattle`'s opening: the ball
+	## thrown there is an animation of its own, so it is spent before a test
+	## drives one of its own.
+	while (_screen.frames_running() or _screen.entrance_running()) and guard > 0:
 		guard -= 1
-	## The intro runs on into `BattleMenu`, and a menu owns the joypad. These
+		_screen.advance_frame()
+		if _screen.frames_running() or not _screen.entrance_running():
+			continue
+		_screen.finish()
+		_screen.advance()
+	## The entrance runs on into `BattleMenu`, and a menu owns the joypad. These
 	## tests drive the pump mid-turn instead, so it is closed behind them.
 	_screen._close_battle_menu()
 

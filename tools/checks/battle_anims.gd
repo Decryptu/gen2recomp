@@ -116,6 +116,51 @@ func run(r: RefCounted) -> void:
 		_verify_substitute_pic(game_id, data)
 		_run_every_animation(game_id, data)
 		_play_every_animation(game_id, data)
+		_verify_the_entrance(game_id, data)
+
+
+## `ANIM_SEND_OUT_MON`, which every entrance plays and which nothing else in the
+## corpus reaches with a parameter: `BattleAnim_SendOutMon` is an
+## `anim_if_param_equal` fan, so the sweep above walks its `$0` body alone and
+## the shiny branch is never decoded. Both are run here, on both sides, and the
+## `SFX_SHINE` `BattleStartMessage` plays in front of a trainer's line is looked
+## up in the audio index the way a track is.
+func _verify_the_entrance(game_id: StringName, data: GameData) -> void:
+	var anims: Gen2BattleAnimData = Gen2BattleAnimData.from_game_data(data)
+	if not _r.check(anims != null, "%s: no battle animation data in the cache." % game_id):
+		return
+	for param: int in [Gen2Battle.SEND_OUT_ANIM_NORMAL, Gen2Battle.SEND_OUT_ANIM_SHINY]:
+		for enemy_turn: bool in [false, true]:
+			var player: Gen2BattleAnimPlayer = Gen2BattleAnimPlayer.create(
+				anims, Gen2Battle.ANIM_SEND_OUT_MON, enemy_turn, param
+			)
+			if not _r.check(
+				player != null,
+				"%s: the send-out animation would not start at param %d." % [game_id, param]
+			):
+				continue
+			var frames: int = 0
+			var sprites: int = 0
+			while player.advance_frame() and frames < MAX_FRAMES:
+				frames += 1
+				sprites = maxi(sprites, player.sprites().size())
+			_r.check(
+				not player.failed(),
+				"%s: the send-out animation ran off its region at param %d." % [
+					game_id, param,
+				]
+			)
+			_r.check(
+				sprites > 0,
+				"%s: the send-out animation drew nothing at param %d on the %s side." % [
+					game_id, param, "enemy" if enemy_turn else "player",
+				]
+			)
+	_r.check(
+		not data.world_audio(&"sfx", Gen2BattleScreen.SFX_SHINE).is_empty(),
+		"%s: SFX_SHINE is not in the audio index, so a trainer battle opens silently." % game_id
+	)
+	print("%s: the entrance runs both send-out branches on both sides." % game_id)
 
 
 ## `GetSubstitutePic`, on both sides and all three cartridges: the doll is four

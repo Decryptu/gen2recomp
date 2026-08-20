@@ -69,6 +69,16 @@ const STAT_CHANGE_FAILED: StringName = &"stat_change_failed"
 ## nobody to call back, and the screen has one sentence to say rather than two.
 const WITHDREW: StringName = &"withdrew"
 const SENT_OUT: StringName = &"sent_out"
+## `SendOutMonText`'s four lines, chosen off the opponent's remaining HP: the
+## `line` field of a player [constant SENT_OUT].
+const SEND_OUT_GO: int = 0
+const SEND_OUT_DO_IT: int = 1
+const SEND_OUT_GO_FOR_IT: int = 2
+const SEND_OUT_FOES_WEAK: int = 3
+## `PlayStereoCry` behind an entrance: the cry `CheckFaintedFrzSlp` allows, on
+## the entering side's own tracks. Silent on its own, so nothing is printed for
+## it.
+const CRY: StringName = &"cry"
 ## The player got away, `how` naming the branch: [code]&"battle_type"[/code] for
 ## the two that always escape, [code]&"item"[/code] for the Smoke Ball,
 ## [code]&"speed"[/code], [code]&"odds"[/code] and [code]&"roll"[/code].
@@ -340,6 +350,13 @@ const EVADED: StringName = &"evaded"
 ## "It's protected by mist!" rather than the "won't go any lower" a drop at its
 ## floor gets.
 const MIST_PROTECTED: StringName = &"mist_protected"
+
+## `ANIM_SEND_OUT_MON` (constants/move_constants.asm) and the two
+## `wBattleAnimParam` values every entrance plays it with: `BattleAnim_SendOutMon`
+## branches on the parameter, `$0` being the ball and `$1` the shiny sparkle.
+const ANIM_SEND_OUT_MON: int = 101
+const SEND_OUT_ANIM_NORMAL: int = 0
+const SEND_OUT_ANIM_SHINY: int = 1
 
 ## `PlayFXAnimID`: one animation to spend frames on, at its own index in the
 ## returned list so the ordering stays the cartridge's, as [Gen2HpBarAnimation]
@@ -1205,12 +1222,91 @@ func send_out(
 		"species": current.active_mon().species, "level": current.active_mon().level,
 		"hp": current.active_mon().hp, "max_hp": current.active_mon().max_hp(),
 		"unown_form": unown_form_of(current.active_mon()),
+		"line": send_out_line(side),
 	})
 	(_participants[side] as Dictionary)[index] = true
+	# `SendOutPlayerMon` and `ShowSetEnemyMonAndSendOutAnimation` both run their
+	# animation after the line that announced them, and `ForceEnemySwitch` runs
+	# it before `DraggedOutText`.
+	events.append_array(entrance_events(side))
 	if dragged_by >= 0:
 		events.append({"type": DRAGGED_OUT, "side": dragged_by, "target": side})
 	_spikes_damage(side, events)
 	return events
+
+
+## `SendOutPlayerMon` and `ShowSetEnemyMonAndSendOutAnimation`, which every
+## entrance in the source runs and which are the same three steps on both sides:
+## `ANIM_SEND_OUT_MON`, a second pass of it for a shiny, and the cry
+## `CheckFaintedFrzSlp` allows. Public because a battle's opening entrance is not
+## a [method send_out]: both sides are already standing there when the pics
+## finish sliding, and the screen plays the same list for them.
+##
+## [param ball] is false for `BattleStartMessage`'s wild branch, which is the one
+## entrance with no ball in it: the Pokemon is already standing there when the
+## pics stop sliding, so only the shiny pass and the cry are left of the list.
+func entrance_events(side: int, ball: bool = true) -> Array:
+	var entering: Gen2BattleMon = mon(side)
+	if entering == null:
+		return []
+	var enemy_turn: bool = side == ENEMY
+	var out: Array = []
+	if ball:
+		out.append(_send_out_animation(enemy_turn, SEND_OUT_ANIM_NORMAL))
+	# `BattleCheckPlayerShininess`/`BattleCheckEnemyShininess`, which read the
+	# live DVs: a Transform has already copied the target's over them.
+	if Gen2Stats.is_shiny(entering.dvs):
+		out.append(_send_out_animation(enemy_turn, SEND_OUT_ANIM_SHINY))
+	# `CheckFaintedFrzSlp`: no cry from a fainted, frozen or sleeping Pokemon.
+	if entering.is_fainted() \
+		or (entering.status & (Gen2Status.FREEZE | Gen2Status.SLEEP_MASK)) != 0:
+		return out
+	out.append({"type": CRY, "side": side, "species": entering.species})
+	return out
+
+
+## `Call_PlayBattleAnim` rather than `PlayFXAnimID`: `WaitBGMap` in place of the
+## three-frame delay, which is what `called` says.
+func _send_out_animation(enemy_turn: bool, param: int) -> Dictionary:
+	return {
+		"type": ANIMATION,
+		"index": ANIM_SEND_OUT_MON,
+		"param": param,
+		"after_anim": 0,
+		"enemy_turn": enemy_turn,
+		# `SendOutPlayerMon` clears `wTypeModifier` on its way past; nothing in a
+		# send-out reads it, since only a damage after-anim has a hit sound.
+		"effectiveness": 0,
+		"restore_user_pic": false,
+		"called": true,
+	}
+
+
+## `SendOutMonText`, which picks one of four lines off how much of the opponent
+## is left. Only the player is ever announced this way; the enemy has one line.
+##
+## The arithmetic is the source's own: the remaining HP times 25 over the top
+## quarter of the maximum, both read as the cartridge reads them, so the answer
+## is a percentage that has been through an eight-bit divisor. A maximum below
+## four leaves that divisor zero, which is `docs/bugs_and_glitches.md`'s freeze;
+## nothing here can freeze, so it answers the first line.
+func send_out_line(side: int) -> int:
+	if side != PLAYER:
+		return SEND_OUT_GO
+	var foe: Gen2BattleMon = mon(opponent_of(side))
+	if foe == null or foe.hp <= 0:
+		return SEND_OUT_GO
+	var divisor: int = (foe.max_hp() >> 2) & 0xFF
+	if divisor == 0:
+		return SEND_OUT_GO
+	var percent: int = ((foe.hp * 25) / divisor) & 0xFF
+	if percent >= 70:
+		return SEND_OUT_GO
+	if percent >= 40:
+		return SEND_OUT_DO_IT
+	if percent >= 10:
+		return SEND_OUT_GO_FOR_IT
+	return SEND_OUT_FOES_WEAK
 
 
 ## `SpikesDamage`, behind each entrance's own `SetPlayerTurn`/`SetEnemyTurn`, so

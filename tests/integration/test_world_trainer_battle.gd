@@ -90,7 +90,9 @@ func _trigger_trainer() -> void:
 		if StringName(pending.get("type", &"")) in [&"text", &"button"]:
 			_world_screen._advance_script_input()
 	await get_tree().process_frame
-	assert_not_null(_battle_host())
+	## Only that the overlay opened: the entrance is left where each test wants
+	## it, since driving it here would spend the line one of them reads.
+	assert_not_null(_battle_child())
 
 
 func _battle_child() -> Gen2BattleScreen:
@@ -105,7 +107,30 @@ func _battle_child() -> Gen2BattleScreen:
 ## `BattleIntroSlidingPics` runs before `BattleStartMessage`, so a battle says
 ## nothing until the pics are in place. In play the screen's own frames spend
 ## that; a test that read the box without it would read an empty one.
+##
+## The entrance behind the slide is half frames and half boxes, so both are
+## driven: `DoBattle` reaches its first menu only once the ball has been thrown.
 func _battle_host() -> Gen2BattleScreen:
+	var host: Gen2BattleScreen = _battle_opening()
+	if host == null:
+		return null
+	var guard: int = 4000
+	while (host.frames_running() or host.entrance_running()) and guard > 0:
+		guard -= 1
+		host.advance_frame()
+		if host.frames_running() or not host.entrance_running():
+			continue
+		## The box owes a press rather than frames: the reveal is skipped and the
+		## press given, which is what a player does to a `prompt` line. The test
+		## is left on the first battle menu, never a press past it.
+		host.finish()
+		host.advance()
+	return host
+
+
+## The same overlay with the slide spent and nothing else, which is where the
+## line `BattleStartMessage` prints is still on screen.
+func _battle_opening() -> Gen2BattleScreen:
 	var host: Gen2BattleScreen = _battle_child()
 	if host == null:
 		return null
@@ -129,7 +154,7 @@ func test_trainer_sight_reaches_the_real_battle_overlay() -> void:
 	var before: Dictionary = _world_screen.world_snapshot()
 	await _trigger_trainer()
 
-	var host: Gen2BattleScreen = _battle_host()
+	var host: Gen2BattleScreen = _battle_opening()
 	assert_not_null(host)
 	assert_eq(before["map"], Vector2i(Fixture.MAP_GROUP, Fixture.MAP_NUMBER))
 	assert_eq(before["player_cell"], Vector2i(4, 5))
@@ -145,6 +170,52 @@ func test_trainer_sight_reaches_the_real_battle_overlay() -> void:
 	assert_eq(snapshot["enemy"], Fixture.TRAINER_SPECIES)
 	assert_eq(snapshot["message"], "LEADER RIVAL wants to fight!")
 	assert_eq(snapshot["world_battle_active"], true)
+
+
+## `BattleStartMessage` and `DoBattle`'s opening, in the order they run: the
+## shine, the line the trainer wants to fight on, the enemy's own send-out and
+## the player's, each ball being `ANIM_SEND_OUT_MON`.
+func test_a_trainer_battle_opens_with_the_source_entrance() -> void:
+	await _open_world()
+	await _trigger_trainer()
+	var host: Gen2BattleScreen = _battle_opening()
+	assert_not_null(host)
+	assert_true(host.entrance_running())
+	assert_eq(host.battle_snapshot()["message"], "LEADER RIVAL wants to fight!")
+
+	var lines: Array = []
+	## Whose ball is being thrown, in order. The fixture carries no animation
+	## tables, so the script itself never runs and the event is what says the
+	## cartridge would have played one.
+	var balls: Array = []
+	var guard: int = 4000
+	while (host.frames_running() or host.entrance_running()) and guard > 0:
+		guard -= 1
+		host.advance_frame()
+		var snapshot: Dictionary = host.battle_snapshot()
+		if not lines.has(snapshot["message"]) and snapshot["message"] != "":
+			lines.append(snapshot["message"])
+		var animation: Dictionary = host.animation_snapshot()
+		if bool(animation["running"]) \
+			and int(animation["index"]) == Gen2Battle.ANIM_SEND_OUT_MON:
+			var side: int = Gen2Battle.ENEMY if bool(animation["enemy_turn"]) \
+				else Gen2Battle.PLAYER
+			if balls.is_empty() or balls[-1] != side:
+				balls.append(side)
+		if host.frames_running() or not host.entrance_running():
+			continue
+		host.finish()
+		host.advance()
+
+	assert_eq(lines, [
+		"LEADER RIVAL wants to fight!",
+		"LEADER RIVAL\nsent out\n%s!" % _wild_name(),
+		"Go! %s!" % _wild_name(),
+	])
+	assert_eq(balls, [Gen2Battle.ENEMY, Gen2Battle.PLAYER],
+		"the trainer throws first, and the player after `DoBattle`'s forty frames")
+	## `EmptyBattleTextbox` before the menu `DoBattle` reaches.
+	assert_eq(host.battle_snapshot()["message"], "")
 
 
 ## While the trainer object is mid-step, its presentation offset eases toward
@@ -195,13 +266,14 @@ func test_trainer_approach_step_interpolates_the_objects_position() -> void:
 func test_victory_displays_imported_text_reloads_objects_and_keeps_player_cell() -> void:
 	await _open_world()
 	await _trigger_trainer()
-	var host: Gen2BattleScreen = _battle_host()
+	var host: Gen2BattleScreen = _battle_child()
 	assert_not_null(host)
 
+	## Beaten before the entrance is spent, so `DoBattle` reaches its result
+	## rather than its first menu: nothing reads a button between them.
 	for _hit: int in 12:
 		host.hurt_enemy()
-	host.finish()
-	host.advance()
+	host = _battle_host()
 	var result_text: Dictionary = host.battle_snapshot()
 	assert_eq(result_text["message"], "YOU WON.")
 
@@ -224,7 +296,7 @@ func test_gold_profile_trainer_sight_reaches_the_real_battle_overlay() -> void:
 	var before: Dictionary = _world_screen.world_snapshot()
 	await _trigger_trainer()
 
-	var host: Gen2BattleScreen = _battle_host()
+	var host: Gen2BattleScreen = _battle_opening()
 	assert_not_null(host)
 	assert_eq(before["player_cell"], Vector2i(4, 5))
 	assert_eq(_world_screen.world_snapshot()["player_cell"], Vector2i(5, 5))
@@ -245,13 +317,14 @@ func test_gold_profile_victory_commits_beaten_flag_and_reloads_objects() -> void
 	_data = Fixture.build(&"gold")
 	await _open_world()
 	await _trigger_trainer()
-	var host: Gen2BattleScreen = _battle_host()
+	var host: Gen2BattleScreen = _battle_child()
 	assert_not_null(host)
 
+	## Beaten before the entrance is spent, so `DoBattle` reaches its result
+	## rather than its first menu: nothing reads a button between them.
 	for _hit: int in 12:
 		host.hurt_enemy()
-	host.finish()
-	host.advance()
+	host = _battle_host()
 	assert_eq(host.battle_snapshot()["message"], "YOU WON.")
 
 	host.finish()
@@ -266,15 +339,14 @@ func test_gold_profile_victory_commits_beaten_flag_and_reloads_objects() -> void
 func test_defeat_displays_imported_loss_text_and_uses_save_recovery() -> void:
 	await _open_world(true)
 	await _trigger_trainer()
-	var host: Gen2BattleScreen = _battle_host()
+	var host: Gen2BattleScreen = _battle_child()
 	assert_not_null(host)
 
 	for _hit: int in 12:
 		host.hurt_player()
 	for member: Gen2BattleMon in host._battle.party(Gen2Battle.PLAYER).mons:
 		member.hp = 0
-	host.finish()
-	host.advance()
+	host = _battle_host()
 	assert_eq(host.battle_snapshot()["message"], "YOU LOST.")
 
 	host.finish()
@@ -296,7 +368,7 @@ func test_defeat_displays_imported_loss_text_and_uses_save_recovery() -> void:
 func test_a_battle_is_spent_and_steered_by_the_world_that_opened_it() -> void:
 	await _open_world(true)
 	await _trigger_trainer()
-	var host: Gen2BattleScreen = _battle_host()
+	var host: Gen2BattleScreen = _battle_child()
 	assert_not_null(host)
 	assert_true(_world_screen.battle_active())
 	assert_eq(_world_screen.battles_fought(), 1)
@@ -401,7 +473,7 @@ func test_resolved_wild_encounter_reaches_the_real_battle_overlay() -> void:
 	await get_tree().process_frame
 	await get_tree().process_frame
 
-	var host: Gen2BattleScreen = _battle_host()
+	var host: Gen2BattleScreen = _battle_opening()
 	assert_not_null(host)
 	assert_true(host.is_ready())
 	assert_eq(host.battle_snapshot()["enemy"], Fixture.TRAINER_SPECIES)
@@ -472,11 +544,14 @@ func test_master_ball_capture_runs_through_the_real_battle_overlay() -> void:
 		"You threw a %s!" % _data.item_name(Gen2WorldPartyHost.ITEM_MASTER_BALL)
 	)
 
-	for _message: int in 4:
+	var caught: String = "Gotcha! %s was caught!" % _wild_name()
+	for _message: int in 8:
+		if host.battle_snapshot()["message"] == caught:
+			break
 		host.finish()
 		host.advance()
 
-	assert_eq(host.battle_snapshot()["message"], "Gotcha! %s was caught!" % _wild_name())
+	assert_eq(host.battle_snapshot()["message"], caught)
 	host.finish()
 	host.advance()
 	await get_tree().process_frame
@@ -703,14 +778,13 @@ func test_a_trainer_battle_fights_and_writes_back_with_an_egg_in_the_party() -> 
 	save.party.append(egg)
 
 	await _trigger_trainer()
-	var host: Gen2BattleScreen = _battle_host()
+	var host: Gen2BattleScreen = _battle_child()
 	assert_not_null(host, "an egg in the party must not refuse the battle")
 	assert_eq(host.battle_snapshot()["world_battle_active"], true)
 
 	for _hit: int in 12:
 		host.hurt_enemy()
-	host.finish()
-	host.advance()
+	host = _battle_host()
 	assert_eq(host.battle_snapshot()["message"], "YOU WON.")
 	host.finish()
 	host.advance()
@@ -741,11 +815,10 @@ func test_hp_experience_and_pp_survive_into_the_next_wild_battle() -> void:
 	_world_screen.preview_wild_encounter()
 	await get_tree().process_frame
 	await get_tree().process_frame
-	var host: Gen2BattleScreen = _battle_host()
+	var host: Gen2BattleScreen = _battle_opening()
 	assert_not_null(host)
 	assert_eq(host.battle_snapshot()["message"], "Wild %s appeared!" % _wild_name())
-	host.finish()
-	host.advance()
+	host = _battle_host()
 
 	var player_mon: Gen2BattleMon = host._battle.party(Gen2Battle.PLAYER).mons[0]
 	var max_hp: int = player_mon.max_hp()

@@ -162,6 +162,8 @@ func test_falkners_pidgeotto_replaces_his_pidgey_after_it_faints() -> void:
 	assert_eq(battle.enemy.level, 9)
 	assert_false(battle.must_replace(Gen2Battle.ENEMY))
 
-	var sent_out: Dictionary = events[events.size() - 1]
+	## The entrance's own animation and cry follow the line, so the line is not
+	## the last event any more.
+	var sent_out: Dictionary = events[0]
 	assert_eq(sent_out["type"], Gen2Battle.SENT_OUT)
 	assert_eq(int(sent_out["level"]), 9, "the level battle_screen.gd reads out of the event")

@@ -184,6 +184,9 @@ var _intro: Gen2BattleIntro = null
 ## `InitBattleDisplay` returns before it is called and the box drawn before the
 ## slide is an empty one.
 var _intro_message: String = ""
+## `BattleStartMessage` and `DoBattle`'s own opening, one step per entry, spent
+## once the pics have finished sliding. See [method _build_entrance].
+var _entrance_stages: Array[Dictionary] = []
 ## The text the event pump produced while a bar was still draining. The source
 ## prints it after the bar arrives, since `applydamage` runs before
 ## `criticaltext` and `supereffectivetext`.
@@ -924,6 +927,14 @@ func intro_running() -> bool:
 	return _intro != null
 
 
+## Whether `BattleStartMessage` and `DoBattle`'s opening still owe something: a
+## line to press past, frames to spend, or a ball to throw. A driver settling a
+## battle to its first menu waits on this as well as on [method frames_running],
+## because two of the steps are a box rather than a run of frames.
+func entrance_running() -> bool:
+	return not _entrance_stages.is_empty()
+
+
 ## `InitBattleDisplay`: the display a battle opens with, and the slide that puts
 ## it there. Every caller that has just built a battle reaches this, which is the
 ## same order the source uses, `InitBattleDisplay` before `BattleStartMessage`.
@@ -946,6 +957,7 @@ func _init_battle_display() -> void:
 	_refresh_exp_bar()
 	_intro = Gen2BattleIntro.for_data(_data)
 	_intro_message = ""
+	_entrance_stages = []
 	_push_view()
 
 
@@ -961,13 +973,115 @@ func advance_intro() -> bool:
 		# then `BattleStartMessage`.
 		_intro = null
 		_push_view()
-		if not _intro_message.is_empty():
-			var text: String = _intro_message
-			_intro_message = ""
-			show_message(text)
+		_build_entrance()
+		_advance_entrance()
 		return true
 	_push_view()
 	return true
+
+
+## `BattleStartMessage` and the opening of `DoBattle`, which the sliding pics run
+## straight into and which is the whole of a battle's entrance.
+##
+## One stage per step, spent in order by [method _advance_entrance]:
+##
+## | Stage | Trainer | Wild |
+## |---|---|---|
+## | 1 | `SFX_SHINE`, `WaitSFX`, twenty frames | the shiny pass and the cry |
+## | 2 | the start line | the start line |
+## | 3 | `ShowBattleTextEnemySentOut` and the enemy's own entrance | - |
+## | 4 | `DoBattle`'s forty frames, `SendOutMonText` and the ball | the same |
+##
+## The one part of `BattleStartMessage` not here is `AnimateFrontpic`: the
+## cartridge wobbles the enemy's picture and plays the cry inside that animation,
+## and this project imports neither the pic animations nor their pointers, so the
+## cry is played on its own the way `.cry_no_anim` plays it.
+func _build_entrance() -> void:
+	_entrance_stages = []
+	var text: String = _intro_message
+	_intro_message = ""
+	if _battle == null or _world_battle_tutorial:
+		if not text.is_empty():
+			show_message(text)
+		return
+
+	var trainer: bool = _enemy_trainer_class > 0
+	if trainer:
+		_entrance_stages.append({
+			"sfx": SFX_SHINE, "wait_sfx": true, "delay": TRAINER_START_FRAMES,
+		})
+	else:
+		# `BattleCheckEnemyShininess` and the cry, both in front of the line.
+		_entrance_stages.append({"events": _battle.entrance_events(Gen2Battle.ENEMY, false)})
+	_entrance_stages.append({"message": text})
+	if trainer:
+		_entrance_stages.append({
+			"message": "%s\nsent out\n%s!" % [_enemy_battler_label(), _name_of(_enemy)],
+			"prompt": false,
+			"events": _battle.entrance_events(Gen2Battle.ENEMY),
+		})
+	_entrance_stages.append({
+		"delay": PLAYER_ENTRANCE_FRAMES,
+		"message": SEND_OUT_LINES[
+			clampi(_battle.send_out_line(Gen2Battle.PLAYER), 0, SEND_OUT_LINES.size() - 1)
+		] % _name_of(_player),
+		"prompt": false,
+		"events": _battle.entrance_events(Gen2Battle.PLAYER),
+	})
+
+
+## One step of the entrance, in the order the fields are read here. Answers
+## whether it took the turn, so the caller can run on when the list is empty.
+func _advance_entrance() -> bool:
+	## A stage's own events are still being shown one line at a time; the next
+	## stage waits for the last of them.
+	if not _pending.is_empty():
+		return false
+	while not _entrance_stages.is_empty():
+		var stage: Dictionary = _entrance_stages[0]
+		var sfx: int = int(stage.get("sfx", 0))
+		var delay: int = int(stage.get("delay", 0))
+		var wait_sfx: bool = bool(stage.get("wait_sfx", false))
+		if sfx > 0 or delay > 0 or wait_sfx:
+			stage["sfx"] = 0
+			stage["delay"] = 0
+			stage["wait_sfx"] = false
+			_anim_plan = []
+			if sfx > 0:
+				_step(ANIM_SFX, {"sfx": sfx})
+			if wait_sfx:
+				_step(ANIM_WAIT_SFX, {})
+			if delay > 0:
+				_step(ANIM_DELAY, {"frames": delay})
+			_run_next_anim_step()
+			return true
+		var message: String = String(stage.get("message", ""))
+		if not message.is_empty():
+			var prompt: bool = bool(stage.get("prompt", true))
+			stage["message"] = ""
+			show_message(message, prompt)
+			## A `prompt` line owes a press. The two send-out lines end in `done`
+			## instead, and their animation is played underneath them.
+			if prompt:
+				return true
+		var events: Array = stage.get("events", []) as Array
+		_entrance_stages.pop_front()
+		if not events.is_empty():
+			_pending = events
+			_show_next_event()
+			return true
+	return false
+
+
+## `Battle_GetTrainerName`, which is the class and the trainer's own name. A wild
+## battle has neither, and the one line that names an opponent without a trainer
+## behind it is a link battle's, which this project does not open.
+func _enemy_battler_label() -> String:
+	if _enemy_trainer_class <= 0 or _data == null:
+		return "Enemy"
+	return "%s %s" % [
+		_data.trainer_name(_enemy_trainer_class), _enemy_trainer_name(),
+	]
 
 
 ## One hardware frame of every running bar. Public so a test or a screenshot
@@ -1017,6 +1131,9 @@ const ANIM_RESTORE_HUD: StringName = &"restore_hud"
 const ANIM_WAIT_SFX: StringName = &"wait_sfx"
 const ANIM_HIT_SOUND: StringName = &"hit_sound"
 const ANIM_APPEAR_USER: StringName = &"appear_user"
+## `PlaySFX` on its own, which only the entrance uses: an animation's own sounds
+## come out of its script.
+const ANIM_SFX: StringName = &"sfx"
 
 ## Whose square is showing the substitute's doll rather than the mon itself,
 ## keyed by [constant Gen2Battle.PLAYER] and [constant Gen2Battle.ENEMY].
@@ -1033,6 +1150,11 @@ var _substitute_pic: Dictionary = {Gen2Battle.PLAYER: false, Gen2Battle.ENEMY: f
 ## battle-scene, hud and after-anim half of `BattleAnimRunScript`.
 const ANIM_MOVE_LIMIT: int = 0x100
 
+## `SendOutMonText`'s four texts, in [constant Gen2Battle.SEND_OUT_GO]'s order.
+const SEND_OUT_LINES: Array[String] = [
+	"Go! %s!", "Do it! %s!", "Go for it,\n%s!", "Your foe's weak!\nGet'm, %s!",
+]
+
 ## `PlayHitSound`'s three effects, by their `constants/sfx_constants.asm`
 ## numbers, which are the same in both pins.
 const SFX_NOT_VERY_EFFECTIVE: int = 0xAB
@@ -1047,6 +1169,14 @@ const SFX_SUPER_EFFECTIVE: int = 0xAD
 ## `AnimateExpBar`'s two: `.PlayExpBarSound`'s at the head of every segment, and
 ## the one `.LoopLevels` and `.skip_exp_bar_animation` both play before their
 ## grew-to-level line.
+## `BattleStartMessage`'s own, in front of a trainer's line.
+const SFX_SHINE: int = 0x5E
+
+## The twenty frames `BattleStartMessage` spends after `SFX_SHINE`, and the forty
+## `DoBattle` spends before the player's Pokemon is sent out.
+const TRAINER_START_FRAMES: int = 20
+const PLAYER_ENTRANCE_FRAMES: int = 40
+
 const SFX_EXP_BAR: int = 0x8C
 const SFX_HIT_END_OF_EXP_BAR: int = 0xB6
 
@@ -1089,8 +1219,10 @@ func _begin_animation(event: Dictionary) -> void:
 	# `PlayFXAnimID`'s own `ld c, 3 / call DelayFrames`, then `_PlayBattleAnim`'s
 	# six, `BattleAnimAssignPals`/`..._RequestPals` and one more. The two pal
 	# calls write nothing here: the palettes an animation remaps are the battle's
-	# own and are read back off the background every frame.
-	_step(ANIM_DELAY, {"frames": 3 + 6 + 1})
+	# own and are read back off the background every frame. An entrance comes
+	# through `Call_PlayBattleAnim` instead, whose `WaitBGMap` is one frame.
+	var lead: int = 1 if bool(event.get("called", false)) else 3
+	_step(ANIM_DELAY, {"frames": lead + 6 + 1})
 
 	if is_move:
 		if Gen2OptionsStore.current().battle_scene:
@@ -1183,6 +1315,8 @@ func _run_next_anim_step() -> void:
 						_anim_plan.push_front(step)
 						_anim_delay = 1
 						return
+			ANIM_SFX:
+				_play_anim_sound(int(step["sfx"]))
 			ANIM_HIT_SOUND:
 				_play_hit_sound()
 			ANIM_SCRIPT:
@@ -1300,6 +1434,20 @@ func _play_anim_cry() -> void:
 		return
 	_audio_player.play_record(
 		record, &"cry", _audio_assets(), false, cry_tracks(enemy_turn)
+	)
+
+
+## `PlayStereoCry` behind an entrance, which names its own species rather than
+## reading whoever is on the field: the event is spent where the source plays it,
+## which is before the panel it came with has been drawn.
+func _play_entrance_cry(side: int, species: int) -> void:
+	if _audio_player == null or _data == null:
+		return
+	var record: Dictionary = _data.species_cry(species)
+	if record.is_empty():
+		return
+	_audio_player.play_record(
+		record, &"cry", _audio_assets(), false, cry_tracks(side == Gen2Battle.ENEMY)
 	)
 
 
@@ -1465,7 +1613,10 @@ func _clear_level_up_box() -> void:
 	_refresh_level_up_box()
 
 
-func show_message(text: String) -> void:
+## [param prompt] is the text's own terminator: `prompt` waits for a press and
+## `done` does not, which is the difference between the line a battle opens with
+## and the two send-out lines an animation is played underneath.
+func show_message(text: String, prompt: bool = true) -> void:
 	# `BattleStartMessage` is called after `InitBattleDisplay` returns, so
 	# nothing is said while the pics are still sliding: the box drawn before the
 	# slide is an empty one.
@@ -1475,7 +1626,7 @@ func show_message(text: String) -> void:
 	_last_message = text
 	## `StdBattleTextbox` blocks on a press for a line it printed; an empty box
 	## is the one a menu is drawn over and owes nothing.
-	_message_awaits_press = not text.is_empty()
+	_message_awaits_press = prompt and not text.is_empty()
 	if _box != null:
 		_box.show_text(text)
 
@@ -1508,6 +1659,7 @@ func battle_snapshot() -> Dictionary:
 		"player": _player,
 		"message": _last_message,
 		"completion_sent": _world_battle_completion_sent,
+		"entrance_running": entrance_running(),
 		"switch_stage": _switch_stage,
 		"switch_cursor": (
 			_switch_offer.selected_index() if _switch_offer != null
@@ -2210,7 +2362,11 @@ func _continue_after_messages() -> void:
 		_held_message = ""
 		show_message(held)
 		return
-	if _message_awaits_press or not _intro_message.is_empty():
+	if _message_awaits_press:
+		return
+	## `BattleStartMessage` and `DoBattle`'s opening: each step is either frames
+	## or a line, so the pump and the press both arrive back here for the next.
+	if _advance_entrance():
 		return
 	## Nothing is left to print, so the line the box stood beside is gone even
 	## though no event was popped to take it away.
@@ -3201,6 +3357,8 @@ func _apply_event_state(event: Dictionary) -> void:
 			_begin_faint(int(event["side"]))
 		Gen2Battle.SUBSTITUTE_PIC:
 			_set_substitute_pic(int(event["side"]), bool(event["raised"]))
+		Gen2Battle.CRY:
+			_play_entrance_cry(int(event["side"]), int(event["species"]))
 		Gen2Battle.SENT_OUT:
 			# The pic and the panel both change, and both come out of the event
 			# rather than out of the party, for the same reason every other number
@@ -3333,7 +3491,12 @@ func _describe(event: Dictionary) -> String:
 		Gen2Battle.SENT_OUT:
 			if side == Gen2Battle.ENEMY:
 				return "Enemy sent out %s!" % _name_of(int(event["species"]))
-			return "Go! %s!" % _name_of(int(event["species"]))
+			return SEND_OUT_LINES[
+				clampi(int(event.get("line", Gen2Battle.SEND_OUT_GO)), 0, SEND_OUT_LINES.size() - 1)
+			] % _name_of(int(event["species"]))
+		Gen2Battle.CRY:
+			# `PlayStereoCry` prints nothing.
+			return ""
 		Gen2Battle.EXP_GAINED:
 			return "%s gained %d EXP. Points!" % [_name_of(int(event["species"])), int(event["amount"])]
 		Gen2Battle.STAT_EXP_GAINED:
