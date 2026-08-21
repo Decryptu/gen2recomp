@@ -11,9 +11,6 @@ signal item_used(item: int, target: int)
 ## event rather than the battle result. The host owns the flag, since the battle
 ## engine is scene-free and holds no world state.
 signal enemy_seen(species: int)
-## `.proceed`'s `SetSeenAndCaughtMon` on the species a party member became. The
-## write is the world's, the way `enemy_seen`'s is.
-signal party_evolved(species: int)
 
 ## Owns the battle, the events and the text box; decides nothing about how they
 ## are drawn. A [Gen2Battle] resolves the turn and answers with events; this
@@ -2926,8 +2923,13 @@ func _finish_world_battle() -> void:
 		"request": _world_battle_request.duplicate(true),
 		"save_written": _save_written,
 	}
-	if outcome == Gen2WorldBattleAdapter.OUTCOME_WON and _battle.pay_day_money > 0:
-		result["pay_day_money"] = _battle.pay_day_money
+	if outcome == Gen2WorldBattleAdapter.OUTCOME_WON:
+		if _battle.pay_day_money > 0:
+			result["pay_day_money"] = _battle.pay_day_money
+		## `ExitBattle`'s `and $f / ret nz`: `wEvolvableFlags` is only ever read
+		## after a battle that was WON, so a fight that was lost or run from
+		## carries nothing for the overworld's own `EvolveAfterBattle` to walk.
+		result["evolvable"] = _battle.evolvable_indices()
 	if outcome == Gen2WorldBattleAdapter.OUTCOME_LOST:
 		result["recovery"] = _world_battle_recovery.duplicate(true)
 	_world_battle_completion_sent = true
@@ -3818,11 +3820,6 @@ func _apply_event_state(event: Dictionary) -> void:
 			# which answers correctly on its own even when the index that gained
 			# it is a benched participant rather than the one on screen.
 			_refresh_exp_bar()
-		Gen2Battle.EVOLVED:
-			# The dex write is all this screen owes the event: nothing here draws
-			# `EvolutionAnimation`, and the panel's own species follows the next
-			# `_push_view`.
-			party_evolved.emit(int(event["new_species"]))
 		Gen2Battle.GREW_LEVEL:
 			# The level number in the panel belongs to whoever is on screen, so it
 			# only moves when the index that grew is the one currently active: a

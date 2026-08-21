@@ -569,9 +569,10 @@ func _use_stone_on_first_member(host: Gen2StartMenuScreen) -> void:
 	await get_tree().process_frame
 
 
-## `EvolvingText` and `CongratulationsYourPokemonText`, which the field stone had
-## none of: it ended at "MOON STONE was used." and never said what happened.
-func test_a_field_stone_says_the_mon_is_evolving_and_what_it_became() -> void:
+## `EvoStoneEffect` reaches `EvolvePokemon`, so a field stone runs the same
+## `EvolutionAnimation` the after-battle pass does: the pack prints no box of its
+## own, and every line of the sequence belongs to that screen.
+func test_a_field_stone_opens_the_evolution_screen_over_the_pack() -> void:
 	_write_stone_item()
 	await _open_world()
 	var host: Gen2StartMenuScreen = await _open_stone_pack()
@@ -579,17 +580,20 @@ func test_a_field_stone_says_the_mon_is_evolving_and_what_it_became() -> void:
 	var nickname: String = save.party[0].nickname
 	await _use_stone_on_first_member(host)
 
-	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_RESULT)
+	var screen: Gen2EvolutionScreen = _world_screen.get("_evolution_host")
+	assert_not_null(screen, "the animation screen is open")
 	assert_eq(save.party[0].species, EVOLVED_SPECIES)
-	var result: String = String(host.get("_pack_result"))
-	assert_true(result.contains("%s is evolving!" % nickname), result)
-	assert_true(result.contains("evolved into"), result)
+	assert_eq(screen.remaining(), 1)
+	## `.pressed_b` reads `wForceEvolution`, which `EvoStoneEffect` set: B cannot
+	## cancel a stone's evolution.
+	assert_false(bool(screen.current_plan().get("can_cancel", true)))
+	assert_true(_lines_of(screen).contains("%s is evolving!" % nickname), "the first box")
+	_settle_evolution()
 
 
 ## `GetNickname` / `CopyName1` run before the species is replaced, and BOTH
 ## boxes read that buffer: an un-nicknamed Pokemon is named by what it WAS on the
-## way in, never by what it became. Reading it back off the party row said
-## "What? <NEW> is evolving!" instead.
+## way in, never by what it became.
 func test_the_evolving_line_names_what_the_mon_was_not_what_it_became() -> void:
 	_write_stone_item()
 	await _open_world()
@@ -602,12 +606,37 @@ func test_the_evolving_line_names_what_the_mon_was_not_what_it_became() -> void:
 	var host: Gen2StartMenuScreen = await _open_stone_pack()
 	await _use_stone_on_first_member(host)
 
-	var result: String = String(host.get("_pack_result"))
-	assert_true(result.contains("What? %s is evolving!" % before), result)
-	assert_true(result.contains("Your %s evolved into %s!" % [before, after]), result)
-	assert_false(result.contains("What? %s" % after), result)
+	var screen: Gen2EvolutionScreen = _world_screen.get("_evolution_host")
+	assert_not_null(screen)
+	var opening: String = _lines_of(screen)
+	assert_true(opening.contains("What? %s is evolving!" % before), opening)
+	assert_false(opening.contains("What? %s" % after), opening)
 	## `UpdateSpeciesNameIfNotNicknamed` still runs, after both boxes.
 	assert_eq(save.party[0].nickname, after)
+	_settle_evolution()
+
+
+## Runs the open evolution screen to its end, pressing A for every page it waits
+## on, the way the overworld's own pump and funnel do.
+func _settle_evolution() -> void:
+	for _frame: int in 4000:
+		if _world_screen.get("_evolution_host") == null:
+			return
+		_world_screen.advance_frame()
+		var screen: Gen2EvolutionScreen = _world_screen.get("_evolution_host")
+		## The frame that closed it has already run whatever was waiting behind
+		## it, so a press here would answer that instead of the box.
+		if screen == null:
+			return
+		if screen.awaiting_press():
+			_world_screen.press_button(Gen2Button.A)
+	fail_test("the evolution screen never closed")
+
+
+## The whole box as one string, so a test asserts what it says rather than how
+## the lines were wrapped.
+func _lines_of(screen: Gen2EvolutionScreen) -> String:
+	return " ".join(screen.text_lines())
 
 
 ## `EvolveAfterBattle` calls `LearnMove` over the new learnset, so a move the new
@@ -619,11 +648,10 @@ func test_an_evolution_offers_its_new_move_and_a_full_moveset_opens_forget() -> 
 	var host: Gen2StartMenuScreen = await _open_stone_pack()
 	await _use_stone_on_first_member(host)
 
-	## The evolution's own box is pressed past first, page by page, the way
-	## PrintText waits; the offer follows its last page instead of the pack.
-	while host.get("_mode") == Gen2StartMenuScreen.Mode.PACK_RESULT:
-		host.handle_button(Gen2Button.A)
-		await get_tree().process_frame
+	## The animation runs to its end first: the offer is `LearnLevelMoves`, which
+	## the source reaches after `EvolutionAnimation` has returned.
+	_settle_evolution()
+	await get_tree().process_frame
 	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_FORGET_ASK)
 	assert_true(String(host.call("box_text")).contains("EMBER"), String(host.call("box_text")))
 

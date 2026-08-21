@@ -9249,7 +9249,8 @@ func _party_species(save: Gen2SaveData) -> Array:
 ## offered into a full moveset is left in the engine's queue, which is the same
 ## answer as declining it.
 func _award_battle_experience(
-	world: Gen2WorldAPI, save: Gen2SaveData, battle: Gen2Battle, player_party: Gen2Party
+	data: GameData, world: Gen2WorldAPI, save: Gen2SaveData, battle: Gen2Battle,
+	player_party: Gen2Party
 ) -> Dictionary:
 	if battle == null or player_party == null or save == null:
 		return {"ok": true, "awarded": 0, "grew": []}
@@ -9267,11 +9268,23 @@ func _award_battle_experience(
 					"species": int(event.get("species", 0)),
 					"level": int(event.get("new_level", 0)),
 				})
-			Gen2Battle.EVOLVED:
-				grew.append({
-					"species": int(event.get("new_species", 0)),
-					"from": int(event.get("old_species", 0)),
-				})
+	## `ExitBattle`'s own order: the party is written back first, and the evolution
+	## pass then walks it on the overworld. Nothing here can press B, so every plan
+	## proceeds, which is what the cartridge does when nobody touches the pad.
+	for plan: Dictionary in Gen2Evolution.after_battle(
+		data, save, battle.evolvable_indices(), world.object_time_of_day
+	):
+		var applied: Dictionary = Gen2WorldPartyHost.apply_evolution(
+			data, save.party[int(plan["index"])], plan["row"]
+		)
+		if applied.is_empty():
+			continue
+		world.state.set_species_caught(int(applied["new_species"]))
+		grew.append({
+			"species": int(applied["new_species"]),
+			"from": int(applied["old_species"]),
+		})
+		_mirror_party(world, save)
 	return {"ok": true, "awarded": awarded, "grew": grew}
 
 
@@ -9586,7 +9599,7 @@ func _drain_story(
 					break
 				var enemy_party: Gen2Party = prepared.get("enemy_party", null)
 				var levelled: Dictionary = _award_battle_experience(
-					world, save, prepared.get("battle", null), player_party
+					data, world, save, prepared.get("battle", null), player_party
 				)
 				if not bool(levelled.get("ok", true)):
 					last_reason = String(levelled.get("reason", "experience write-back failed"))

@@ -23,6 +23,11 @@ signal closed
 ## The payload is the resolved effect, because the screen hosting the world is
 ## the one that can cast a rod or draw a warp.
 signal field_item_used(request: Dictionary)
+
+## `EvoStoneEffect`'s own `EvolvePokemon`: the pack has already written the party
+## row, and the animation belongs to the screen the overworld hosts. [param after]
+## is this menu's own continuation, run when that screen closes.
+signal evolution_animation_requested(plan: Dictionary, after: Callable)
 ## `PlaySFX`, which this screen has no driver of its own for: the world that
 ## hosts it owns the player. `SFX_SAVE` is the only one it asks for.
 signal sfx_requested(sfx: int, waited: bool)
@@ -1418,9 +1423,18 @@ func _use_selected_item(party_index: int) -> void:
 	if StringName(result.get("effect", &"")) == &"evolution":
 		_forget_party_index = party_index
 		_evolution_offers.assign(result.get("move_offers", []))
-		_show_pack_result(
-			_use_summary(item, result), true, _offer_next_evolution_move
-		)
+		## `EvoStoneEffect` reaches `EvolvePokemon` with `wForceEvolution` set, so
+		## the same `EvolutionAnimation` runs and its B does nothing: the whole
+		## presentation is the screen the after-battle pass uses, and this path
+		## prints no box of its own.
+		evolution_animation_requested.emit({
+			"index": party_index,
+			"old_species": int(result.get("old_species", 0)),
+			"new_species": int(result.get("new_species", 0)),
+			"evolving_name": String(result.get("evolving_name", "")),
+			"statused": Gen2Evolution.is_statused(_pack_save.party[party_index]),
+			"can_cancel": false,
+		}, _offer_next_evolution_move)
 		return
 	_show_pack_result(_use_summary(item, result), true)
 
@@ -1460,18 +1474,6 @@ func _use_summary(item: Dictionary, result: Dictionary) -> String:
 	if int(result.get("repel_steps", -1)) >= 0:
 		return "%s will repel weak Pokemon for %d steps." % [
 			item_name, int(result.get("repel_steps", 0)),
-		]
-	if StringName(result.get("effect", &"")) == &"evolution" and _data != null:
-		## Both boxes read wStringBuffer2, which `GetNickname` filled before the
-		## species was replaced, so neither may be built from the party row: it
-		## already carries the new species and, for an un-nicknamed Pokemon, the
-		## new name.
-		var nickname: String = String(result.get("evolving_name", ""))
-		return "%s %s" % [
-			Gen2Evolution.evolving_text(nickname),
-			Gen2Evolution.evolved_text(nickname, String(
-				_data.species(int(result.get("new_species", 0))).get("name", "")
-			)),
 		]
 	var healed: int = int(result.get("healed", 0))
 	if healed > 0:

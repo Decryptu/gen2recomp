@@ -137,3 +137,21 @@ static func to_battle_party(data: GameData, save: Gen2SaveData) -> Gen2Party:
 			return null
 		members.append(mon)
 	return Gen2Party.create(members)
+
+
+## Where battle-party slot [param battle_index] sits in [param save]'s party.
+## `CheckIfCurPartyMonIsFitToFight` refuses an EGG as a combatant but leaves it
+## in its party slot, so [method to_battle_party] skips it and the two lists
+## stop lining up the moment a party carries one. -1 when there is no such slot.
+static func save_party_index(save: Gen2SaveData, battle_index: int) -> int:
+	if save == null or battle_index < 0:
+		return -1
+	var seen: int = 0
+	for index: int in save.party.size():
+		var mon: Gen2SaveMon = save.party[index]
+		if mon != null and mon.is_egg:
+			continue
+		if seen == battle_index:
+			return index
+		seen += 1
+	return -1

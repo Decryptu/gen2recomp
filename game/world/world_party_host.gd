@@ -21,6 +21,10 @@ const ITEM_POKE_BALL: int = 0x05
 ## The Bug Contest's own ball. It is never in the bag: `wParkBallsRemaining` is
 ## what holds it and `BattleMenu_Pack`'s contest branch loads it by name.
 const ITEM_PARK_BALL: int = 0xB1
+## `ConvertBerriesToBerryJuice`'s own three constants.
+const ITEM_BERRY: int = 0xAD
+const ITEM_BERRY_JUICE: int = 0x8B
+const SHUCKLE: int = 0xD5
 
 ## HAPPINESS_THRESHOLD_1 and HAPPINESS_THRESHOLD_2
 ## (constants/pokemon_data_constants.asm), which pick a HappinessChanges column.
@@ -908,6 +912,21 @@ static func _apply_item_evolution(data: GameData, mon: Gen2SaveMon, item: int) -
 			return {}
 	if row.is_empty():
 		return {}
+	return apply_evolution(data, mon, row)
+
+
+## `.proceed` and everything past it: the species is replaced, `CalcMonStats`
+## adds the max-HP delta, `UpdateSpeciesNameIfNotNicknamed` renames an
+## un-nicknamed row and `LearnLevelMoves` offers what the new species knows at
+## the level that triggered it. Shared, because the master loop reaches it from a
+## level evolution and `EvoStoneEffect` from an item, and only the predicate in
+## front of it differs.
+static func apply_evolution(data: GameData, mon: Gen2SaveMon, row: Dictionary) -> Dictionary:
+	if data == null or mon == null or row.is_empty():
+		return {}
+	var battle_mon: Gen2BattleMon = Gen2SaveBattleAdapter.to_battle_mon(data, mon)
+	if battle_mon == null:
+		return {}
 	var result: Dictionary = Gen2Evolution.evolve(battle_mon, int(row.get("target", 0)))
 	if result.is_empty():
 		return {}
@@ -1115,3 +1134,147 @@ static func _world_name(data: GameData, bank: int, address: int) -> String:
 
 static func _failure(reason: StringName, details: Dictionary) -> Dictionary:
 	return {"ok": false, "handled": false, "reason": reason, "details": details.duplicate(true)}
+
+
+## `GivePokerusAndConvertBerries`, the line `ExitBattle` runs one after
+## `EvolveAfterBattle`. Both halves are gated on
+## `STATUSFLAGS2_REACHED_GOLDENROD_F`, and both are pure party writes, so the
+## whole routine is one call the world boundary makes on a battle it won.
+##
+## Returns what changed, for a caller that wants to say so: an empty dictionary
+## when neither half did anything.
+static func give_pokerus_and_convert_berries(
+	data: GameData, save: Gen2SaveData, world: Gen2WorldAPI,
+	random: RandomNumberGenerator
+) -> Dictionary:
+	if save == null or random == null:
+		return {}
+	var reached: bool = world != null and world.state != null \
+		and world.state.reached_goldenrod(Gen2WorldState.is_crystal_profile(data))
+	var out: Dictionary = {}
+	var juice: int = _convert_berries_to_berry_juice(save, reached, random)
+	if juice >= 0:
+		out["berry_juice_index"] = juice
+	var infected: Dictionary = _give_pokerus(save, reached, random)
+	if not infected.is_empty():
+		out.merge(infected)
+	return out
+
+
+## `ConvertBerriesToBerryJuice`: a 1-in-16 roll, then the first SHUCKLE in the
+## party holding a BERRY. The party index it converted, or -1.
+static func _convert_berries_to_berry_juice(
+	save: Gen2SaveData, reached_goldenrod: bool, random: RandomNumberGenerator
+) -> int:
+	if not reached_goldenrod or _random_byte(random) >= 16:
+		return -1
+	for index: int in save.party.size():
+		var mon: Gen2SaveMon = save.party[index]
+		if mon == null or mon.species != SHUCKLE or mon.item != ITEM_BERRY:
+			continue
+		mon.item = ITEM_BERRY_JUICE
+		return index
+	return -1
+
+
+## The rest of `GivePokerusAndConvertBerries`: an active infection anywhere in
+## the party is sampled for a spread and nothing else can happen, which is why
+## no second Pokemon catches it de novo while one is still carrying it.
+static func _give_pokerus(
+	save: Gen2SaveData, reached_goldenrod: bool, random: RandomNumberGenerator
+) -> Dictionary:
+	var count: int = save.party.size()
+	for index: int in count:
+		var mon: Gen2SaveMon = save.party[index]
+		if mon != null and (mon.pokerus & 0x0F) != 0:
+			return _try_spread_pokerus(save, index, random)
+	if not reached_goldenrod:
+		return {}
+	## `Random` fills two bytes and both are read: 3 of 65,536.
+	if _random_byte(random) != 0 or _random_byte(random) >= 3:
+		return {}
+	var target: int = _random_byte(random) & 0x7
+	while target >= count:
+		target = _random_byte(random) & 0x7
+	var mon: Gen2SaveMon = save.party[target]
+	if mon == null or (mon.pokerus & 0xF0) != 0:
+		return {}
+	## `.randomPokerusLoop` samples the strain and the duration out of one byte,
+	## and rerolls a zero because that byte is the whole of both.
+	var roll: int = _random_byte(random)
+	while roll == 0:
+		roll = _random_byte(random)
+	mon.pokerus = pokerus_from_roll(roll)
+	return {"pokerus_index": target, "pokerus": mon.pokerus}
+
+
+## `.TrySpreadPokerus`: a 1-in-3 roll, then a walk away from the carrier in one
+## direction. A party member that has already recovered (`and $3` zero with a
+## strain still on it) stops the walk rather than being skipped.
+static func _try_spread_pokerus(
+	save: Gen2SaveData, carrier: int, random: RandomNumberGenerator
+) -> Dictionary:
+	if _random_byte(random) >= 85:
+		return {}
+	var count: int = save.party.size()
+	if count <= 1:
+		return {}
+	var strain_source: int = save.party[carrier].pokerus
+	## `ld a, b / cp 2 / jr c`: b is how many party members are left including
+	## the carrier, so a carrier in the last slot can only walk backwards.
+	var forwards: bool = carrier < count - 1 and _random_byte(random) >= 129
+	var step: int = 1 if forwards else -1
+	var index: int = carrier
+	while true:
+		index += step
+		if index < 0 or index >= count:
+			return {}
+		var mon: Gen2SaveMon = save.party[index]
+		if mon == null:
+			return {}
+		if mon.pokerus == 0:
+			mon.pokerus = pokerus_spread_from(strain_source)
+			return {"pokerus_index": index, "pokerus": mon.pokerus}
+		if (mon.pokerus & 0x3) == 0:
+			return {}
+		strain_source = mon.pokerus
+	return {}
+
+
+## `.load_pkrs`: one byte is the whole of both halves. A high nibble of zero is
+## strain zero, and the duration is read off the strain rather than off the byte,
+## which is what the shared `and $3 / inc a` after the `swap b` does.
+static func pokerus_from_roll(roll: int) -> int:
+	var strain: int = 0 if (roll & 0xF0) == 0 else (roll & 0x7) + 1
+	return ((strain << 4) & 0xF0) + (strain & 0x3) + 1
+
+
+## `.infectMon`: the carrier's strain is kept and the duration is derived from
+## that strain, so a spread never carries the carrier's remaining days.
+static func pokerus_spread_from(carrier: int) -> int:
+	return (carrier & 0xF0) + ((carrier >> 4) & 0x3) + 1
+
+
+## One `Random` byte. The cartridge's own generator is not modelled; what
+## matters at every call site above is the distribution and the number of draws.
+static func _random_byte(random: RandomNumberGenerator) -> int:
+	return random.randi_range(0, 0xFF)
+
+
+## `ApplyPokerusTick`, which `CheckPokerusTick` runs with the days elapsed since
+## the timer's start day: the low nibble is days remaining and floors at zero,
+## and the strain nibble is kept, which is what stops a recovered Pokemon from
+## catching it again. True when a byte moved.
+static func apply_pokerus_tick(save: Gen2SaveData, days: int) -> bool:
+	if save == null or days <= 0:
+		return false
+	var changed: bool = false
+	for mon: Gen2SaveMon in save.party:
+		if mon == null:
+			continue
+		var remaining: int = mon.pokerus & 0x0F
+		if remaining == 0:
+			continue
+		mon.pokerus = (mon.pokerus & 0xF0) + maxi(remaining - days, 0)
+		changed = true
+	return changed

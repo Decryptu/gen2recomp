@@ -128,3 +128,75 @@ static func evolve(mon: Gen2BattleMon, target: int) -> Dictionary:
 	# `evolve.asm` adds the max-HP delta, preserving damage through evolution.
 	mon.hp = clampi(old_hp + mon.max_hp() - before_max_hp, 0, mon.max_hp())
 	return {"old_species": old_species, "new_species": target}
+
+
+## `StoppedEvolvingText`, printed by `CancelEvolution` before the master loop
+## moves on to the next party member.
+static func stopped_evolving_text(mon_name: String) -> String:
+	return "Huh? %s stopped evolving!" % mon_name
+
+
+## `EvolveAfterBattle`'s master loop, as a list of plans rather than a walk that
+## evolves as it goes: nothing here writes a party row, so a caller can show
+## `EvolutionAnimation` for each and apply only the ones that were not cancelled.
+##
+## [param evolvable] is `wEvolvableFlags` as [method Gen2Battle.evolvable_indices]
+## answers it: BATTLE-party indices, mapped here through the one rule that knows
+## an egg keeps its party slot without being a combatant. Only `.level`,
+## `.happiness` and `.stat` are reachable on this path: `wForceEvolution` is zero,
+## which is what `.item` demands, and `.trade` demands a `wLinkMode` this project
+## has none of.
+static func after_battle(
+	data: GameData, save: Gen2SaveData, evolvable: Array, time_of_day: int
+) -> Array:
+	var plans: Array = []
+	if data == null or save == null:
+		return plans
+	var flagged: Array[int] = []
+	for battle_index: int in evolvable:
+		var mapped: int = Gen2SaveBattleAdapter.save_party_index(save, int(battle_index))
+		if mapped >= 0:
+			flagged.append(mapped)
+	for index: int in save.party.size():
+		if not flagged.has(index):
+			continue
+		var mon: Gen2SaveMon = save.party[index]
+		if mon == null or mon.is_egg:
+			continue
+		var battle_mon: Gen2BattleMon = Gen2SaveBattleAdapter.to_battle_mon(data, mon)
+		if battle_mon == null:
+			continue
+		var row: Dictionary = level_evolution(data, battle_mon, time_of_day)
+		if row.is_empty():
+			continue
+		var target: int = int(row.get("target", 0))
+		if target <= 0 or target == mon.species or data.species(target).is_empty():
+			continue
+		plans.append({
+			"index": index,
+			"old_species": mon.species,
+			"new_species": target,
+			"level": mon.level,
+			# `GetNickname` / `CopyName1` fill wStringBuffer2 before the species is
+			# replaced, and all four boxes read it, so every line of the sequence
+			# names what the Pokemon was called on the way in.
+			"evolving_name": mon.nickname if not mon.nickname.is_empty() \
+				else String(data.species(mon.species).get("name", "")),
+			# `.check_statused`'s `CheckFaintedFrzSlp`, which costs the cry and the
+			# closing `AnimateFrontpic` both.
+			"statused": is_statused(mon),
+			# `.pressed_b` reads `wForceEvolution`: a level evolution is not
+			# forced, so B cancels it, and an item's is and B does nothing.
+			"can_cancel": true,
+			"row": row.duplicate(true),
+		})
+	return plans
+
+
+## `CheckFaintedFrzSlp`, which `EvolutionAnimation.check_statused` asks about the
+## party row rather than about a battler: fainted, frozen or asleep.
+static func is_statused(mon: Gen2SaveMon) -> bool:
+	if mon == null:
+		return true
+	return mon.hp <= 0 or (mon.status & Gen2Status.FREEZE) != 0 \
+		or Gen2Status.is_asleep(mon.status)

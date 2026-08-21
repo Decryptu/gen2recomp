@@ -96,3 +96,61 @@ func test_a_trade_evolution_honours_its_held_item_parameter() -> void:
 	var row: Dictionary = Gen2Evolution.trade_evolution(data, held)
 	assert_eq(int(row.get("target", 0)), TRADE_TARGET)
 	assert_eq(int(row.get("consumes_held_item", 0)), TRADE_HELD_ITEM)
+
+
+## `EvolveAfterBattle_MasterLoop`: the walk is over `wEvolvableFlags`, which is
+## per party member and not per level gained, and it evolves nobody it was not
+## handed a flag for.
+func test_the_after_battle_walk_reads_the_evolvable_flags_and_nothing_else() -> void:
+	var save: Gen2SaveData = _save_with([Fixture.BULBASAUR, Fixture.BULBASAUR], 16)
+
+	assert_true(Gen2Evolution.after_battle(
+		_data, save, [], Gen2WorldPalette.TIME_DAY
+	).is_empty(), "no flag, no plan")
+
+	var plans: Array = Gen2Evolution.after_battle(
+		_data, save, [1], Gen2WorldPalette.TIME_DAY
+	)
+	assert_eq(plans.size(), 1)
+	assert_eq(int(plans[0]["index"]), 1)
+	assert_eq(int(plans[0]["old_species"]), Fixture.BULBASAUR)
+	assert_eq(int(plans[0]["new_species"]), 2)
+	assert_true(bool(plans[0]["can_cancel"]), "wForceEvolution is zero after a battle")
+	assert_eq(save.party[1].species, Fixture.BULBASAUR, "and nothing is written yet")
+
+
+## `CheckFaintedFrzSlp`, which costs the cry and the closing animation both.
+func test_a_statused_party_member_is_planned_without_its_cry() -> void:
+	var save: Gen2SaveData = _save_with([Fixture.BULBASAUR], 16)
+	save.party[0].status = Gen2Status.FREEZE
+	assert_true(bool(Gen2Evolution.after_battle(
+		_data, save, [0], Gen2WorldPalette.TIME_DAY
+	)[0]["statused"]))
+
+	save.party[0].status = Gen2Status.NONE
+	assert_false(bool(Gen2Evolution.after_battle(
+		_data, save, [0], Gen2WorldPalette.TIME_DAY
+	)[0]["statused"]))
+
+
+## An EGG keeps its party slot without being a combatant, so the flag the battle
+## set for battle slot 0 belongs to party slot 1 when an egg is in front of it.
+func test_an_egg_shifts_the_flag_off_the_battle_party_indices() -> void:
+	var save: Gen2SaveData = _save_with([Fixture.BULBASAUR, Fixture.BULBASAUR], 16)
+	save.party[0].is_egg = true
+
+	assert_eq(Gen2SaveBattleAdapter.save_party_index(save, 0), 1)
+	var plans: Array = Gen2Evolution.after_battle(
+		_data, save, [0], Gen2WorldPalette.TIME_DAY
+	)
+	assert_eq(plans.size(), 1)
+	assert_eq(int(plans[0]["index"]), 1)
+
+
+func _save_with(species: Array, level: int) -> Gen2SaveData:
+	var save := Gen2SaveData.new()
+	for number: int in species:
+		save.party.append(Gen2SaveBattleAdapter.from_battle_mon(
+			Gen2BattleMon.create(_data, number, level, [])
+		))
+	return save

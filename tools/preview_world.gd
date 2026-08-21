@@ -193,7 +193,7 @@ func _build_live(data: GameData, group: int, number: int, cell: Vector2i) -> voi
 	## cell, so the player is left where the map puts them.
 	if _kind_cell.x >= 0:
 		_screen.start_cell = _kind_cell
-	elif cell.x >= 0 and _kind != &"battle_transition":
+	elif cell.x >= 0 and _kind not in [&"battle_transition", &"level_evolution"]:
 		_screen.start_cell = cell
 	## Pinned so two captures of the same map are the same picture: the seed the
 	## screen resolves is what a wandering NPC's own generator is built from.
@@ -235,6 +235,20 @@ func _process(_delta: float) -> bool:
 			## a different picture; the second is 1 for a trainer's, which is the
 			## branch that draws the Poke Ball and floods the map.
 			_screen.preview_battle_transition(_cell.x, _cell.y != 0)
+		elif _kind == &"level_evolution":
+			## `EvolveAfterBattle`'s own screen, which is a few hundred frames of
+			## picture. The first number is how far into it to photograph rather
+			## than a cell, the way `battle_transition`'s is; the box is pressed
+			## past on the frames it is waiting on, since neither `PrintText` nor
+			## `DelayFrames` shortens for a screenshot.
+			_screen.preview_level_evolution()
+			for _frame: int in maxi(_cell.x, 0):
+				_screen.advance_frame()
+				var evolving: Gen2EvolutionScreen = _screen.get("_evolution_host")
+				if evolving == null:
+					break
+				if evolving.awaiting_press():
+					_screen.press_button(Gen2Button.A)
 		elif _kind == &"yes_no":
 			## `Script_yesorno`'s own box: the NPC beside the player is talked
 			## to and each page answered until the choice the script ends on is
@@ -324,7 +338,7 @@ func _process(_delta: float) -> bool:
 			_screen.preview_effect_sprites(_kind)
 		if _kind not in [
 			&"warp", &"door", &"map_name_sign", &"ledge", &"heal_machine",
-			&"battle_transition",
+			&"battle_transition", &"level_evolution",
 		]:
 			## Those kinds drove themselves to the frame they want; every other
 			## kind stages a sprite and then spends the frames it needs.
