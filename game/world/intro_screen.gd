@@ -23,6 +23,11 @@ signal failed(message: String)
 const WORLD_SCENE: String = "res://game/world/world_screen.tscn"
 const LAUNCHER_SCENE: String = "res://game/main/main.tscn"
 
+## `InitGender`'s trailing `ld c, 10` and `InitClock`'s opening `ld c, 8`, both
+## spent on the gender screen before its fade begins.
+const GENDER_TAIL_FRAMES: int = 10
+const CLOCK_HEAD_FRAMES: int = 8
+
 var _data: GameData = null
 var _slot: int = -1
 var _label: String = ""
@@ -37,6 +42,13 @@ var _clock: Dictionary = {"day": 0, "hour": 10, "minute": 0}
 ## Null when a driver builds this class directly rather than instancing the
 ## scene; the sub-screens are then plain children and draw at their own size.
 var _viewport: Gen2Screen = null
+## The fade between two sub-screens. The cartridge puts those in the caller: the
+## routine being left is still on screen while `RotateFourPalettesLeft` runs, so
+## the screen that hosts both is the one that can spend those frames.
+var _presentation := Gen2IntroPresentation.new()
+var _after: Callable = Callable()
+var _accumulator: float = 0.0
+var _fading: bool = false
 
 
 ## Runs the intro for [param slot] on [param data]. [param standalone] is false
@@ -68,6 +80,41 @@ func _ready() -> void:
 		_start()
 
 
+## Sub-screens that own frames of their own are driven from here, so the whole
+## intro runs on one clock.
+func _process(delta: float) -> void:
+	_accumulator += delta * Gen2IntroPresentation.FRAME_RATE
+	var frames: int = int(_accumulator)
+	_accumulator -= float(frames)
+	advance_frames(frames)
+
+
+## Spends [param count] source frames: the fade this screen is standing in, or
+## whatever the sub-screen under it is standing in. Public so a test or a
+## preview tool spends the cartridge's own `DelayFrames` without a clock.
+func advance_frames(count: int) -> void:
+	for _frame: int in count:
+		if not _fading:
+			var screen: Control = current()
+			if screen != null and screen.has_method(&"advance_frames"):
+				screen.call(&"advance_frames", 1)
+			continue
+		_presentation.advance_frame()
+		_apply_fade()
+		if _presentation.finished():
+			_finish_fade()
+
+
+## How many source frames the intro owes before it will read a button.
+func animation_frames_left() -> int:
+	if _fading:
+		return _presentation.remaining_frames()
+	var screen: Control = current()
+	if screen != null and screen.has_method(&"animation_frames_left"):
+		return int(screen.call(&"animation_frames_left"))
+	return 0
+
+
 ## The eight hardware buttons and nothing else, the way every other screen here
 ## reads input; see `docs/CONTRIBUTING.md`.
 func _unhandled_input(event: InputEvent) -> void:
@@ -84,11 +131,15 @@ func _unhandled_input(event: InputEvent) -> void:
 
 ## Sub-screens draw in the 160x144 space, so they go inside the hardware
 ## viewport when there is one.
+## A sub-screen's own `_process` is turned off once it is in the tree, since a
+## node with one has it enabled again when it is added: the intro owns the clock
+## and drives every screen under it, so nothing runs a second one.
 func _show_sub_screen(node: Control) -> void:
 	if _viewport != null:
 		_viewport.display(node)
-		return
-	add_child(node)
+	else:
+		add_child(node)
+	node.set_process(false)
 
 
 ## The launcher's staged slot, for the scene entered through a scene change.
@@ -115,6 +166,8 @@ func gender() -> int:
 
 
 func handle_button(button: int) -> bool:
+	if _fading:
+		return true
 	var screen: Control = current()
 	return screen.handle_button(button) if screen != null else false
 
@@ -162,11 +215,40 @@ func _start_profile_setup() -> void:
 	_show_sub_screen(_gender_screen)
 
 
+## `InitGender`'s own `ld c, 10 / call DelayFrames` after the choice, then
+## `InitClock`'s `ld c, 8` and its `RotateFourPalettesLeft`, all three of which
+## run with the gender screen still on screen. `_start_clock` is what the fade
+## ends on, so nothing else has to know the clock comes next.
 func _on_gender_chosen(chosen: int) -> void:
 	_gender = chosen
+	_presentation.clear()
+	_presentation.push_delay(GENDER_TAIL_FRAMES + CLOCK_HEAD_FRAMES)
+	_presentation.push_rotate_four_left()
+	_fading = true
+	_accumulator = 0.0
+	_after = _drop_gender_screen
+	_presentation.sync()
+	_apply_fade()
+
+
+func _drop_gender_screen() -> void:
 	Gen2Screen.drop(_gender_screen)
 	_gender_screen = null
 	_start_clock()
+
+
+func _apply_fade() -> void:
+	if _gender_screen != null:
+		_gender_screen.bgp = _presentation.bgp()
+
+
+func _finish_fade() -> void:
+	_presentation.clear()
+	_fading = false
+	var next: Callable = _after
+	_after = Callable()
+	if next.is_valid():
+		next.call()
 
 
 ## `OakSpeech` farcalls `InitClock` before its first `PrintText`, then

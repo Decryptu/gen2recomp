@@ -3334,13 +3334,15 @@ func test_set_day_of_week_follows_the_source_selection_and_confirmation_flow() -
 	## `SetDayOfWeek` shows one weekday between two arrows, not a seven-row list:
 	## seven rows at `_InitVerticalMenuCursor`'s two-row step do not fit a screen.
 	assert_eq(menu["event"]["menu_kind"], &"spinner")
+	## `.WeekdayStrings`' own padding, which is what centres the name in the
+	## nine-wide box `hlcoord 10, 5` places it in.
 	assert_eq(menu["event"]["options"], [
-		&"SUNDAY", &"MONDAY", &"TUESDAY", &"WEDNESDAY", &"THURSDAY", &"FRIDAY", &"SATURDAY",
+		" SUNDAY", " MONDAY", " TUESDAY", "WEDNESDAY", "THURSDAY", " FRIDAY", "SATURDAY",
 	])
 
 	var confirmation_text: Dictionary = runner.advance(true, 3)
 	assert_eq(confirmation_text["event"]["type"], &"text")
-	assert_eq(confirmation_text["event"]["text"], "WEDNESDAY,\nis it?")
+	assert_eq(confirmation_text["event"]["text"], "WEDNESDAY, is it?")
 	var confirmation: Dictionary = runner.advance(true)
 	assert_eq(confirmation["event"]["type"], &"choice")
 	assert_eq(confirmation["event"]["choices"], [&"yes", &"no"])

@@ -19,6 +19,15 @@ var _page: Gen2GenderScreenPage = null
 var _question: String = ""
 var _background: TextureRect = null
 
+## The palette byte every colour on screen is remapped through
+## ([method Gen2IntroPresentation.apply_bgp]). `InitClock` opens with
+## `RotateFourPalettesLeft` over the screen `InitGender` left standing, so this
+## screen is what the next routine's fade-out fades.
+var bgp: int = Gen2IntroPresentation.BGP_NORMAL:
+	set(value):
+		bgp = value
+		_refresh()
+
 
 ## Answers false on a cartridge that has no gender screen, which is Gold and
 ## Silver: `pokegold` ships neither `init_gender.asm` nor its text, so the
@@ -97,5 +106,5 @@ func _refresh() -> void:
 func _palette() -> PackedColorArray:
 	var colors: PackedColorArray = _page.palette
 	if colors.size() < RomLayout.GENDER_SCREEN_PALETTE_COLORS:
-		return Gen2Palette.pic_palette(PackedColorArray([Color.WHITE, Color.BLACK]))
-	return colors
+		colors = Gen2Palette.pic_palette(PackedColorArray([Color.WHITE, Color.BLACK]))
+	return Gen2IntroPresentation.apply_bgp(colors, bgp)

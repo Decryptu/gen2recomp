@@ -29,6 +29,9 @@ func before_each() -> void:
 func after_each() -> void:
 	_clear_saves()
 	RomCache.clear(Fixture.directory())
+	# `Gen2Screen.drop` queues the sub-screen it replaced, and a test that never
+	# reaches a frame would leave every one of them standing as an orphan.
+	await get_tree().process_frame
 
 
 func _clear_saves() -> void:
@@ -59,21 +62,29 @@ func _settle_splash(limit: int = 800) -> void:
 		splash.advance_frames(1)
 
 
-## Spends whatever `DelayFrames` the speech is standing in. The intro's fades
-## and pic moves are real frame counts, so a test drives them rather than
-## skipping them; there is no clock in a GUT run.
+## Spends whatever `DelayFrames` the intro is standing in: its own fade between
+## two sub-screens, or the queue the screen under it is holding. The intro's
+## fades, pic moves and `DelayFrames` are real frame counts, so a test drives
+## them rather than skipping them; there is no clock in a GUT run.
 func _settle(limit: int = 40) -> void:
-	var speech: Gen2OakSpeechScreen = _screen.current() as Gen2OakSpeechScreen
 	for _pass: int in limit:
-		if speech == null or speech.animation_frames_left() == 0:
+		var owed: int = _screen.animation_frames_left()
+		if owed == 0:
 			return
-		speech.advance_frames(speech.animation_frames_left())
+		_screen.advance_frames(owed)
 
 
+## `InitClock` from the gender choice to Oak's speech: the fade in front of it,
+## Oak's woke-up text, both dials and both YES/NO boxes, and his answer.
 func _accept_clock() -> void:
+	_settle()
 	assert_true(_screen.current() is Gen2ClockSetScreen)
-	for _step: int in 6:
+	for _step: int in 12:
+		_settle()
+		if not (_screen.current() is Gen2ClockSetScreen):
+			return
 		_screen.handle_button(Gen2Button.A)
+	_settle()
 
 
 ## Presses A until [param stop] answers, so a test never has to know how many
@@ -135,6 +146,9 @@ func test_the_gender_question_comes_first() -> void:
 	_begin()
 	assert_true(_screen.current() is Gen2GenderScreen)
 	_screen.handle_button(Gen2Button.A)
+	assert_true(_screen.current() is Gen2GenderScreen,
+		"still standing under `RotateFourPalettesLeft`")
+	_settle()
 	assert_true(_screen.current() is Gen2ClockSetScreen, "then InitClock")
 	_accept_clock()
 	assert_true(_screen.current() is Gen2OakSpeechScreen, "then the speech")
@@ -146,16 +160,53 @@ func test_the_gender_question_comes_first() -> void:
 func test_clock_set_wraps_each_source_dial_and_reaches_the_speech() -> void:
 	_begin()
 	_screen.handle_button(Gen2Button.A)
+	_settle()
 	var clock: Gen2ClockSetScreen = _screen.current() as Gen2ClockSetScreen
 	assert_not_null(clock)
+	# `PrintText OakTimeWokeUpText`: three pages before the first dial is drawn.
+	for _page: int in 3:
+		_settle()
+		assert_true(_screen.current() is Gen2ClockSetScreen, "still in the text")
+		clock.handle_button(Gen2Button.A)
+	_settle()
 	clock.handle_button(Gen2Button.DOWN)
 	clock.handle_button(Gen2Button.A)
+	_settle()
+	# `YesNoBox` defaults to YES, and `InterpretTwoOptionMenu` holds `ld c, $f`
+	# before the answer is acted on.
 	clock.handle_button(Gen2Button.A)
+	assert_eq(clock.value()["minute"], 0, "the minutes dial has not been reached")
+	_settle()
 	clock.handle_button(Gen2Button.DOWN)
 	assert_eq(clock.value(), {"day": 0, "hour": 9, "minute": 59})
 	clock.handle_button(Gen2Button.A)
+	_settle()
+	clock.handle_button(Gen2Button.A)
+	_settle()
+	# `.MinutesAreSet`'s `OakText_ResponseToSetTime`, which waits with
+	# `WaitPressAorB_BlinkCursor` before the routine returns.
+	assert_true(_screen.current() is Gen2ClockSetScreen, "Oak answers the time")
 	clock.handle_button(Gen2Button.A)
 	assert_true(_screen.current() is Gen2OakSpeechScreen)
+
+
+## `.loop` and `.HourIsSet` end on `ld c, 10 / call DelayFrames`, and
+## `InterpretTwoOptionMenu` on `ld c, $f`, so neither a dial nor a YES/NO reads
+## a button on the frame it is drawn.
+func test_a_dial_reads_no_button_until_its_delay_frames_have_gone() -> void:
+	_begin()
+	_screen.handle_button(Gen2Button.A)
+	_settle()
+	var clock: Gen2ClockSetScreen = _screen.current() as Gen2ClockSetScreen
+	for _page: int in 3:
+		_settle()
+		clock.handle_button(Gen2Button.A)
+	assert_eq(clock.animation_frames_left(), Gen2ClockSetScreen.DIAL_DELAY_FRAMES)
+	clock.handle_button(Gen2Button.DOWN)
+	assert_eq(clock.value()["hour"], 10, "the dial is still held")
+	_settle()
+	clock.handle_button(Gen2Button.DOWN)
+	assert_eq(clock.value()["hour"], 9)
 
 
 ## `NewGame` reaches `InitializeWorld` only after both have returned, so nothing

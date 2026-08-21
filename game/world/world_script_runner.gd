@@ -272,10 +272,10 @@ const WAIT_FRAMES: StringName = &"frames"
 ## delays six.
 const PAUSE_FRAMES_PER_UNIT: int = 2
 const WAIT_FRAMES_PER_UNIT: int = 6
-## `_SetDayOfWeek`'s own `.Days`, which are uppercase like every cartridge string.
-const WEEKDAY_NAMES: Array[StringName] = [
-	&"SUNDAY", &"MONDAY", &"TUESDAY", &"WEDNESDAY", &"THURSDAY", &"FRIDAY", &"SATURDAY",
-]
+## `SetDayOfWeek.WeekdayStrings`, padded the way the source pads them so the
+## name is centred in its nine-wide box. One list, in [Gen2ClockSetScreen],
+## because the dial that draws it is shared with `InitClock`.
+const WEEKDAY_NAMES: Array[String] = Gen2ClockSetScreen.DAYS
 
 ## Crystal event flags used by the player's room decoration callbacks. The
 ## importer keeps raw cartridge flag numbers, so these values match the
@@ -412,7 +412,10 @@ func advance(acknowledge: bool = false, choice: int = -1) -> Dictionary:
 			var selected_day: int = posmod(choice, WEEKDAY_NAMES.size())
 			_pending = {
 				"type": &"text",
-				"text": "%s,\nis it?" % String(WEEKDAY_NAMES[selected_day]),
+				## `.ConfirmWeekdayText` places the weekday at `hlcoord 1, 14` and
+				## `_OakTimeIsItText` carries on from where `PlaceString` left
+				## off, so the two are one line.
+				"text": "%s, is it?" % WEEKDAY_NAMES[selected_day],
 				"special": &"set_day_of_week_confirmation",
 				"day": selected_day,
 				"source": _request.duplicate(true),
