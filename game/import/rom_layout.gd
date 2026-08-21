@@ -1966,7 +1966,9 @@ const GOLD_SILVER: Dictionary = {
 	"map_group_pointers": 0x940ED,
 	"map_group_counts": [14, 7, 82, 9, 10, 8, 17, 7, 6, 17, 22, 13, 6, 8, 12, 8, 13, 14, 4, 4, 26, 9, 13, 13, 15, 11],
 	"tilesets": 0x156BE,
-	"tileset_block_counts": [128, 128, 128, 128, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64],
+	## Each tileset's `*Meta` run, whose length is only the distance to the next
+	## label: `TilesetForest` is 40 blocks on both cartridges, not 64.
+	"tileset_block_counts": [128, 128, 128, 128, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 40],
 	"tileset_palette_bank": 0x02,
 	"world_palette_offset": 0xB75E,
 	"overworld_sprites": 0x147DE,
@@ -2394,6 +2396,7 @@ const CRYSTAL: Dictionary = {
 	"map_group_pointers": 0x94000,
 	"map_group_counts": [14, 7, 91, 9, 10, 8, 17, 7, 6, 17, 24, 13, 6, 8, 12, 8, 13, 14, 4, 6, 26, 16, 13, 13, 15, 11],
 	"tilesets": 0x4D596,
+	## See GOLD_SILVER: `TilesetForest`, here number 31, is the short one.
 	"tileset_block_counts": [128, 128, 128, 128, 128, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 40, 64, 64, 64, 64, 64],
 	"tileset_palette_bank": 0x13,
 	"world_palette_offset": 0xB319,

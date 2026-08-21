@@ -184,6 +184,83 @@ func test_sacred_ash_is_refused_and_kept_while_nothing_has_fainted() -> void:
 	assert_eq(_world.state.item_quantity(0x9C), 1)
 
 
+## `VitaminEffect`: ten added to the high byte of one stat experience word,
+## which is 2,560 flat, and HAPPINESS_USEDITEM. `UpdateStatsAfterItem` writes
+## MON_MAXHP and the stats, never MON_HP, so the maximum rises and the member is
+## no healthier than it was.
+func test_a_vitamin_raises_one_stat_experience_and_the_maximum_it_pays_for() -> void:
+	_world.state.apply_changes({}, {}, {"items": {0x1A: 2, 0x1B: 1}})
+	var mon: Gen2SaveMon = _save.party[0]
+	mon.happiness = 100
+	mon.hp = 1
+	var before_max: int = Gen2SaveBattleAdapter.to_battle_mon(_data, mon).max_hp()
+
+	var result: Dictionary = Gen2WorldPartyHost.use_item(_world, _save, 0x1A, 0, false)
+
+	assert_true(result["ok"], JSON.stringify(result))
+	assert_eq(result["effect"], &"vitamin")
+	assert_eq(int(_save.party[0].stat_exp["hp"]), 10 << 8)
+	assert_gt(_save.party[0].happiness, 100)
+	assert_gt(Gen2SaveBattleAdapter.to_battle_mon(_data, _save.party[0]).max_hp(), before_max)
+	assert_eq(_save.party[0].hp, 1)
+	assert_eq(_world.state.item_quantity(0x1A), 1)
+
+	var other: Dictionary = Gen2WorldPartyHost.use_item(_world, _save, 0x1B, 0, false)
+	assert_true(other["ok"], JSON.stringify(other))
+	assert_eq(int(_save.party[0].stat_exp["attack"]), 10 << 8)
+	assert_eq(int(_save.party[0].stat_exp["hp"]), 10 << 8)
+
+
+## `cp 100 / jr nc, NoEffectMessage` is a refusal, not a clamp, and it reads the
+## high byte alone.
+func test_a_vitamin_is_refused_and_kept_once_its_stat_reaches_the_cap() -> void:
+	_world.state.apply_changes({}, {}, {"items": {0x1A: 1}})
+	_save.party[0].stat_exp["hp"] = 100 << 8
+
+	var result: Dictionary = Gen2WorldPartyHost.use_item(_world, _save, 0x1A, 0, false)
+
+	assert_false(result["ok"])
+	assert_eq(StringName(result["reason"]), &"item_has_no_effect")
+	assert_eq(int(_save.party[0].stat_exp["hp"]), 100 << 8)
+	assert_eq(_world.state.item_quantity(0x1A), 1)
+
+
+## `RevivalHerbEffect` reaches `RevivePokemon`, whose `cp REVIVE` leaves it on
+## `ReviveFullHP`, and then charges HAPPINESS_REVIVALHERB.
+func test_a_revival_herb_revives_to_full_health_and_costs_happiness() -> void:
+	_world.state.apply_changes({}, {}, {"items": {0x7C: 1}})
+	var mon: Gen2SaveMon = _save.party[0]
+	mon.hp = 0
+	mon.happiness = 100
+
+	var result: Dictionary = Gen2WorldPartyHost.use_item(_world, _save, 0x7C, 0, false)
+
+	assert_true(result["ok"], JSON.stringify(result))
+	assert_true(result["bitter"])
+	assert_eq(_save.party[0].hp, Gen2SaveBattleAdapter.to_battle_mon(_data, mon).max_hp())
+	assert_eq(_save.party[0].happiness, 85)
+	assert_eq(_world.state.item_quantity(0x7C), 0)
+
+
+## `EnergypowderEnergyRootCommon` charges its row only once `ItemRestoreHP`
+## reports the item was used, and every item outside those four charges nothing.
+func test_an_energy_root_costs_happiness_where_a_potion_costs_none() -> void:
+	_world.state.apply_changes({}, {}, {"items": {0x7A: 1}})
+	_save.party[0].hp = 1
+	_save.party[0].happiness = 100
+
+	var bitter: Dictionary = Gen2WorldPartyHost.use_item(_world, _save, 0x7A, 0, false)
+	assert_true(bitter["ok"], JSON.stringify(bitter))
+	assert_true(bitter["bitter"])
+	assert_eq(_save.party[0].happiness, 90)
+
+	_save.party[0].hp = 1
+	var plain: Dictionary = Gen2WorldPartyHost.use_item(_world, _save, 0x12, 0, false)
+	assert_true(plain["ok"], JSON.stringify(plain))
+	assert_false(plain["bitter"])
+	assert_eq(_save.party[0].happiness, 90)
+
+
 func test_moon_stone_evolves_a_party_member_and_consumes_the_item() -> void:
 	var source: Gen2BattleMon = Gen2BattleMon.create(_data, 1, 5)
 	source.hp = maxi(source.max_hp() - 3, 1)
@@ -781,6 +858,8 @@ func _add_party_item_metadata() -> void:
 			raw["heal_amount"] = 20
 		if number == 0x09:
 			raw["status_mask"] = Gen2Status.POISON
+		if number == 0x7A:
+			raw["heal_amount"] = 200
 		if number == 0x14:
 			raw["field_menu"] = RomLayout.ITEMMENU_CURRENT
 		if number == 0x05:

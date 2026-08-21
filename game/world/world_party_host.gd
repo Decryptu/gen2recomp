@@ -11,6 +11,7 @@ extends RefCounted
 const ITEM_POTION: int = 0x12
 const ITEM_REVIVE: int = 0x27
 const ITEM_MAX_REVIVE: int = 0x28
+const ITEM_REVIVAL_HERB: int = 0x7C
 const ITEM_REPEL: int = 0x14
 const ITEM_SUPER_REPEL: int = 0x2A
 const ITEM_MAX_REPEL: int = 0x2B
@@ -22,6 +23,27 @@ const ITEM_POKE_BALL: int = 0x05
 ## what holds it and `BattleMenu_Pack`'s contest branch loads it by name.
 const ITEM_PARK_BALL: int = 0xB1
 ## `ConvertBerriesToBerryJuice`'s own three constants.
+## `StatExpItemPointerOffsets`: the five vitamins and the stat experience each
+## one raises. `MON_HP_EXP` and its four neighbours are words and the offsets
+## name the high byte, so `VitaminEffect` reads and writes that byte alone: it
+## refuses at 100 and adds 10 there, which is 25,600 and 2,560 of the flat value
+## kept here.
+const VITAMINS: Dictionary = {
+	0x1A: "hp", 0x1B: "attack", 0x1C: "defense", 0x1D: "speed", 0x1F: "special",
+}
+const VITAMIN_CAP: int = 100 << 8
+const VITAMIN_STEP: int = 10 << 8
+
+## The four items whose own routine is an ordinary effect plus a happiness
+## penalty and `LooksBitterMessage`. `EnergypowderEffect` and `EnergyRootEffect`
+## share one body and differ only in the row they charge.
+const BITTER_ITEMS: Dictionary = {
+	0x79: Gen2Battle.HAPPINESS_BITTERPOWDER,
+	0x7A: Gen2Battle.HAPPINESS_ENERGYROOT,
+	0x7B: Gen2Battle.HAPPINESS_BITTERPOWDER,
+	ITEM_REVIVAL_HERB: Gen2Battle.HAPPINESS_REVIVALHERB,
+}
+
 const ITEM_BERRY: int = 0xAD
 const ITEM_BERRY_JUICE: int = 0x8B
 const SHUCKLE: int = 0xD5
@@ -305,6 +327,8 @@ static func use_item(
 		"new_species": int(effect.get("new_species", 0)),
 		"evolving_name": String(effect.get("evolving_name", "")),
 		"move_offers": effect.get("move_offers", []).duplicate(),
+		"bitter": bool(effect.get("bitter", false)),
+		"stat": String(effect.get("stat", "")),
 	}
 
 
@@ -826,12 +850,19 @@ static func _apply_item_effect(
 	var evolution: Dictionary = _apply_item_evolution(data, mon, item)
 	if not evolution.is_empty():
 		return evolution
+	var vitamin: Dictionary = _apply_vitamin(data, mon, item)
+	if not vitamin.is_empty():
+		return vitamin
 	var max_hp: int = _max_hp(data, mon)
-	if item in [ITEM_REVIVE, ITEM_MAX_REVIVE]:
+	# `RevivePokemon`'s own `cp REVIVE / jr z, .revive_half_hp`: REVIVE is the
+	# only half, so MAX_REVIVE and REVIVAL_HERB both reach `ReviveFullHP`.
+	if item in [ITEM_REVIVE, ITEM_MAX_REVIVE, ITEM_REVIVAL_HERB]:
 		if mon.hp > 0:
 			return {"ok": false, "reason": &"item_has_no_effect"}
-		mon.hp = max_hp if item == ITEM_MAX_REVIVE else maxi(max_hp / 2, 1)
-		return {"ok": true, "effect": &"revive", "healed": mon.hp}
+		mon.hp = maxi(max_hp / 2, 1) if item == ITEM_REVIVE else max_hp
+		return _with_bitterness(
+			data, mon, item, {"ok": true, "effect": &"revive", "healed": mon.hp}
+		)
 
 	var status_mask: int = int(definition.get("status_mask", 0))
 	var heal_amount: int = int(definition.get("heal_amount", 0))
@@ -847,10 +878,44 @@ static func _apply_item_effect(
 		mon.status &= ~status_mask
 	if healed <= 0 and cleared == 0:
 		return {"ok": false, "reason": &"item_has_no_effect"}
-	return {
+	return _with_bitterness(data, mon, item, {
 		"ok": true, "effect": &"party_item", "healed": healed,
 		"status_cleared": cleared,
+	})
+
+
+## `VitaminEffect`. The cap is a refusal rather than a clamp.
+## `UpdateStatsAfterItem` is `CalcMonStats` writing `MON_MAXHP` and the five
+## stats below it and nothing else, so an HP UP raises the maximum and heals
+## nothing; here every one of those is derived from the stat experience, which
+## leaves the raise and the happiness row as the whole effect.
+static func _apply_vitamin(data: GameData, mon: Gen2SaveMon, item: int) -> Dictionary:
+	if not VITAMINS.has(item):
+		return {}
+	var stat: String = VITAMINS[item]
+	var raised: int = int(mon.stat_exp.get(stat, 0))
+	if raised >= VITAMIN_CAP:
+		return {"ok": false, "reason": &"item_has_no_effect"}
+	mon.stat_exp[stat] = raised + VITAMIN_STEP
+	mon.happiness = change_happiness(data, mon.happiness, Gen2Battle.HAPPINESS_USEDITEM)
+	return {
+		"ok": true, "effect": &"vitamin", "stat": stat,
+		"stat_exp": int(mon.stat_exp[stat]), "happiness": mon.happiness,
 	}
+
+
+## The happiness half of `HealPowderEffect`, `EnergypowderEnergyRootCommon` and
+## `RevivalHerbEffect`, which each run it only once their shared effect reports
+## the item was used. Every other field item charges nothing.
+static func _with_bitterness(
+	data: GameData, mon: Gen2SaveMon, item: int, effect: Dictionary
+) -> Dictionary:
+	if not BITTER_ITEMS.has(item):
+		return effect
+	mon.happiness = change_happiness(data, mon.happiness, int(BITTER_ITEMS[item]))
+	effect["bitter"] = true
+	effect["happiness"] = mon.happiness
+	return effect
 
 
 ## `_SacredAsh`: `CheckAnyFaintedMon` first, which skips eggs and stops at the

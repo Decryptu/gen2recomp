@@ -2654,9 +2654,13 @@ const LANDMARK_NONE: int = -1
 ## takes it. Gold and Silver ship neither the second row nor the compare in
 ## front of it: their `.skip_active_mon_update` passes HAPPINESS_GAINLEVEL flat.
 const HAPPINESS_GAINLEVEL: int = 0x01
+const HAPPINESS_USEDITEM: int = 0x02
 const HAPPINESS_GYMBATTLE: int = 0x04
 const HAPPINESS_FAINTED: int = 0x06
 const HAPPINESS_BEATENBYSTRONGFOE: int = 0x08
+const HAPPINESS_BITTERPOWDER: int = 0x0F
+const HAPPINESS_ENERGYROOT: int = 0x10
+const HAPPINESS_REVIVALHERB: int = 0x11
 const HAPPINESS_GAINLEVELATHOME: int = 0x13
 
 
