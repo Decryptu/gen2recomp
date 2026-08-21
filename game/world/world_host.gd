@@ -282,7 +282,7 @@ static func _resolve_data_request(world: Gen2WorldAPI, request: Dictionary) -> D
 				return {"ok": false, "reason": &"unsupported_pc_mode"}
 			return {"ok": true, "data": {"pc": {"mode": pc_mode}}}
 		&"audio_requested":
-			var audio: Dictionary = _audio_for_request(world, request)
+			var audio: Dictionary = audio_for_request(world, request)
 			var audio_kind: StringName = StringName(request.get("values", {}).get("kind", &""))
 			if audio.is_empty() and audio_kind != &"sound_wait":
 				return {"ok": false, "reason": &"audio_data_unavailable"}
@@ -290,7 +290,9 @@ static func _resolve_data_request(world: Gen2WorldAPI, request: Dictionary) -> D
 	return {}
 
 
-static func _audio_for_request(world: Gen2WorldAPI, request: Dictionary) -> Dictionary:
+## The record one `audio_requested` resolves to, which is also what says a
+## `PlaySlowCry` and a `cry` are one request with one field between them.
+static func audio_for_request(world: Gen2WorldAPI, request: Dictionary) -> Dictionary:
 	var values: Dictionary = request.get("values", {})
 	var audio_kind: StringName = StringName(values.get("kind", &""))
 	var data: GameData = world.data
@@ -315,7 +317,18 @@ static func _audio_for_request(world: Gen2WorldAPI, request: Dictionary) -> Dict
 			# `PlayMonCry`, whose own `GetCryIndex` is the species less one into
 			# `PokemonCries`. Only the low byte of the two the command carries is
 			# kept, the way the source pushes the first and discards the second.
-			return data.species_cry(int(values.get("species", -1)) & 0xFF)
+			var cry: Dictionary = data.species_cry(
+				int(values.get("species", -1)) & 0xFF
+			)
+			if cry.is_empty() or not bool(values.get("slow", false)):
+				return cry
+			# `PlaySlowCry` edits the record `LoadCry` just loaded rather than
+			# playing a second one: `wCryPitch` less `$140` and `wCryLength`
+			# plus `$60`, both sixteen bit and both wrapping there.
+			cry = cry.duplicate(true)
+			cry["cry_pitch"] = (int(cry.get("cry_pitch", 0)) - 0x140) & 0xFFFF
+			cry["cry_length"] = (int(cry.get("cry_length", 0)) + 0x60) & 0xFFFF
+			return cry
 		&"warp_sound":
 			var collision: int = int(values.get("collision", -1))
 			var warp_sfx: int = 0x23

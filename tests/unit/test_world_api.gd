@@ -1468,12 +1468,179 @@ func test_fade_out_to_white_is_presentation_on_both_profiles() -> void:
 		"kind": &"test", "bank": 48, "script": 0x6A00,
 	})
 	var result: Dictionary = runner.advance()
-	assert_eq(result["status"], &"complete", JSON.stringify(result))
+	## `ConvertTimePals*HL` spends `ld c, 2` on each of its four rows, so the
+	## script holds for eight frames rather than running straight on.
+	assert_eq(result["status"], &"waiting", JSON.stringify(result))
+	assert_eq(int(result["event"]["frames"]), 8, JSON.stringify(result))
 	assert_eq(
 		int(_event_value(result["events"], &"presentation_special_applied", "special")),
 		46,
 		JSON.stringify(result),
 	)
+	assert_eq(
+		_event_value(result["events"], &"presentation_special_applied", "orders"),
+		Gen2WorldPalette.FADE_OUT_ORDERS,
+		JSON.stringify(result),
+	)
+
+
+## `BattleTowerFade` is `FadeOutToWhite`'s four rows with `ld c, 7` instead of
+## `ld c, 2`, and it is Crystal's own insertion at 47, which is why the four
+## either side of it need no profile mapping.
+func test_battle_tower_fade_walks_the_white_rows_at_seven_frames_each() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	scripts["48:6A40"] = [
+		Gen2WorldScript.SPECIAL,
+		Gen2WorldScriptRunner.SPECIAL_BATTLE_TOWER_FADE, 0,
+		Gen2WorldScript.END,
+	]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var data: GameData = GameData.open_directory(_directory)
+	var runner := Gen2WorldScriptRunner.begin(data, Gen2WorldState.new(), {
+		"kind": &"test", "bank": 48, "script": 0x6A40,
+	})
+	var result: Dictionary = runner.advance()
+	assert_eq(result["status"], &"waiting", JSON.stringify(result))
+	assert_eq(int(result["event"]["frames"]), 28, JSON.stringify(result))
+	assert_eq(
+		int(_event_value(result["events"], &"presentation_special_applied", "step_frames")),
+		Gen2WorldPalette.BATTLE_TOWER_FADE_STEP_FRAMES,
+		JSON.stringify(result),
+	)
+
+
+## `FadeOutToBlack` and `FadeInFromBlack` walk the other half of `.cgbfade`, and
+## neither runs `FillWhiteBGColor`, so colour 0 stays the map's own.
+func test_the_two_black_fades_walk_the_dark_rows_without_the_white_fill() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	scripts["48:6A60"] = [
+		Gen2WorldScript.SPECIAL,
+		Gen2WorldScriptRunner.SPECIAL_FADE_OUT_TO_BLACK, 0,
+		Gen2WorldScript.END,
+	]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var data: GameData = GameData.open_directory(_directory)
+	var runner := Gen2WorldScriptRunner.begin(data, Gen2WorldState.new(), {
+		"kind": &"test", "bank": 48, "script": 0x6A60,
+	})
+	var result: Dictionary = runner.advance()
+	assert_eq(result["status"], &"waiting", JSON.stringify(result))
+	assert_eq(
+		_event_value(result["events"], &"presentation_special_applied", "orders"),
+		Gen2WorldPalette.FADE_TO_BLACK_ORDERS,
+		JSON.stringify(result),
+	)
+	assert_false(
+		bool(_event_value(result["events"], &"presentation_special_applied", "white_fill")),
+		JSON.stringify(result),
+	)
+	## `FadeOutToWhite` is the one that does, which is what says the flag is read
+	## rather than always false.
+	assert_true(
+		Gen2WorldScriptRunner.SPECIAL_FADE_OUT_TO_WHITE
+			in Gen2WorldScriptRunner.FADE_WHITE_FILL_SPECIALS
+	)
+
+
+## `CheckFirstMonIsEgg` reads slot zero alone and names it on both branches,
+## since `GetPokemonName` runs before either `ld [wScriptVar]` is reached.
+func test_check_first_mon_is_egg_reads_slot_zero_and_names_it() -> void:
+	for is_egg: bool in [true, false]:
+		var result: Array = _events_answering_special(
+			90, 1 if is_egg else 0, 0x6A80,
+			[172] as Array[int], [is_egg], [true], [70], [172], ["PICHU"]
+		)
+		assert_true(_flag_31_set(result), "egg %s" % is_egg)
+		assert_eq(
+			_event_value(result[0]["events"], &"text_buffer_changed", "value"),
+			"PICHU", "GetPokemonName runs on both branches",
+		)
+
+
+## `GetFirstPokemonHappiness` walks past every EGG in the list rather than
+## reading slot zero, which is the one step a reading of it drops.
+func test_first_pokemon_happiness_skips_the_eggs_in_front_of_it() -> void:
+	var result: Array = _events_answering_special(
+		89, 200, 0x6AA0,
+		[172, 25] as Array[int], [true, false], [true, true], [10, 200], [25],
+		["PICHU", "PIKACHU"]
+	)
+	assert_true(_flag_31_set(result))
+	## The box it fills names the member it answered for, not slot zero.
+	assert_eq(
+		_event_value(result[0]["events"], &"text_buffer_changed", "value"), "PIKACHU"
+	)
+
+
+## `CheckOwnMon` is three tests, not one: the species, the player's ID and the
+## OT name. A traded mon of the right species owns nothing.
+func test_mon_check_refuses_a_party_member_with_another_trainers_ot() -> void:
+	for owned: Array in [[25], []]:
+		var result: Array = _events_answering_special(
+			151, 1 if not owned.is_empty() else 0, 0x6AC0,
+			[25] as Array[int], [false], [not owned.is_empty()], [70], owned,
+			["PIKACHU"], 25
+		)
+		assert_true(_flag_31_set(result), JSON.stringify(owned))
+
+
+## `BeastsCheck` leaves the species it stopped on in wScriptVar, which is what
+## `.notexist`'s own `xor a` does not do: the caller branches on which beast is
+## missing rather than on a plain FALSE.
+func test_beasts_check_answers_the_first_beast_the_player_does_not_own() -> void:
+	var cases: Array = [[[], 243], [[243], 244], [[243, 244], 245], [[243, 244, 245], 1]]
+	for case: Array in cases:
+		var result: Array = _events_answering_special(
+			150, int(case[1]), 0x6AE0,
+			[25] as Array[int], [false], [true], [70], case[0], ["PIKACHU"]
+		)
+		assert_true(_flag_31_set(result), JSON.stringify(case))
+
+
+## One script that runs [param special] with [param value] loaded and sets event
+## 31 only when it answers [param expected], which is how a wScriptVar the API
+## does not expose is read: the branch the cartridge's own caller takes.
+func _events_answering_special(
+	special: int, expected: int, address: int,
+	species: Array[int], eggs: Array, own_ot: Array, happiness: Array,
+	owned_species: Array, names: Array, value: int = -1
+) -> Array:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	var refused: int = address + 0x10
+	var body: Array = []
+	if value >= 0:
+		body.append_array([Gen2WorldScript.SETVAL, value])
+	body.append_array([
+		Gen2WorldScript.SPECIAL, special, 0,
+		Gen2WorldScript.IFNOTEQUAL, expected, refused & 0xFF, (refused >> 8) & 0xFF,
+		Gen2WorldScript.SETEVENT, 31, 0,
+		Gen2WorldScript.END,
+	])
+	scripts["48:%04X" % address] = body
+	scripts["48:%04X" % refused] = [Gen2WorldScript.END]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var data: GameData = GameData.open_directory(_directory)
+	var world := Gen2WorldAPI.open(data, 1, 1, Vector2i(7, 6))
+	var moves: Array = []
+	for _slot: int in species.size():
+		moves.append([])
+	world.set_party_summary(
+		species.size(), false, species, moves, names, eggs,
+		{"own_ot": own_ot, "happiness": happiness, "owned_species": owned_species},
+		[]
+	)
+	world.current_map.events["coord_events"] = [{
+		"scene": 0, "x": 7, "y": 6, "script": address,
+	}]
+	var result: Array = world.dispatch_script_events(Vector2i(7, 6))
+	result.append(world)
+	return result
+
+
+## Whether the branch was taken, read off the world the helper appended.
+func _flag_31_set(result: Array) -> bool:
+	var world: Gen2WorldAPI = result.back() as Gen2WorldAPI
+	return world != null and world.state.is_event_flag_active(31)
 
 
 func test_fade_in_from_white_is_presentation_on_both_profiles() -> void:
@@ -1490,10 +1657,18 @@ func test_fade_in_from_white_is_presentation_on_both_profiles() -> void:
 		"kind": &"test", "bank": 48, "script": 0x6A20,
 	})
 	var result: Dictionary = runner.advance()
-	assert_eq(result["status"], &"complete", JSON.stringify(result))
+	## `ConvertTimePals*HL` spends `ld c, 2` on each of its four rows, so the
+	## script holds for eight frames rather than running straight on.
+	assert_eq(result["status"], &"waiting", JSON.stringify(result))
+	assert_eq(int(result["event"]["frames"]), 8, JSON.stringify(result))
 	assert_eq(
 		int(_event_value(result["events"], &"presentation_special_applied", "special")),
 		49,
+		JSON.stringify(result),
+	)
+	assert_eq(
+		_event_value(result["events"], &"presentation_special_applied", "orders"),
+		Gen2WorldPalette.FADE_IN_ORDERS,
 		JSON.stringify(result),
 	)
 

@@ -180,6 +180,32 @@ const SPECIAL_INITIAL_SET_DST_FLAG: int = 166
 const SPECIAL_INITIAL_CLEAR_DST_FLAG: int = 167
 const SPECIAL_FADE_OUT_MUSIC: int = 106
 const SPECIAL_INIT_ROAM_MONS: int = 105
+## The five map fades. `BattleTowerFade` is Crystal's own insertion at 47, which
+## is why the four either side of it need no profile split.
+const SPECIAL_FADE_OUT_TO_WHITE: int = 46
+const SPECIAL_BATTLE_TOWER_FADE: int = 47
+const SPECIAL_FADE_OUT_TO_BLACK: int = 48
+const SPECIAL_FADE_IN_FROM_WHITE: int = 49
+const SPECIAL_FADE_IN_FROM_BLACK: int = 50
+## Which four rows of `.cgbfade` each of them walks, and in which direction.
+const FADE_ORDERS_OF: Dictionary = {
+	SPECIAL_FADE_OUT_TO_WHITE: Gen2WorldPalette.FADE_OUT_ORDERS,
+	SPECIAL_BATTLE_TOWER_FADE: Gen2WorldPalette.FADE_OUT_ORDERS,
+	SPECIAL_FADE_IN_FROM_WHITE: Gen2WorldPalette.FADE_IN_ORDERS,
+	SPECIAL_FADE_OUT_TO_BLACK: Gen2WorldPalette.FADE_TO_BLACK_ORDERS,
+	SPECIAL_FADE_IN_FROM_BLACK: Gen2WorldPalette.FADE_FROM_BLACK_ORDERS,
+}
+## `FillWhiteBGColor` runs in front of the two fades that end white and nowhere
+## else, so the way to black flattens onto the map's own colour 0.
+const FADE_WHITE_FILL_SPECIALS: Array[int] = [
+	SPECIAL_FADE_OUT_TO_WHITE, SPECIAL_BATTLE_TOWER_FADE,
+]
+## `GameboyCheck`'s three answers (`constants/misc_constants.asm`). Every screen
+## here is drawn in the CGB palettes, so `hCGB` is set and the other two are
+## unreachable.
+const GBCHECK_CGB: int = 2
+## `BeastsCheck`'s three, in the order it asks about them.
+const BEAST_SPECIES: Array[int] = [243, 244, 245]
 ## StrengthBoulderScript's index in StdScripts (engine/events/std_scripts.asm),
 ## the same 14 in both pins despite the tables being 52 and 46 long. Every
 ## boulder object in every map reaches Strength through `jumpstd` on it.
@@ -2188,6 +2214,24 @@ func _stage_trainer_approach() -> void:
 	})
 
 
+## `FindThatSpecies`, and `CheckOwnMon`'s ID and OT test on top of it when
+## [param own_only]. The walk is `wPartySpecies`, so an EGG's slot carries EGG
+## rather than what is inside it and cannot match a species.
+func _party_slot_of_species(party: Dictionary, species: int, own_only: bool) -> int:
+	var listed: Array = party.get("species", [])
+	var eggs: Array = party.get("eggs", [])
+	var own_ot: Array = party.get("own_ot", [])
+	for slot: int in listed.size():
+		if slot < eggs.size() and bool(eggs[slot]):
+			continue
+		if int(listed[slot]) != species:
+			continue
+		if own_only and (slot >= own_ot.size() or not bool(own_ot[slot])):
+			return -1
+		return slot
+	return -1
+
+
 ## `wXCoord`/`wYCoord`, mirrored onto the request the way the party count is.
 func _player_cell() -> Vector2i:
 	var standing: Variant = _request.get("player_cell", Vector2i(-1, -1))
@@ -2477,22 +2521,126 @@ func _execute_special(special: int) -> Dictionary:
 			_script_value = 1 if state != null \
 				and state.map_music() == Gen2WorldRadio.MUSIC_POKE_FLUTE_CHANNEL \
 				and cell in SNORLAX_PROXIMITY_CELLS else 0
-		46, 48, 49, 50, 51, 52, 53, 94, 95, 157, 158:
-			## Fade, sprite reload and the dummied trainer-ranking bookkeeping
-			## affect presentation or source-only counters, not scene-free state.
+		SPECIAL_FADE_OUT_TO_WHITE, SPECIAL_BATTLE_TOWER_FADE, SPECIAL_FADE_OUT_TO_BLACK, \
+		SPECIAL_FADE_IN_FROM_WHITE, SPECIAL_FADE_IN_FROM_BLACK:
 			## `FadeOutToWhite` is 46 in both pins, since Crystal's inserted
 			## `BattleTowerFade` sits at 47, so it needs no profile split;
 			## `FadeInFromWhite` is 49 here and 48 in Gold/Silver, which
 			## special_index() already normalizes (maps/OlivineLighthouse6F.asm's
-			## Amphy cure runs 46 then 49); `LoadUsedSpritesGFX` (94) and
+			## Amphy cure runs 46 then 49).
+			##
+			## Each of the five is `GetTimePalFade` and then four rows of the
+			## fade table, and none of them is free: `ConvertTimePals*HL` spends
+			## `ld c, 2` on every row and `BattleTowerFade`'s own loop `ld c, 7`,
+			## so the script holds for the whole walk the way it does on the
+			## cartridge. `FillWhiteBGColor` is the two white fades' alone.
+			var orders: Array[int] = FADE_ORDERS_OF[special]
+			var step_frames: int = Gen2WorldPalette.BATTLE_TOWER_FADE_STEP_FRAMES \
+				if special == SPECIAL_BATTLE_TOWER_FADE \
+				else Gen2WorldPalette.FADE_STEP_FRAMES
+			_emit_runtime_event(&"presentation_special_applied", {
+				"special": special, "kind": &"palette_fade",
+				"orders": orders.duplicate(),
+				"step_frames": step_frames,
+				"white_fill": special in FADE_WHITE_FILL_SPECIALS,
+			})
+			return _stage_frame_wait(orders.size() * step_frames, {
+				"special": special, "kind": &"palette_fade",
+			})
+		51, 52, 53, 55, 56, 94, 152, 157, 158, 164:
+			## Sprite reload, palette reload and the dummied trainer-ranking
+			## bookkeeping affect presentation or source-only counters, not
+			## scene-free state. `LoadUsedSpritesGFX` (94), `UpdateSprites` (55),
+			## `UpdatePlayerSprite` (56), `ReloadSpritesNoPalettes` (51) and
 			## `RefreshSprites` (158) reload the sprite set a `variablesprite`
-			## just changed. `PlaySlowCry` (95) is the cry player with its pitch
-			## and tempo lowered, so it plays audio and reads nothing.
-			## `ClearBGPalettes` (52) and `UpdateTimePals` (53) are the palette
-			## pair `BugContestResultsWarpScript` and the day/night scripts open
-			## with; the renderer takes its palettes from the map and the clock,
-			## so both are presentation here too.
+			## just changed. `ClearBGPalettes` (52), `UpdateTimePals` (53),
+			## `SetPlayerPalette` (152) and `LoadMapPalettes` (164) are the
+			## palette pair `BugContestResultsWarpScript` and the day/night
+			## scripts open with; the renderer takes its palettes from the map
+			## and the clock, so all four are presentation here too.
 			_emit_runtime_event(&"presentation_special_applied", {"special": special})
+		95, 100:
+			## `PlaySlowCry` (95) is `LoadCry` with the record's own pitch
+			## lowered by `$140` and its length raised by `$60`, and
+			## `PlayCurMonCry` (100) is `PlayMonCry` straight. Both take their
+			## species from wScriptVar (the second through `wCurPartySpecies`,
+			## which the `loadvar` in front of it has already set) and write
+			## nothing back, so what they owe is the sound and the `WaitSFX`
+			## each ends on. `Script_cry`'s own request is the same one.
+			return _stage_audio_request(&"cry", {
+				"special": special,
+				"species": _script_value,
+				"slow": special == 95,
+			})
+		59:
+			## `SpecialWaitSFX` is `WaitSFX`: it holds until the four effect
+			## channels are free rather than spending a counted number of
+			## frames, which is `Script_waitsfx`'s own request.
+			return _stage_audio_request(&"sound_wait", {"special": special})
+		66, 67:
+			## `FindPartyMonThatSpecies` and its ID-checking twin. Both answer
+			## TRUE/FALSE in wScriptVar off the species wScriptVar was loaded
+			## with; the second adds `CheckOwnMon`'s ID and OT test on the slot
+			## the first one found.
+			var party: Dictionary = _request.get("party", {})
+			if party.is_empty():
+				return {"ok": false, "reason": &"missing_party_summary", "special": special}
+			_script_value = 1 if _party_slot_of_species(
+				party, _script_value, special == 67
+			) >= 0 else 0
+		89:
+			## `GetFirstPokemonHappiness` walks past every EGG in the list and
+			## answers the first hatched member's happiness byte, naming that
+			## member in the buffer its two boxes print.
+			var happy_party: Dictionary = _request.get("party", {})
+			if happy_party.is_empty():
+				return {"ok": false, "reason": &"missing_party_summary", "special": special}
+			var eggs: Array = happy_party.get("eggs", [])
+			var happiness: Array = happy_party.get("happiness", [])
+			var names: Array = happy_party.get("names", [])
+			var slot: int = 0
+			while slot < eggs.size() and bool(eggs[slot]):
+				slot += 1
+			_script_value = int(happiness[slot]) if slot < happiness.size() else 0
+			if slot < names.size():
+				_set_text_buffer(3, String(names[slot]), &"first_party_mon", {
+					"special": special, "slot": slot,
+				})
+		90:
+			## `CheckFirstMonIsEgg` reads slot zero alone, and names it whether
+			## or not it is an egg: `GetPokemonName` runs on both branches.
+			var first_party: Dictionary = _request.get("party", {})
+			if first_party.is_empty():
+				return {"ok": false, "reason": &"missing_party_summary", "special": special}
+			var first_eggs: Array = first_party.get("eggs", [])
+			var first_names: Array = first_party.get("names", [])
+			_script_value = 1 if not first_eggs.is_empty() and bool(first_eggs[0]) else 0
+			if not first_names.is_empty():
+				_set_text_buffer(3, String(first_names[0]), &"first_party_mon", {
+					"special": special, "slot": 0,
+				})
+		102:
+			## `GameboyCheck` reports which console the game booted on. This one
+			## is a Game Boy Color every time, since every screen here is drawn
+			## in the CGB palettes `hCGB` selects.
+			_script_value = GBCHECK_CGB
+		150, 151:
+			## `MonCheck` answers whether the player owns the species in
+			## wScriptVar and `BeastsCheck` runs the same test on all three
+			## beasts, leaving the last species it asked about behind in
+			## wScriptVar when one is missing.
+			var owner_party: Dictionary = _request.get("party", {})
+			if owner_party.is_empty():
+				return {"ok": false, "reason": &"missing_party_summary", "special": special}
+			var owned: Array = owner_party.get("owned_species", [])
+			if special == 151:
+				_script_value = 1 if owned.has(_script_value) else 0
+			else:
+				_script_value = 1
+				for beast: int in BEAST_SPECIES:
+					if not owned.has(beast):
+						_script_value = beast
+						break
 		SPECIAL_INIT_ROAM_MONS:
 			## InitRoamMons seeds the roam structs with Raikou and Entei at
 			## level 40 on their starting maps. Gen2WorldAPI.open() already
