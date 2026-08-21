@@ -1496,6 +1496,26 @@ func test_levelling_up_learns_a_move_into_an_empty_slot_without_asking() -> void
 	assert_false(battle.must_learn_move(Gen2Battle.PLAYER))
 
 
+## `wEvolvableFlags`: the `SmallFarFlagAction SET_FLAG` at the end of the same
+## block as `.level_loop`, so the flag is set once per party member that gained a
+## level rather than once per level. Nothing evolves in here at all:
+## `ExitBattle` runs `EvolveAfterBattle` on the overworld, after the battle.
+func test_a_level_gained_sets_the_evolvable_flag_and_evolves_nothing() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.BULBASAUR, 5, [Fixture.TACKLE]),
+		_mon(Fixture.GEODUDE, 20, [Fixture.TACKLE])
+	)
+	battle.player.hp = battle.player.max_hp() * 10
+	battle.enemy.hp = 1
+	assert_true(battle.evolvable_indices().is_empty(), "cleared at the start")
+
+	var events: Array = battle.take_turn(0, 0)
+
+	assert_gt(_of_type(events, Gen2Battle.GREW_LEVEL).size(), 1, "more than one level")
+	assert_eq(battle.evolvable_indices(), [0] as Array[int], "one flag, not one per level")
+	assert_eq(battle.player.species, Fixture.BULBASAUR, "and it did not evolve here")
+
+
 ## `LevelUpHappinessMod`: once per award that levelled, not once per level, and
 ## HAPPINESS_GAINLEVELATHOME only where the Pokemon was caught. The table's own
 ## rows are signed, so the numbers come out of the cache rather than out of here.

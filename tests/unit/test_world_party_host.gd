@@ -288,6 +288,85 @@ func test_a_stone_will_not_evolve_an_everstone_holder_from_the_pack() -> void:
 	assert_eq(_world.state.item_quantity(0x08), 1, "and the stone is not spent")
 
 
+## `ConvertBerriesToBerryJuice`'s Goldenrod gate. Swept over every seed rather
+## than one, since the branch behind the gate is a roll: before the city, no
+## draw converts anything.
+func test_a_shuckle_holding_a_berry_makes_juice_only_past_goldenrod() -> void:
+	var flag: int = _world.state.engine_flag(
+		Gen2WorldState.ENGINE_REACHED_GOLDENROD, true
+	)
+	assert_false(_world.state.is_engine_flag_active(flag), "the fixture starts short of it")
+	var converted_before: int = 0
+	var converted_after: int = 0
+	for seed_value: int in 64:
+		converted_before += 1 if _juice_run(seed_value) else 0
+	_world.state.set_engine_flag(flag, true)
+	for seed_value: int in 64:
+		converted_after += 1 if _juice_run(seed_value) else 0
+	assert_eq(converted_before, 0, "nothing converts before Goldenrod")
+	assert_gt(converted_after, 0, "and the 1-in-16 roll lands inside 64 seeds")
+
+
+## One run of the routine over a SHUCKLE holding a BERRY, answering whether it
+## became BERRY JUICE.
+func _juice_run(seed_value: int) -> bool:
+	_save.party[0] = Gen2SaveBattleAdapter.from_battle_mon(
+		Gen2BattleMon.create(_data, 1, 5)
+	)
+	_save.party[0].species = Gen2WorldPartyHost.SHUCKLE
+	_save.party[0].item = Gen2WorldPartyHost.ITEM_BERRY
+	var random := RandomNumberGenerator.new()
+	random.seed = seed_value
+	Gen2WorldPartyHost.give_pokerus_and_convert_berries(_data, _save, _world, random)
+	return _save.party[0].item == Gen2WorldPartyHost.ITEM_BERRY_JUICE
+
+
+## `.loopMons`: an active infection anywhere in the party is sampled for a
+## spread, and nothing is infected de novo while one is standing, so the strain
+## every seed can produce is the carrier's own rather than a fresh roll.
+func test_a_carrier_spreads_its_own_strain_and_blocks_a_new_infection() -> void:
+	_world.state.set_engine_flag(_world.state.engine_flag(
+		Gen2WorldState.ENGINE_REACHED_GOLDENROD, true
+	), true)
+	var spread: int = 0
+	for seed_value: int in 64:
+		_save.party[0].pokerus = 0x31
+		_save.party[1].pokerus = 0
+		var random := RandomNumberGenerator.new()
+		random.seed = seed_value
+		Gen2WorldPartyHost.give_pokerus_and_convert_berries(_data, _save, _world, random)
+		assert_eq(_save.party[0].pokerus, 0x31, "the carrier is never rewritten")
+		if _save.party[1].pokerus != 0:
+			spread += 1
+			assert_eq(_save.party[1].pokerus, 0x34, ".infectMon keeps the strain")
+	assert_gt(spread, 0, "the 1-in-3 roll lands inside 64 seeds")
+
+
+## `ApplyPokerusTick`: the days floor at zero and the STRAIN nibble survives,
+## which is what stops a recovered Pokemon from catching it a second time.
+func test_the_pokerus_tick_floors_the_days_and_keeps_the_strain() -> void:
+	_save.party[0].pokerus = 0x33
+	_save.party[1].pokerus = 0x00
+
+	assert_true(Gen2WorldPartyHost.apply_pokerus_tick(_save, 2))
+	assert_eq(_save.party[0].pokerus, 0x31)
+
+	assert_true(Gen2WorldPartyHost.apply_pokerus_tick(_save, 9))
+	assert_eq(_save.party[0].pokerus, 0x30, "cured, and still carrying its strain")
+	assert_eq(_save.party[1].pokerus, 0x00, "an uninfected member is left alone")
+	assert_false(Gen2WorldPartyHost.apply_pokerus_tick(_save, 1), "nothing left to spend")
+
+
+## `.randomPokerusLoop` and `.infectMon`, the two pieces of arithmetic a reading
+## gets wrong: both durations come off the STRAIN nibble, not off the byte.
+func test_the_two_pokerus_bytes_are_the_source_arithmetic() -> void:
+	assert_eq(Gen2WorldPartyHost.pokerus_from_roll(0x0F), 0x01, "a zero strain is one day")
+	assert_eq(Gen2WorldPartyHost.pokerus_from_roll(0x13), 0x41, "(3 & 7) + 1 = 4")
+	assert_eq(Gen2WorldPartyHost.pokerus_from_roll(0xF7), 0x81, "strain 8, and 8 & 3 is 0")
+	assert_eq(Gen2WorldPartyHost.pokerus_spread_from(0x31), 0x34)
+	assert_eq(Gen2WorldPartyHost.pokerus_spread_from(0x44), 0x41, "4 & 3 is 0")
+
+
 func _add_party_evolution_metadata() -> void:
 	var species: Array = RomCache.read_json(RomCache.species_path(Fixture.directory()))
 	for raw: Dictionary in species:

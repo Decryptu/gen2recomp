@@ -104,7 +104,6 @@ const STAT_EXP_GAINED: StringName = &"stat_exp_gained"
 ## [code]new_stats[/code] are both [Gen2BattleMon.stats], so a screen can show
 ## what moved without asking the Pokémon twice.
 const GREW_LEVEL: StringName = &"grew_level"
-const EVOLVED: StringName = &"evolved"
 ## A move learned into a slot that had nothing in it, no question asked because
 ## the cartridge does not ask one when there is nowhere for the answer to go.
 const MOVE_LEARNED: StringName = &"move_learned"
@@ -592,6 +591,12 @@ var _future_sight: Dictionary = {
 ## world completion boundary; the move command only scatters the coins.
 var pay_day_money: int = 0
 
+## `wEvolvableFlags`, cleared by `FindFirstAliveMonAndStartBattle` and set per
+## party member that gained a level. `ExitBattle` hands it to `EvolveAfterBattle`
+## on the overworld, so it is read at the completion boundary the way
+## [member pay_day_money] is.
+var _evolvable: Array[int] = []
+
 ## Moves waiting on [method learn_move] or [method decline_move], one queue per
 ## side, FIFO: a level that teaches two moves into a full six-move team asks
 ## about both, one at a time, in the order they were learned.
@@ -929,6 +934,13 @@ func winner() -> Variant:
 	if party(PLAYER).is_wiped() and party(ENEMY).is_wiped():
 		return null
 	return ENEMY if party(PLAYER).is_wiped() else PLAYER
+
+
+## `wEvolvableFlags` read back: the party indices that gained a level in this
+## battle, in party order. Battle-party indices, so a save carrying an egg maps
+## them through [method Gen2SaveBattleAdapter.save_party_index].
+func evolvable_indices() -> Array[int]:
+	return _evolvable.duplicate()
 
 
 ## Whether a side is waiting for somebody to be sent out: the Pokémon that was
@@ -2339,29 +2351,19 @@ func _give_experience_to(
 			"old_level": old_level, "new_level": learner.level,
 			"old_stats": old_stats, "new_stats": learner.stats.duplicate(),
 		})
-		var evolution: Dictionary = Gen2Evolution.level_evolution(
-			data, learner, time_of_day
-		)
-		if not evolution.is_empty():
-			var evolved: Dictionary = Gen2Evolution.evolve(
-				learner, int(evolution.get("target", 0))
-			)
-			if not evolved.is_empty():
-				events.append({
-					"type": EVOLVED, "side": PLAYER, "index": index,
-					"old_species": int(evolved["old_species"]),
-					"new_species": int(evolved["new_species"]),
-					"level": learner.level, "hp": learner.hp,
-					"max_hp": learner.max_hp(),
-				})
-		# `LearnLevelMoves` runs after the species has been replaced, so an
-		# evolved species gets its own move at the level that triggered it.
 		_offer_moves_learned_at(learner, index, learner.level, events)
 
 	## `LevelUpHappinessMod` sits after `.level_loop`, outside it: an award that
 	## crossed four levels raises happiness once, not four times.
 	if grew:
 		_gain_level_happiness(learner)
+		## The `SmallFarFlagAction SET_FLAG` at the end of the same block, which
+		## is what `EvolveAfterBattle` walks the party against once the battle is
+		## over and won. Nothing evolves in here: `ExitBattle` runs the pass on
+		## the overworld, so a Pokemon that levels up and then loses the fight
+		## does not evolve at all.
+		if not _evolvable.has(index):
+			_evolvable.append(index)
 
 
 ## `LevelUpHappinessMod`: HAPPINESS_GAINLEVELATHOME when the Pokémon is standing

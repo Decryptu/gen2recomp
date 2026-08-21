@@ -1154,3 +1154,86 @@ func test_a_battle_runs_its_transition_before_the_overlay_exists() -> void:
 	assert_true(seen, "the outro blacks the map out on the way")
 	assert_gt(frames, Gen2BattleTransition.LEAD_FRAMES, "the flash and an outro")
 	assert_not_null(_battle_child(), "and the battle behind it once it lands")
+
+
+## `ExitBattle`'s `predef EvolveAfterBattle`, which is the pass this screen runs
+## on the overworld: the level evolution the fight paid for is presented, and
+## the party row is only written when the animation has finished.
+const EVOLVING_SPECIES: int = 155
+const EVOLVED_SPECIES: int = 156
+const EVOLVE_LEVEL: int = 5
+
+
+func _write_level_evolution() -> void:
+	var species: Array = RomCache.read_json(RomCache.species_path(Fixture.directory()))
+	for raw: Dictionary in species:
+		match int(raw.get("number", 0)):
+			EVOLVING_SPECIES:
+				raw["name"] = "CHIKORITA"
+				raw["evolutions"] = [{
+					"method": RomLayout.EVOLVE_LEVEL, "parameter": EVOLVE_LEVEL,
+					"condition": 0, "target": EVOLVED_SPECIES,
+				}]
+			EVOLVED_SPECIES:
+				raw["name"] = "BAYLEEF"
+	RomCache.write_json(RomCache.species_path(Fixture.directory()), species)
+	_data = GameData.open_directory(Fixture.directory())
+
+
+## Runs the open evolution screen to its end, pressing A for every page it waits
+## on, the way the overworld's own pump and funnel do.
+func _settle_evolution(cancel: bool = false) -> void:
+	for _frame: int in 4000:
+		if _world_screen.get("_evolution_host") == null:
+			return
+		_world_screen.advance_frame()
+		var screen: Gen2EvolutionScreen = _world_screen.get("_evolution_host")
+		if screen == null:
+			return
+		if cancel and screen.phase() == Gen2EvolutionScreen.Phase.FLASH:
+			_world_screen.press_button(Gen2Button.B)
+		elif screen.awaiting_press():
+			_world_screen.press_button(Gen2Button.A)
+	fail_test("the evolution screen never closed")
+
+
+func test_a_level_evolution_is_presented_after_the_battle_and_then_applied() -> void:
+	_write_level_evolution()
+	await _open_world(true)
+	var save: Gen2SaveData = _world_screen._injected_save
+	save.party[0].species = EVOLVING_SPECIES
+	save.party[0].nickname = "CHIKORITA"
+	save.party[0].level = EVOLVE_LEVEL
+
+	_world_screen.preview_level_evolution()
+	var screen: Gen2EvolutionScreen = _world_screen.get("_evolution_host")
+	assert_not_null(screen, "the pass opened its screen")
+	assert_eq(screen.remaining(), 1)
+	assert_eq(save.party[0].species, EVOLVING_SPECIES, "nothing is written before the animation")
+
+	_settle_evolution()
+	assert_null(_world_screen.get("_evolution_host"), "and it closes on its own")
+	assert_eq(save.party[0].species, EVOLVED_SPECIES)
+	assert_eq(save.party[0].nickname, "BAYLEEF", "UpdateSpeciesNameIfNotNicknamed")
+	assert_true(_world_screen._world.state.has_caught_species(EVOLVED_SPECIES),
+		"SetSeenAndCaughtMon")
+
+
+## `.WaitFrames_CheckPressedB` sets `wEvolutionCanceled` and `.proceed`'s
+## `jp c, CancelEvolution` prints `StoppedEvolvingText` instead of writing the
+## new species. The flash loop is the only place B is read, which is why the
+## press waits for that phase rather than landing on the first frame.
+func test_b_during_the_flash_cancels_the_evolution_and_says_so() -> void:
+	_write_level_evolution()
+	await _open_world(true)
+	var save: Gen2SaveData = _world_screen._injected_save
+	save.party[0].species = EVOLVING_SPECIES
+	save.party[0].nickname = "CHIKORITA"
+	save.party[0].level = EVOLVE_LEVEL
+
+	_world_screen.preview_level_evolution()
+	_settle_evolution(true)
+
+	assert_eq(save.party[0].species, EVOLVING_SPECIES, "the species is unchanged")
+	assert_eq(save.party[0].nickname, "CHIKORITA")
+	assert_false(_world_screen._world.state.has_caught_species(EVOLVED_SPECIES))

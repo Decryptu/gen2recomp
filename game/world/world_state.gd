@@ -899,6 +899,9 @@ func consume_wild_encounter_cooldown() -> bool:
 ## `wStatusFlags2`' own bit, so it sits past `ENGINE_MOBILE_SYSTEM` and shifts on
 ## Gold and Silver like every other flag there.
 const ENGINE_BUG_CONTEST_TIMER: int = 17
+## Five entries further down the same run (data/events/engine_flags.asm), so it
+## shifts on Gold and Silver the way every flag past ENGINE_MOBILE_SYSTEM does.
+const ENGINE_REACHED_GOLDENROD: int = 22
 ## `ENGINE_DAILY_BUG_CONTEST`, the once-a-day flag the officer checks.
 const ENGINE_DAILY_BUG_CONTEST: int = 81
 ## `BugCatchingContestantEventFlagTable`, whose ten entries are the same numbers
@@ -910,6 +913,13 @@ const EVENT_BUG_CATCHING_CONTESTANT_FIRST: int = 1814
 ## holds no GameData of its own, so the caller resolves the profile.
 func bug_contest_active(crystal: bool = true) -> bool:
 	return is_engine_flag_active(engine_flag(ENGINE_BUG_CONTEST_TIMER, crystal))
+
+
+## `STATUSFLAGS2_REACHED_GOLDENROD_F`, the fifth entry of the same `wStatusFlags2`
+## run: `GivePokerusAndConvertBerries` gates both of its halves on it, so neither
+## Pokerus nor BERRY JUICE exists before Goldenrod has been walked into once.
+func reached_goldenrod(crystal: bool = true) -> bool:
+	return is_engine_flag_active(engine_flag(ENGINE_REACHED_GOLDENROD, crystal))
 
 
 func park_balls() -> int:

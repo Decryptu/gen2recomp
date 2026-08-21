@@ -119,6 +119,15 @@ var _start_menu_host: Gen2StartMenuScreen = null
 var _party_host: Gen2PartyScreen = null
 var _hall_of_fame_host: Gen2HallOfFameScreen = null
 var _credits_host: Gen2CreditsScreen = null
+## `EvolveAfterBattle`'s own screen, opened on the overworld after a battle that
+## was won and by an evolution stone from the pack.
+var _evolution_host: Gen2EvolutionScreen = null
+## What the evolution pass has to run when its screen closes: the pack's own
+## continuation, or nothing for the after-battle pass.
+var _evolution_after: Callable = Callable()
+## The party the open pass applies to, which is the fought save rather than
+## whatever is selected while the screen is up.
+var _evolution_save: Gen2SaveData = null
 ## Whether a field-move message is on screen waiting for its acknowledge. The
 ## world is idle while it is, the same way a script text pause holds it.
 var _field_move_text: bool = false
@@ -592,6 +601,10 @@ func advance_frame() -> void:
 	## place on the same frame.
 	if _battle_host != null:
 		_battle_host.advance_hardware_frame()
+	## `EvolveAfterBattle` runs inside the map's own loop the same way, so its
+	## `DelayFrames` counts are spent from this pump.
+	if _evolution_host != null:
+		_evolution_host.advance_frame()
 	_spending_frame = false
 
 
@@ -664,6 +677,7 @@ func _advance_day_cycle(delta: float) -> void:
 		return
 	var ticks: Array = _clock.advance(delta, _world)
 	_world.set_world_clock(_clock.day, _clock.hour, _clock.minute)
+	_apply_pokerus_days(ticks)
 	if ticks.is_empty():
 		return
 	_update_time_of_day()
@@ -732,7 +746,8 @@ func _overlay_open() -> bool:
 		or _battle_host != null or _service_host != null \
 		or _start_menu_host != null or _party_host != null \
 		or _hall_of_fame_host != null or _trainer_card_host != null \
-		or _pokedex_host != null or _credits_host != null
+		or _pokedex_host != null or _credits_host != null \
+		or _evolution_host != null
 
 
 ## Wandering objects keep to themselves while anything else owns the world. A
@@ -820,6 +835,12 @@ func _handle_button(button: int) -> bool:
 		return true
 	if not _map_fade.is_empty() or not _trainer_approach.is_empty() \
 		or _world.phone_ring_active():
+		return true
+	## In front of every other overlay: `EvolveAfterBattle` runs with the map
+	## loop suspended, and the pack path reaches it with the pack still open
+	## behind it, so its B is the animation's cancel rather than the pack's back.
+	if _evolution_host != null:
+		_evolution_host.handle_button(button)
 		return true
 	## Before the PC and the party overlay because the Hall of Fame is the one
 	## overlay a script opens with nothing behind it: there is no map to go back
@@ -1414,10 +1435,26 @@ func advance_world_time(seconds: float) -> Array:
 		return []
 	var ticks: Array = _clock.advance(seconds, _world)
 	_world.set_world_clock(_clock.day, _clock.hour, _clock.minute)
+	_apply_pokerus_days(ticks)
 	if not ticks.is_empty():
 		_update_time_of_day()
 		_refresh_labels()
 	return ticks
+
+
+## `CheckPokerusTick`, which `UpdateTime` reaches with the days elapsed since the
+## timer's start day. The clock here runs a minute at a time rather than being
+## read off a hardware RTC, so the count is the midnights the ticks crossed.
+func _apply_pokerus_days(ticks: Array) -> void:
+	var days: int = 0
+	for tick: Dictionary in ticks:
+		if int(tick.get("hour", -1)) == 0 and int(tick.get("minute", -1)) == 0:
+			days += 1
+	if days <= 0:
+		return
+	Gen2WorldPartyHost.apply_pokerus_tick(
+		_injected_save if _injected_save != null else _selected_runtime_save(), days
+	)
 
 
 ## Public host boundary for a time/radio tick. The imported roaming graph is
@@ -1863,6 +1900,57 @@ func _first_stone_evolution() -> Dictionary:
 		for row: Dictionary in _data.evolutions(species):
 			if int(row.get("method", 0)) == RomLayout.EVOLVE_ITEM:
 				return {"species": species, "item": int(row.get("parameter", 0))}
+	return {}
+
+
+## Public screenshot driver and scene-test entry for `EvolveAfterBattle`'s own
+## presentation: it stands the first party member on the first LEVEL evolution
+## the cache holds and opens the screen on it, which is the one path a stone
+## cannot reach, since `.pressed_b` lets B cancel this one and not that one.
+##
+## The party row is left alone. [method _on_evolution_resolved] applies it, the
+## same way the after-battle pass does, so the preview is that pass rather than
+## a picture of it.
+func preview_level_evolution() -> void:
+	if _world == null or _data == null:
+		return
+	if _evolution_host != null:
+		return
+	var save: Gen2SaveData = _injected_save if _injected_save != null \
+		else _embedded_party_save()
+	if save == null or save.party.is_empty():
+		_script_prompt = "Evolution preview needs a party"
+		_refresh_labels()
+		return
+	_injected_save = save
+	var plans: Array = Gen2Evolution.after_battle(
+		_data, save, [0], _world.object_time_of_day
+	)
+	if plans.is_empty():
+		## Only when the party's own lead has nothing due: a caller that has
+		## already staged one is photographing that one.
+		var row: Dictionary = _first_level_evolution()
+		if row.is_empty():
+			_script_prompt = "Evolution preview: this cache has no level evolution"
+			_refresh_labels()
+			return
+		var mon: Gen2SaveMon = save.party[0]
+		mon.species = int(row["species"])
+		mon.level = maxi(mon.level, int(row["row"].get("parameter", mon.level)))
+		mon.nickname = String(_data.species(mon.species).get("name", ""))
+		mon.hp = maxi(mon.hp, 1)
+		mon.status = Gen2Status.NONE
+		plans = Gen2Evolution.after_battle(
+			_data, save, [0], _world.object_time_of_day
+		)
+	_open_evolution(plans, save, Callable())
+
+
+func _first_level_evolution() -> Dictionary:
+	for species: int in range(1, _data.species_count() + 1):
+		for row: Dictionary in _data.evolutions(species):
+			if int(row.get("method", 0)) == RomLayout.EVOLVE_LEVEL:
+				return {"species": species, "row": row}
 	return {}
 
 
@@ -2435,7 +2523,6 @@ func _open_battle_host(request: Dictionary) -> void:
 	host.z_index = 10
 	host.mouse_filter = Control.MOUSE_FILTER_STOP
 	add_child(host)
-	host.party_evolved.connect(_on_party_evolved)
 	host.battle_finished.connect(_on_battle_finished)
 	host.enemy_seen.connect(_on_enemy_seen)
 	if not tutorial:
@@ -2480,12 +2567,6 @@ func _open_battle_host(request: Dictionary) -> void:
 func _on_enemy_seen(species: int) -> void:
 	if _world != null and _world.state != null:
 		_world.state.set_species_seen(species)
-
-
-## `.proceed`'s `SetSeenAndCaughtMon`, the write a level evolution owes the dex.
-func _on_party_evolved(species: int) -> void:
-	if _world != null and _world.state != null:
-		_world.state.set_species_caught(species)
 
 
 func _on_capture_requested(ball: int) -> void:
@@ -2549,6 +2630,40 @@ func _on_battle_finished(result: Dictionary) -> void:
 		_world.state.apply_changes({}, {}, {"money": {
 			0: mini(_world.state.money(0) + pay_day_money, Gen2WorldInventory.MAX_MONEY),
 		}})
+	## `ExitBattle`'s own tail, in its order: `CheckPayDay`, then
+	## `EvolveAfterBattle`, then `GivePokerusAndConvertBerries`, and only then
+	## does the map come back. The evolution owns frames, so the rest of the exit
+	## is what its screen resumes into rather than something that runs behind it.
+	var fought_save: Gen2SaveData = _active_battle_save
+	var plans: Array = _after_battle_evolution_plans(result, fought_save)
+	if not plans.is_empty():
+		_open_evolution(plans, fought_save, func() -> void:
+			_finish_battle_exit(result, fought_save)
+		)
+		return
+	_finish_battle_exit(result, fought_save)
+
+
+## `EvolveAfterBattle`'s `wEvolvableFlags`, read only on a battle that was won.
+func _after_battle_evolution_plans(result: Dictionary, save: Gen2SaveData) -> Array:
+	if _data == null or save == null or _world == null:
+		return []
+	if StringName(result.get("outcome", &"")) != Gen2WorldBattleAdapter.OUTCOME_WON:
+		return []
+	return Gen2Evolution.after_battle(
+		_data, save, result.get("evolvable", []), _world.object_time_of_day
+	)
+
+
+## Everything `ExitBattle` does once `EvolveAfterBattle` has returned.
+func _finish_battle_exit(result: Dictionary, fought_save: Gen2SaveData) -> void:
+	if _world == null:
+		return
+	if StringName(result.get("outcome", &"")) == Gen2WorldBattleAdapter.OUTCOME_WON:
+		Gen2WorldPartyHost.give_pokerus_and_convert_berries(
+			_data, fought_save, _world, _encounter_random
+		)
+		_persist_after_battle(fought_save)
 	var resumed: Array = _world.complete_runtime_request(result)
 	if resumed.is_empty():
 		## `WildBattleScript` is `randomwildmon`, `startbattle`,
@@ -2588,6 +2703,113 @@ func _on_battle_finished(result: Dictionary) -> void:
 	## map's own track back over the one `PlayBattleMusic` started.
 	_play_current_map_music()
 	_refresh_labels()
+
+
+## `EvoStoneEffect`'s evolution, which the pack has already applied: only the
+## animation is left, and it is the after-battle pass's own screen so both ways
+## in draw the same thing.
+func _on_pack_evolution(plan: Dictionary, after: Callable) -> void:
+	## No [member _evolution_save]: the row is already written, so [method
+	## _on_evolution_resolved] has nothing to apply and the dex write was the
+	## pack transaction's.
+	_open_evolution([plan], null, after)
+
+
+## `EvolveAfterBattle`'s screen. [param plans] is
+## [method Gen2Evolution.after_battle]'s list, [param save] the party they are
+## applied to, and [param after] whatever the caller was doing when the pass
+## interrupted it, run once the last plan has been answered.
+func _open_evolution(plans: Array, save: Gen2SaveData, after: Callable) -> void:
+	if _evolution_host != null or _data == null or plans.is_empty():
+		if after.is_valid():
+			after.call()
+		return
+	var host := Gen2EvolutionScreen.new()
+	host.set_context(_data, plans)
+	_evolution_save = save
+	_evolution_after = after
+	host.resolved.connect(_on_evolution_resolved)
+	host.closed.connect(_on_evolution_closed)
+	host.cry_requested.connect(_play_species_cry)
+	host.sfx_requested.connect(_play_sfx)
+	host.music_requested.connect(_play_evolution_music)
+	## Into the 160x144 viewport rather than over the whole window: the first box
+	## is printed over the map, so it has to be composited with it the way the
+	## world's own text box is.
+	host.z_index = 30
+	## Held before the node enters the tree: `_ready()` runs inside
+	## [method Gen2Screen.display], and a screen that closes there has to find
+	## itself here to be taken off again.
+	_evolution_host = host
+	_screen.display(host)
+	if _evolution_host == null:
+		return
+	_script_prompt = "Evolving"
+	_refresh_labels()
+
+
+## `.proceed`'s own write, or `CancelEvolution` doing nothing but printing.
+## `SetSeenAndCaughtMon` and `UpdateUnownDex` are here rather than in the screen:
+## the screen draws, the world owns the dex and the party.
+func _on_evolution_resolved(plan: Dictionary, canceled: bool) -> void:
+	if canceled or _evolution_save == null or _data == null:
+		return
+	var index: int = int(plan.get("index", -1))
+	if index < 0 or index >= _evolution_save.party.size():
+		return
+	var applied: Dictionary = Gen2WorldPartyHost.apply_evolution(
+		_data, _evolution_save.party[index], plan.get("row", {})
+	)
+	if applied.is_empty() or _world == null or _world.state == null:
+		return
+	_world.state.set_species_caught(int(applied["register_caught"]))
+	var form: int = int(applied.get("register_unown", 0))
+	if form > 0:
+		_world.state.update_unown_dex(form)
+	## `LearnLevelMoves` teaches whatever fits an empty slot, which
+	## [method Gen2WorldPartyHost.apply_evolution] has already done. A move that
+	## needs `ForgetMove` is declined here: that menu lives inside the start menu
+	## screen's own mode machine and this pass has no way into it, and declining
+	## is one of the two answers the cartridge takes.
+	_script_prompt = "%s evolved" % String(plan.get("evolving_name", ""))
+
+
+func _on_evolution_closed() -> void:
+	var host: Gen2EvolutionScreen = _evolution_host
+	_evolution_host = null
+	_evolution_save = null
+	if host != null:
+		Gen2Screen.drop(host)
+	if _renderer != null:
+		_renderer.refresh()
+	var after: Callable = _evolution_after
+	_evolution_after = Callable()
+	if after.is_valid():
+		after.call()
+
+
+## `PlayMusic` from inside the animation: MUSIC_NONE stops what the map or the
+## battle left playing, and MUSIC_EVOLUTION is its own track.
+func _play_evolution_music(music: int) -> void:
+	if _audio_player == null or _data == null:
+		return
+	if music == Gen2EvolutionScreen.MUSIC_NONE:
+		_audio_player.stop_all()
+		return
+	var record: Dictionary = _data.world_audio(&"music", music)
+	if record.is_empty():
+		return
+	_audio_player.play_record(record, &"map_music", _audio_assets())
+
+
+## The save write `ExitBattle` owes once the evolution pass and Pokerus have
+## both run over the party the battle already wrote.
+func _persist_after_battle(save: Gen2SaveData) -> void:
+	if save == null or not _active_battle_persist or _data == null:
+		return
+	var written: Dictionary = Gen2SaveStore.save(save, _data)
+	if not bool(written.get("ok", false)):
+		push_error("Could not save the battle exit: %s" % String(written.get("message", "")))
 
 
 func _advance_script_input() -> void:
@@ -2933,6 +3155,7 @@ func _open_start_menu_host(entry: Callable) -> void:
 	host.action_chosen.connect(_on_start_menu_action)
 	host.closed.connect(_on_start_menu_closed)
 	host.field_item_used.connect(_on_field_item_used)
+	host.evolution_animation_requested.connect(_on_pack_evolution)
 	host.sfx_requested.connect(_play_sfx)
 	_start_menu_host = host
 	_script_prompt = "Start menu open"
