@@ -217,14 +217,30 @@ func test_the_crystal_falls_to_its_own_stop() -> void:
 ## whose `oamrestart` takes it back to the top.
 func test_the_birds_frameset_loops() -> void:
 	var scene: Gen2TitleScene = _scene(RomRegistry.GOLD)
-	assert_eq(scene.bird_frame(), 0)
-	_spend(scene, 11)
-	assert_eq(scene.bird_frame(), 1, "the first entry lasts its own eleven frames")
+	## `_TitleScreen` copies ten bytes of a sixteen-byte struct into
+	## `wSpriteAnim10`, so the bird's `SPRITEANIMSTRUCT_FRAME` keeps the zero
+	## `ClearSpriteAnims` left rather than `_InitSpriteAnimStruct`'s -1, and
+	## `GetSpriteAnimFrame`'s `inc [hl]` skips entry 0 on the first pass alone.
+	_spend(scene, 1)
+	assert_eq(scene.bird_frame(), 1, "the screen opens on the second entry")
+	_spend(scene, 9)
+	assert_eq(scene.bird_frame(), 1, "which lasts its own duration plus one")
+	_spend(scene, 1)
+	assert_eq(scene.bird_frame(), 2)
+
+	## `oamrestart` writes -1, so every cycle after the first plays entry 0. The
+	## first cycle is the whole frameset less that entry, and the screen is
+	## eleven frames into it here.
 	var total: int = 0
 	for entry: Vector2i in Gen2TitleScene.BIRD_FRAMESET_GOLD:
-		total += entry.y
-	_spend(scene, total - 11)
+		total += entry.y + 1
+	var first_cycle: int = total - (Gen2TitleScene.BIRD_FRAMESET_GOLD[0].y + 1)
+	_spend(scene, first_cycle - 11 + 1)
 	assert_eq(scene.bird_frame(), 0, "and the sequence restarts")
+	_spend(scene, Gen2TitleScene.BIRD_FRAMESET_GOLD[0].y)
+	assert_eq(scene.bird_frame(), 0, "for the entry's own duration plus one")
+	_spend(scene, 1)
+	assert_eq(scene.bird_frame(), 1)
 
 
 ## `UpdateTitleTrailSprite` spawns on every fourth frame of the timer, and
@@ -366,6 +382,35 @@ func test_golds_trails_open_on_their_own_phase() -> void:
 		if path.size() == 11 and not shapes.has(path):
 			shapes.append(path)
 	assert_gt(shapes.size(), 1, "consecutive spawns ride the sine from different places")
+
+
+## `DoNextFrameForAllSprites` calls `UpdateAnimFrame` whatever the animation
+## did, so `AnimSeq_GSTitleTrail`'s `.delete` clears the struct's index and the
+## sprite is still written to shadow OAM on that same pass, unmoved. The pass
+## after it is the one `.loop`'s `and a` skips.
+func test_a_trail_is_drawn_once_more_on_the_frame_it_is_deleted() -> void:
+	var scene := Gen2TitleScene.create(RomRegistry.GOLD, _sine())
+	var last: Vector2i = Vector2i(-1, -1)
+	var held: int = 0
+	for _frame: int in 200:
+		scene.advance_frame()
+		for at: Vector2i in _trails(scene):
+			if at.x < Gen2TitleScene.TRAIL_X_END - Gen2TitleScene.TRAIL_X_STEP:
+				continue
+			if at == last:
+				held += 1
+			last = at
+	assert_gt(held, 0, "the struct is drawn a second time where it stands")
+
+	## And it is gone the pass after, rather than riding on past $a4.
+	var beyond: Array[Vector2i] = []
+	var walk := Gen2TitleScene.create(RomRegistry.GOLD, _sine())
+	for _frame: int in 200:
+		walk.advance_frame()
+		for at: Vector2i in _trails(walk):
+			if at.x > Gen2TitleScene.TRAIL_X_END:
+				beyond.append(at)
+	assert_eq(beyond, [] as Array[Vector2i], "and never past the edge")
 
 
 func _distinct(values: Array[int]) -> int:

@@ -89,16 +89,17 @@ const BIRD_AT := Vector2i(11 * Gen2Tiles.TILE_WIDTH, 12 * Gen2Tiles.TILE_HEIGHT)
 const BIRD_SINE_GOLD: int = 2
 const BIRD_SINE_SILVER: int = 8
 
-## `.Frameset_GSIntroHoOhLugia` as [code](oam set, frames)[/code] pairs per
-## profile. `oamframe X, n` lasts n + 1 and `oamrestart` loops rather than ending.
+## `.Frameset_GSIntroHoOhLugia` as (OAM set, duration) pairs per profile, the
+## same shape as [constant TRAIL_FRAMESET_GOLD]: a frame lasts its duration plus
+## one, and `oamrestart` loops rather than ending.
 const BIRD_FRAMESET_GOLD: Array[Vector2i] = [
-	Vector2i(0, 11), Vector2i(1, 10), Vector2i(2, 11),
-	Vector2i(3, 11), Vector2i(2, 10), Vector2i(4, 11),
+	Vector2i(0, 10), Vector2i(1, 9), Vector2i(2, 10),
+	Vector2i(3, 10), Vector2i(2, 9), Vector2i(4, 10),
 ]
 const BIRD_FRAMESET_SILVER: Array[Vector2i] = [
-	Vector2i(1, 4), Vector2i(0, 8), Vector2i(1, 8), Vector2i(2, 8),
-	Vector2i(2, 8), Vector2i(3, 8), Vector2i(3, 8), Vector2i(2, 8),
-	Vector2i(1, 4),
+	Vector2i(1, 3), Vector2i(0, 7), Vector2i(1, 7), Vector2i(2, 7),
+	Vector2i(2, 7), Vector2i(3, 7), Vector2i(3, 7), Vector2i(2, 7),
+	Vector2i(1, 3),
 ]
 
 ## `UpdateTitleTrailSprite`, a trail every fourth frame of the timer. Gold picks
@@ -169,7 +170,19 @@ var _suicune_counter: int = 0
 ## by the page: the counter is read before it is raised, so the write lands late.
 var _suicune_base: int = SUICUNE_FIRST_BASE
 var _bird_var: int = 0
+## `SPRITEANIMSTRUCT_FRAME` and `..._DURATION` for the bird's own struct, and
+## the frame counter opens at 0 rather than `_InitSpriteAnimStruct`'s -1.
+## `_TitleScreen` copies the spawned struct into `wSpriteAnim10` with
+## `ld bc, NUM_SPRITE_ANIM_STRUCTS`, which is ten bytes where the struct is
+## sixteen, so the six fields from `..._FRAME` up are never copied. They are the
+## zeroes `ClearSpriteAnims` left, that routine having wiped the whole of
+## `wSpriteAnimData` at the top of `_TitleScreen`, so the values are the
+## cartridge's on every entry rather than boot-time WRAM. The one visible
+## consequence is `GetSpriteAnimFrame`'s `inc [hl]`: entry 0 is skipped on the
+## first pass, and `oamrestart` writes -1, so every later cycle plays it.
 var _bird_frame: int = 0
+var _bird_duration: int = 0
+var _bird_set: int = 0
 var _selected: int = -1
 var _sine: Gen2BattleAnimData = null
 ## Live particles as `{ at, var1, yoffset, fresh }`, capped the way
@@ -301,7 +314,13 @@ func _advance_animation() -> void:
 	# The struct's own VAR1, counted the way each profile counts it. A byte, so
 	# Silver's countdown wraps rather than going negative.
 	_bird_var = (_bird_var + (1 if _profile == RomRegistry.GOLD else -1)) & 0xFF
-	_bird_frame += 1
+	var bird: Dictionary = {
+		"frame": _bird_frame, "duration": _bird_duration, "set": _bird_set,
+	}
+	_advance_frameset(bird, _bird_frameset(), true)
+	_bird_frame = int(bird["frame"])
+	_bird_duration = int(bird["duration"])
+	_bird_set = int(bird["set"])
 	_advance_trails()
 
 
@@ -320,6 +339,10 @@ func _advance_clouds() -> void:
 func _advance_trails() -> void:
 	var alive: Array[Dictionary] = []
 	for trail: Dictionary in _trails:
+		if bool(trail["dead"]):
+			# `DeinitializeSprite` cleared the index on the pass before this one,
+			# so `.loop`'s `and a` skips the struct and nothing draws it again.
+			continue
 		if bool(trail["fresh"]):
 			trail["fresh"] = false
 			if _profile == RomRegistry.GOLD:
@@ -338,6 +361,13 @@ func _advance_trails() -> void:
 			)
 		var at: Vector2i = trail["at"]
 		if at.x >= TRAIL_X_END:
+			# `DoNextFrameForAllSprites` calls `UpdateAnimFrame` whatever the
+			# animation did, so `.delete`'s `DeinitializeSprite` does not take the
+			# sprite off this frame: the struct is drawn once more where it
+			# stands, and the frameset it is drawn through steps as usual.
+			trail["dead"] = true
+			_advance_trail_frameset(trail)
+			alive.append(trail)
 			continue
 		at.x += TRAIL_X_STEP
 		if _profile == RomRegistry.GOLD:
@@ -348,7 +378,13 @@ func _advance_trails() -> void:
 		_advance_trail_frameset(trail)
 		alive.append(trail)
 	_trails = alive
-	if (_timer & TRAIL_SPAWN_MASK) != 0 or _trails.size() >= MAX_TRAILS:
+	# A struct deleted on this pass has already released its slot, so it is not
+	# one of the ten `_InitSpriteAnimStruct` walks even though it is still drawn.
+	var live: int = 0
+	for trail: Dictionary in _trails:
+		if not bool(trail["dead"]):
+			live += 1
+	if (_timer & TRAIL_SPAWN_MASK) != 0 or live >= MAX_TRAILS:
 		return
 	var spawn: Vector2i = TRAIL_AT_SILVER
 	if _profile == RomRegistry.GOLD:
@@ -362,26 +398,36 @@ func _advance_trails() -> void:
 	if _anim_count == 0:
 		_anim_count = 1
 	_trails.append({
-		"at": spawn, "var1": 0, "yoffset": 0, "fresh": true, "index": _anim_count,
-		"set": 0, "frame": -1, "duration": 0,
+		"at": spawn, "var1": 0, "yoffset": 0, "fresh": true, "dead": false,
+		"index": _anim_count, "set": 0, "frame": -1, "duration": 0,
 	})
 
 
-## `GetSpriteAnimFrame` for one trail. The counter starts at -1 and the duration
-## loads on the pass that reads an entry, so `oamframe X, n` is drawn n + 1
-## times; Gold `oamrestart`s and Silver `oamend`s, repeating the last.
-func _advance_trail_frameset(trail: Dictionary) -> void:
-	var frames: Array[Vector2i] = TRAIL_FRAMESET_GOLD if _profile == RomRegistry.GOLD \
-		else TRAIL_FRAMESET_SILVER
-	if int(trail["duration"]) > 0:
-		trail["duration"] = int(trail["duration"]) - 1
+## `GetSpriteAnimFrame` for one struct, [param state] carrying its `frame`,
+## `duration` and `set`. The duration loads on the pass that reads an entry, so
+## `oamframe X, n` is drawn n + 1 times; [param restarts] is `oamrestart` and
+## the other end is `oamend`, whose `.repeat_last` holds the last entry.
+func _advance_frameset(
+	state: Dictionary, frames: Array[Vector2i], restarts: bool
+) -> void:
+	if int(state["duration"]) > 0:
+		state["duration"] = int(state["duration"]) - 1
 		return
-	var at: int = int(trail["frame"]) + 1
+	var at: int = int(state["frame"]) + 1
 	if at >= frames.size():
-		at = 0 if _profile == RomRegistry.GOLD else frames.size() - 1
-	trail["frame"] = at
-	trail["set"] = frames[at].x
-	trail["duration"] = frames[at].y
+		at = 0 if restarts else frames.size() - 1
+	state["frame"] = at
+	state["set"] = frames[at].x
+	state["duration"] = frames[at].y
+
+
+## The trails' own frameset, which Gold `oamrestart`s and Silver `oamend`s.
+func _advance_trail_frameset(trail: Dictionary) -> void:
+	_advance_frameset(
+		trail,
+		TRAIL_FRAMESET_GOLD if _profile == RomRegistry.GOLD else TRAIL_FRAMESET_SILVER,
+		_profile == RomRegistry.GOLD
+	)
 
 
 ## `AnimSeqs_Sine` over `BattleAnimSineWave`, as the byte `UpdateAnimFrame` adds
@@ -519,24 +565,13 @@ func _bird_sprites() -> Array[Dictionary]:
 func bird_frame() -> int:
 	if _profile == RomRegistry.CRYSTAL:
 		return -1
-	return int(_bird_frameset()[_bird_entry()].x)
+	return _bird_set
 
 
 ## `SPRITEANIMSTRUCT_FRAME` is the frameset entry, not the OAM set it names:
 ## Gold's list reaches set 2 twice and `.TitleTrailCoords` indexes the entry.
 func _bird_entry() -> int:
-	var frameset: Array[Vector2i] = _bird_frameset()
-	var total: int = 0
-	for entry: Vector2i in frameset:
-		total += entry.y
-	if total <= 0:
-		return 0
-	var at: int = _bird_frame % total
-	for index: int in frameset.size():
-		if at < frameset[index].y:
-			return index
-		at -= frameset[index].y
-	return 0
+	return _bird_frame
 
 
 func _bird_frameset() -> Array[Vector2i]:

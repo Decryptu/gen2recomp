@@ -147,11 +147,19 @@ const BIRD_SETS_SILVER: Array[Vector2i] = [
 	Vector2i(1, 0x60), Vector2i(0, 0x00),
 ]
 
-## `.OAMData_GSTitleTrail`: one 8x16 object a tile up and left of the struct's
-## own coordinate, drawn through object palette 1. `SPRITE_ANIM_OAMSET_GS_TITLE_TRAIL_1`
-## and `_2` are the same picture at vtile $f8 and $fa, and `TitleScreen` copies
-## the trail into `vTiles1 tile $78`, which is where those two land.
-const TRAIL_AT := Vector3i(-8, -8, 0x00)
+## `.OAMData_GSTitleTrail`, which is not the same picture on the two cartridges.
+## Gold's is one 8x16 object at `dbsprite -1, -1, 4, 4`, so its four pixels of
+## offset take it half a tile up and left of the struct rather than a whole one;
+## Silver's is two objects side by side at `-1, -1` and `0, -1` with no pixel
+## offset, and its own tiles rather than a vtile base. Both are drawn through
+## object palette 1.
+const TRAIL_OAM_GOLD: Array[Vector3i] = [Vector3i(-4, -4, 0x00)]
+const TRAIL_OAM_SILVER: Array[Vector3i] = [
+	Vector3i(-8, -8, 0x00), Vector3i(0, -8, 0x02),
+]
+## `SPRITE_ANIM_OAMSET_GS_TITLE_TRAIL_1` and `_2` are Gold's one picture at vtile
+## $f8 and $fa, which is what its frameset alternates. Silver's frameset reaches
+## only `_1`, so nothing steps this there.
 const TRAIL_TILES: Array[int] = [0x00, 0x02]
 ## `TitleScreen` copies the trail into `vTiles1 tile $78`, which the object
 ## layer addresses as tile $78 of the second sheet.
@@ -435,11 +443,14 @@ func _oam_set(kind: StringName, frame: int) -> Array[Vector3i]:
 		Gen2TitleScene.SPRITE_CRYSTAL:
 			return [Vector3i(0, 0, 0)] as Array[Vector3i]
 		Gen2TitleScene.SPRITE_TRAIL:
-			# The frameset's own two sets, which are one picture each.
-			return [Vector3i(
-				TRAIL_AT.x, TRAIL_AT.y,
-				TRAIL_TILES[clampi(frame, 0, TRAIL_TILES.size() - 1)]
-			)] as Array[Vector3i]
+			if _profile == RomRegistry.SILVER:
+				return TRAIL_OAM_SILVER
+			# Gold's frameset alternates the two vtile bases over one picture.
+			var step: int = TRAIL_TILES[clampi(frame, 0, TRAIL_TILES.size() - 1)]
+			var trail: Array[Vector3i] = []
+			for part: Vector3i in TRAIL_OAM_GOLD:
+				trail.append(Vector3i(part.x, part.y, part.z + step))
+			return trail
 		_:
 			var sets: Array[Vector2i] = (
 				BIRD_SETS_GOLD if _profile == RomRegistry.GOLD else BIRD_SETS_SILVER
