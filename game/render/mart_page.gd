@@ -29,6 +29,25 @@ const MONEY_AT: Vector2i = Vector2i(11, 0)
 const MONEY_SIZE: Vector2i = Vector2i(9, 3)
 const MONEY_TEXT_AT: Vector2i = Vector2i(12, 1)
 
+## `constants/script_constants.asm`'s COIN count, printed by `PrintNum` as two
+## bytes in four digits with `PlaceString`'s own leading blanks in front of it.
+const COIN_DIGITS: int = 4
+
+## The other two boxes of `engine/menus/menu_2.asm`, which the overworld's
+## `special DisplayCoinCaseBalance` and `special DisplayMoneyAndCoinBalance`
+## write over the map. `Textbox`, not `MenuBox`: the coin box places "COIN" at
+## `hlcoord 12, 0`, which is its own top border row.
+const COIN_CASE_AT: Vector2i = Vector2i(11, 0)
+const COIN_CASE_SIZE: Vector2i = Vector2i(9, 3)
+const COIN_CASE_LABEL_AT: Vector2i = Vector2i(12, 0)
+const COIN_CASE_COUNT_AT: Vector2i = Vector2i(13, 1)
+const BALANCES_AT: Vector2i = Vector2i(5, 0)
+const BALANCES_SIZE: Vector2i = Vector2i(15, 5)
+const BALANCES_MONEY_LABEL_AT: Vector2i = Vector2i(6, 1)
+const BALANCES_MONEY_AT: Vector2i = Vector2i(12, 1)
+const BALANCES_COIN_LABEL_AT: Vector2i = Vector2i(6, 3)
+const BALANCES_COIN_AT: Vector2i = Vector2i(15, 3)
+
 ## `MenuHeader_Buy`: `menu_coords 1, 3, SCREEN_WIDTH - 1, TEXTBOX_Y - 1`, four
 ## rows of eight columns. `ScrollingMenu_InitFlags` puts the cursor on the left
 ## border coordinate itself and steps `$20`, which is two rows.
@@ -126,6 +145,58 @@ func render(state: Dictionary) -> Image:
 ## in seven cells. `PrintBCDNumber` lays the prices down the same way.
 static func money_string(amount: int) -> String:
 	return ("¥%d" % maxi(amount, 0)).lpad(MONEY_CELLS)
+
+
+## One of the three balance windows as an image and the tile it stands at:
+## `{"image": Image, "at": Vector2i}`, empty when the font is missing. The three
+## are one routine's neighbours, which is why they are drawn here rather than
+## beside the overworld: `PlaceMoneyTopRight` is the box this screen already
+## draws and the other two are the same file's.
+static func balance_window(
+	data: GameData, kind: StringName, money: int, coins: int
+) -> Dictionary:
+	var page: Gen2MartPage = Gen2MartPage.from_data(data)
+	if page == null:
+		return {}
+	var at: Vector2i = MONEY_AT
+	var box: Vector2i = MONEY_SIZE
+	match kind:
+		&"coin_case":
+			at = COIN_CASE_AT
+			box = COIN_CASE_SIZE
+		&"money_and_coins":
+			at = BALANCES_AT
+			box = BALANCES_SIZE
+	var width: int = Gen2Screen.WIDTH
+	var indices := PackedByteArray()
+	indices.resize(width * Gen2Screen.HEIGHT)
+	page.font.draw_box(
+		page.frame_style, indices, width, at.x * TILE, at.y * TILE, box.x, box.y
+	)
+	match kind:
+		&"coin_case":
+			page._text(indices, width, "COIN", COIN_CASE_LABEL_AT)
+			page._text(indices, width, coin_string(coins), COIN_CASE_COUNT_AT)
+		&"money_and_coins":
+			page._text(indices, width, "MONEY", BALANCES_MONEY_LABEL_AT)
+			page._text(indices, width, money_string(money), BALANCES_MONEY_AT)
+			page._text(indices, width, "COIN", BALANCES_COIN_LABEL_AT)
+			page._text(indices, width, coin_string(coins), BALANCES_COIN_AT)
+		_:
+			page._text(indices, width, money_string(money), MONEY_TEXT_AT)
+	var image: Image = Gen2PicImage.from_indices(
+		indices, width, Gen2Screen.HEIGHT,
+		Gen2Palette.pic_palette(PackedColorArray([Color.WHITE, Color.BLACK]))
+	)
+	return {
+		"image": image.get_region(Rect2i(at * TILE, box * TILE)),
+		"at": at,
+	}
+
+
+## `PrintNum` with `lb bc, 2, 4`: four digits, right aligned, no `¥`.
+static func coin_string(coins: int) -> String:
+	return ("%d" % maxi(coins, 0)).lpad(COIN_DIGITS)
 
 
 func _draw_money(indices: PackedByteArray, width: int, money: int) -> void:

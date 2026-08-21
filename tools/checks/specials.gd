@@ -52,12 +52,10 @@ const EXPECTED_DEFERRED: Dictionary = {
 	30: "DayCareMan", 31: "DayCareLady", 32: "DayCareManOutside",
 	34: "BankOfMom", 39: "UnownPrinter", 40: "MapRadio", 41: "UnownPuzzle",
 	42: "SlotMachine", 43: "CardFlip", 57: "GameCornerPrizeMonCheckDex",
-	75: "GiveShuckle", 76: "ReturnShuckie", 77: "BillsGrandfather",
-	79: "DisplayCoinCaseBalance", 80: "DisplayMoneyAndCoinBalance",
-	81: "PlaceMoneyTopRight", 82: "CheckForLuckyNumberWinners",
+	75: "GiveShuckle", 76: "ReturnShuckie",
+	82: "CheckForLuckyNumberWinners",
 	83: "CheckLuckyNumberShowFlag", 84: "ResetLuckyNumberShowFlag",
-	85: "PrintTodaysLuckyNumber", 97: "OlderHaircutBrother",
-	98: "YoungerHaircutBrother", 99: "DaisysGrooming", 103: "TrainerHouse",
+	85: "PrintTodaysLuckyNumber", 103: "TrainerHouse",
 	104: "PhotoStudio", 107: "Diploma", 108: "PrintDiploma",
 	126: "Reset", 131: "MoveTutor", 132: "OmanyteChamber",
 	141: "HoOhChamber", 143: "CelebiShrineEvent", 144: "CheckCaughtCelebi",
@@ -238,6 +236,21 @@ func _verify_corpus(data: GameData, crystal_commands: bool) -> void:
 		unnamed.is_empty(),
 		"%d script sites reach a special this project neither answers nor names: %s" % [
 			sites, ", ".join(unnamed),
+		]
+	)
+	## The census the exit code cannot carry: how much of the corpus is still
+	## waiting on a named routine, which is what says whether the list is
+	## shrinking between sessions.
+	var deferred_sites: int = 0
+	var deferred_indices: int = 0
+	for raw_special: Variant in reached:
+		if not EXPECTED_DEFERRED.has(int(raw_special)):
+			continue
+		deferred_indices += 1
+		deferred_sites += int(reached[raw_special])
+	_r.note(
+		"%d script sites reach %d named-but-unbuilt specials." % [
+			deferred_sites, deferred_indices,
 		]
 	)
 	## The other direction: a routine that is built has to leave the list, or

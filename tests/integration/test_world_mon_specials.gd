@@ -359,3 +359,93 @@ func test_no_on_the_confirmation_leaves_the_moves_alone() -> void:
 		" ".join(_world_screen._text_box.text_lines()),
 		" ".join(_data.move_deleter_text("come_again").split("\n"))
 	)
+
+
+## `engine/events/haircut.asm`'s four routines are the same `SelectMonFromParty`
+## with no boxes of their own: every line the player reads belongs to the map
+## script, so the special owes a party list and an answer and nothing else.
+func _run_haircut(special: int) -> void:
+	_write_name_rater_script(special)
+	await _open_world()
+	_run_script()
+
+
+func _selection_list() -> Gen2PartyScreen:
+	return _world_screen._party_host
+
+
+func test_a_grooming_special_opens_the_party_list_with_no_box_of_its_own() -> void:
+	await _run_haircut(Gen2WorldScriptRunner.SPECIAL_OLDER_HAIRCUT_BROTHER)
+	assert_not_null(_selection_list())
+	assert_eq(_selection_list()._prompt(), Gen2PartyScreen.PROMPT_CHOOSE)
+	assert_false(_world_screen._text_box.visible, "the script owns every line")
+	assert_false(_world_screen.move_player(Vector2i.RIGHT))
+
+
+## `.nope`: the carry a B press or the CANCEL row answers with is `xor a`, which
+## is the `ifequal $0` both haircut scripts refuse on.
+func test_cancelling_the_list_answers_zero_and_changes_no_happiness() -> void:
+	await _run_haircut(Gen2WorldScriptRunner.SPECIAL_YOUNGER_HAIRCUT_BROTHER)
+	var before: int = _world_screen.active_save().party[0].happiness
+	_selection_list().handle_button(Gen2Button.B)
+	assert_null(_selection_list())
+	assert_eq(_world_screen._world._active_script._script_value, 0)
+	assert_eq(_world_screen.active_save().party[0].happiness, before)
+
+
+## `.egg`: `cp EGG` is read before the name copy and before `Random`, so an egg
+## answers 1 and no row is walked.
+func test_an_egg_answers_one_and_is_not_groomed() -> void:
+	await _run_haircut(Gen2WorldScriptRunner.SPECIAL_DAISYS_GROOMING)
+	var mon: Gen2SaveMon = _world_screen.active_save().party[0]
+	mon.is_egg = true
+	var before: int = mon.happiness
+	_selection_list().handle_button(Gen2Button.A)
+	assert_eq(_world_screen._world._active_script._script_value, 1)
+	assert_eq(mon.happiness, before)
+
+
+## `call ChangeHappiness` on the row `Random` picked, and `wCurPartySpecies`
+## left holding the chosen member, which is what a following
+## `special PlayCurMonCry` reads rather than the row in wScriptVar.
+func test_grooming_raises_happiness_and_leaves_the_chosen_species_standing() -> void:
+	await _run_haircut(Gen2WorldScriptRunner.SPECIAL_DAISYS_GROOMING)
+	var mon: Gen2SaveMon = _world_screen.active_save().party[0]
+	mon.happiness = 100
+	_selection_list().handle_button(Gen2Button.A)
+	var runner: Gen2WorldScriptRunner = _world_screen._world._active_script
+	assert_gt(mon.happiness, 100, "HAPPINESS_GROOMING is a rise at every threshold")
+	assert_eq(runner._cur_party_species, mon.species)
+	assert_ne(runner._script_value, mon.species,
+		"wScriptVar carries the table row, which is why the cry reads the other byte")
+
+
+## `BillsGrandfather` has no egg branch and no table: it answers the species
+## itself, which is what `ifnotequal LICKITUNG` and its four siblings read.
+func test_bills_grandfather_answers_the_chosen_species() -> void:
+	await _run_haircut(Gen2WorldScriptRunner.SPECIAL_BILLS_GRANDFATHER)
+	var mon: Gen2SaveMon = _world_screen.active_save().party[0]
+	var before: int = mon.happiness
+	_selection_list().handle_button(Gen2Button.A)
+	assert_eq(_world_screen._world._active_script._script_value, mon.species)
+	assert_eq(mon.happiness, before, "no row is walked here")
+
+
+## The three balance windows write the tilemap and return, so the script runs
+## straight on and the box stands over the map until `closetext` redraws it.
+func test_a_balance_window_stands_over_the_map_until_closetext() -> void:
+	var directory: String = Fixture.directory()
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(directory))
+	scripts[Gen2WorldScript.pointer_key(Fixture.BANK, Fixture.TUTORIAL_SCRIPT)] = [
+		Gen2WorldScript.SPECIAL,
+		Gen2WorldScriptRunner.SPECIAL_PLACE_MONEY_TOP_RIGHT, 0x00,
+		Gen2WorldScript.WAITBUTTON,
+		Gen2WorldScript.CLOSETEXT,
+		Gen2WorldScript.END,
+	]
+	RomCache.write_json(RomCache.world_scripts_path(directory), scripts)
+	await _open_world()
+	_run_script()
+	assert_true(_world_screen.money_window_open())
+	_world_screen.press_button(Gen2Button.A)
+	assert_false(_world_screen.money_window_open())

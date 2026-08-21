@@ -90,6 +90,13 @@ var player_name: String = ""
 ## started without one randomizes its own rather than reaching for the engine's
 ## global generator, which no seed can reach.
 var _random := RandomNumberGenerator.new()
+## wCurPartySpecies, which is not wScriptVar: `PartyMenuSelect` writes it from
+## the row the player chose and `pokepic`, `givepoke` and `giveegg` from their
+## own operands. `PlayCurMonCry` is the one special that reads it, and all four
+## of its scripts reach it with a grooming routine's own wScriptVar standing.
+var _cur_party_species: int = 0
+## Which balance window `engine/menus/menu_2.asm` left standing, empty for none.
+var _money_window: StringName = &""
 
 const PHONE_CONTACT_GOT: int = 0
 const PHONE_CONTACTS_FULL: int = 1
@@ -166,6 +173,40 @@ const SPECIAL_MOVE_DELETION: int = 33
 ## the party list `SelectMonFromParty` opens, so the whole routine is one host
 ## request; the map script's own `waitbutton` follows it.
 const SPECIAL_NAME_RATER: int = 87
+## `engine/events/haircut.asm`'s four routines, each of them
+## `SelectMonFromParty` and then a read. `BillsGrandfather` answers the chosen
+## member's *species*, since it names it with `GetPokemonName`; the three
+## grooming routines answer `HappinessData_*`'s own row and name the member with
+## `GetCurNickname`.
+const SPECIAL_BILLS_GRANDFATHER: int = 77
+const SPECIAL_OLDER_HAIRCUT_BROTHER: int = 97
+const SPECIAL_YOUNGER_HAIRCUT_BROTHER: int = 98
+const SPECIAL_DAISYS_GROOMING: int = 99
+## Which `HappinessData_*` table each of the three walks.
+const GROOMING_TABLE_OF: Dictionary = {
+	SPECIAL_OLDER_HAIRCUT_BROTHER: &"older_haircut",
+	SPECIAL_YOUNGER_HAIRCUT_BROTHER: &"younger_haircut",
+	SPECIAL_DAISYS_GROOMING: &"grooming",
+}
+## `EGG`, which `HaircutOrGrooming` answers 1 for rather than grooming.
+const SPECIES_EGG: int = 0xFD
+
+## `constants/script_constants.asm`'s YOUR_MONEY, the account every
+## `PlaceMoneyTextbox` prints and the one `checkmoney`/`takemoney` default to.
+const ACCOUNT_YOUR_MONEY: int = 0
+
+## The three balance windows of `engine/menus/menu_2.asm`. Each writes the
+## tilemap and returns, so the box stands over the map until `closetext`
+## redraws it, which is the same lifetime `Script_pokepic`'s box has.
+const SPECIAL_DISPLAY_COIN_CASE_BALANCE: int = 79
+const SPECIAL_DISPLAY_MONEY_AND_COIN_BALANCE: int = 80
+const SPECIAL_PLACE_MONEY_TOP_RIGHT: int = 81
+const MONEY_WINDOW_KIND_OF: Dictionary = {
+	SPECIAL_DISPLAY_COIN_CASE_BALANCE: &"coin_case",
+	SPECIAL_DISPLAY_MONEY_AND_COIN_BALANCE: &"money_and_coins",
+	SPECIAL_PLACE_MONEY_TOP_RIGHT: &"money_top_right",
+}
+
 ## DisplayUnownWords, which is Crystal's alone: pokegold's table stops well
 ## before it, so no Gold or Silver script can reach this index and neither dump
 ## ships the words. The four wall patterns are Crystal bg events, two per
@@ -761,6 +802,12 @@ func complete_runtime_request(result: Dictionary) -> Dictionary:
 		):
 			return _fail(&"phone_script_missing", phone_script)
 		return advance()
+	if kind == &"party_selection_requested":
+		if not bool(result.get("ok", false)):
+			return _fail(
+				StringName(result.get("reason", &"party_selection_failed")), result
+			)
+		return _finish_party_selection(request, result)
 	if kind == &"apricorn_selection_requested":
 		if not bool(result.get("ok", false)):
 			return _fail(
@@ -1321,6 +1368,11 @@ func _execute(command: Dictionary, frame: Dictionary) -> Dictionary:
 			## an unrelated menu.
 			if opcode == Gen2WorldScript.CLOSETEXT:
 				_standing_text = ""
+				## The balance windows are tilemap, so the redraw behind the box
+				## is what takes them away too.
+				if _money_window != &"":
+					_money_window = &""
+					_emit_runtime_event(&"money_window_closed", {})
 		Gen2WorldScript.ITEMNOTIFY:
 			## `CurItemName` reads wCurItem, which whichever `giveitem` came
 			## before this wrote.
@@ -1364,6 +1416,9 @@ func _execute(command: Dictionary, frame: Dictionary) -> Dictionary:
 			var species: Array = party.get("species", [])
 			_script_value = 1 if int(command.get("value", 0)) in species else 0
 		Gen2WorldScript.GIVEPOKE, Gen2WorldScript.GIVEEGG:
+			## Both write their species operand to wCurPartySpecies before the
+			## routine runs, whether or not the party had room for it.
+			_cur_party_species = int(command.get("pokemon", 0))
 			return _stage_runtime_request(&"pokemon_requested", command)
 		Gen2WorldScript.GIVEPOKEMAIL, Gen2WorldScript.CHECKPOKEMAIL:
 			return _stage_runtime_request(&"mail_requested", command)
@@ -1517,8 +1572,15 @@ const CATALOG_KINDS: Dictionary = {
 func _execute_later_command(source_opcode: int, command: Dictionary, bank: int) -> Dictionary:
 	match source_opcode:
 		0x55:
+			## `Script_pokepic` takes wScriptVar when its operand is zero and
+			## writes whichever it settled on to wCurPartySpecies, which is
+			## what a later `special PlayCurMonCry` reads.
+			var pic_species: int = int(command.get("pokemon", 0))
+			if pic_species == 0:
+				pic_species = _script_value
+			_cur_party_species = pic_species
 			_emit_runtime_event(&"pokemon_picture_requested", {
-				"pokemon": int(command.get("pokemon", 0)),
+				"pokemon": pic_species,
 			})
 		0x56:
 			_emit_runtime_event(&"pokemon_picture_closed", {})
@@ -2562,14 +2624,18 @@ func _execute_special(special: int) -> Dictionary:
 		95, 100:
 			## `PlaySlowCry` (95) is `LoadCry` with the record's own pitch
 			## lowered by `$140` and its length raised by `$60`, and
-			## `PlayCurMonCry` (100) is `PlayMonCry` straight. Both take their
-			## species from wScriptVar (the second through `wCurPartySpecies`,
-			## which the `loadvar` in front of it has already set) and write
-			## nothing back, so what they owe is the sound and the `WaitSFX`
-			## each ends on. `Script_cry`'s own request is the same one.
+			## `PlayCurMonCry` (100) is `PlayMonCry` straight. Neither writes
+			## anything back, so what they owe is the sound and the `WaitSFX`
+			## each ends on, which is `Script_cry`'s own request.
+			##
+			## They do not read the same byte. 95 is `ld a, [wScriptVar]`, which
+			## the `setval` in front of it has just set; 100 is
+			## `ld a, [wCurPartySpecies]`, and all four of its scripts are a
+			## grooming routine's, which leaves a `HappinessData_*` row rather
+			## than a species in wScriptVar.
 			return _stage_audio_request(&"cry", {
 				"special": special,
-				"species": _script_value,
+				"species": _script_value if special == 95 else _cur_party_species,
 				"slow": special == 95,
 			})
 		59:
@@ -2652,6 +2718,28 @@ func _execute_special(special: int) -> Dictionary:
 			_emit_runtime_event(&"roaming_mons_initialized", {
 				"special": special,
 				"count": state.roaming_mons().size() if state != null else 0,
+			})
+		SPECIAL_BILLS_GRANDFATHER, SPECIAL_OLDER_HAIRCUT_BROTHER, \
+		SPECIAL_YOUNGER_HAIRCUT_BROTHER, SPECIAL_DAISYS_GROOMING:
+			## `engine/events/haircut.asm`. All four open `SelectMonFromParty`
+			## and nothing else: every box either routine's script shows is the
+			## script's own, so the host owes a party list and an answer.
+			return _stage_runtime_request(&"party_selection_requested", {
+				"special": special,
+				"routine": GROOMING_TABLE_OF.get(special, &"bills_grandfather"),
+			})
+		SPECIAL_DISPLAY_COIN_CASE_BALANCE, SPECIAL_DISPLAY_MONEY_AND_COIN_BALANCE, \
+		SPECIAL_PLACE_MONEY_TOP_RIGHT:
+			## Three tilemap writes and a `ret`. The window stands over the map
+			## until `closetext` redraws it, so a script that spends money
+			## between two of them (the haircut brothers' `takemoney`) draws the
+			## second over the first.
+			_money_window = MONEY_WINDOW_KIND_OF[special]
+			_emit_runtime_event(&"money_window_opened", {
+				"special": special,
+				"kind": _money_window,
+				"money": _money_balance(ACCOUNT_YOUR_MONEY),
+				"coins": _coins_value(),
 			})
 		SPECIAL_NAME_RATER:
 			return _stage_runtime_request(&"name_rater_requested", {
@@ -3036,6 +3124,54 @@ func _decode_bcd(bytes: PackedByteArray) -> int:
 	for byte: int in bytes:
 		value = value * 100 + ((byte >> 4) * 10) + (byte & 0x0F)
 	return value
+
+
+## `engine/events/haircut.asm` past its `farcall SelectMonFromParty`.
+##
+## The carry the party list answers a B press or its CANCEL row with is
+## `.nope`/`.cancel`, which is `xor a` in every one of the four; an EGG is
+## `.egg`'s own 1, and only the three grooming routines test for it, because
+## `BillsGrandfather` has no such branch and answers EGG as a species like any
+## other. `GetCurNickname` names the member for the three and `GetPokemonName`
+## the species for the fourth, both into wStringBuffer3.
+func _finish_party_selection(request: Dictionary, result: Dictionary) -> Dictionary:
+	var values: Dictionary = request.get("values", {})
+	var special: int = int(values.get("special", 0))
+	var routine: StringName = StringName(values.get("routine", &""))
+	var party_index: int = int(result.get("party_index", -1))
+	if party_index < 0:
+		_script_value = 0
+		_pending = {}
+		return advance()
+	var species: int = int(result.get("species", 0))
+	_cur_party_species = species
+	if routine == &"bills_grandfather":
+		_script_value = species
+		_set_text_buffer(3, String(result.get("species_name", "")), &"chosen_party_mon", {
+			"special": special, "slot": party_index,
+		})
+		_pending = {}
+		return advance()
+	if species == SPECIES_EGG:
+		_script_value = 1
+		_pending = {}
+		return advance()
+	_set_text_buffer(3, String(result.get("nickname", "")), &"chosen_party_mon", {
+		"special": special, "slot": party_index,
+	})
+	## `call Random` sits behind the name copy, so the roll is spent whether or
+	## not the row it picks changes anything.
+	var outcome: Dictionary = Gen2WorldPartyHost.groom_outcome(
+		routine, _random.randi() & 0xFF, _crystal_commands()
+	)
+	_script_value = int(outcome["script_value"])
+	_emit_runtime_event(&"party_happiness_changed", {
+		"special": special,
+		"slot": party_index,
+		"happiness_kind": int(outcome["happiness_kind"]),
+	})
+	_pending = {}
+	return advance()
 
 
 func _emit_runtime_event(kind: StringName, values: Dictionary) -> void:
