@@ -49,7 +49,7 @@ const EXPECTED_DEFERRED: Dictionary = {
 	## work, not a dispatch entry: it opens a screen, spends a transaction, or
 	## reads a save field nothing writes.
 	25: "CheckMagikarpLength", 26: "MagikarpHouseSign",
-	34: "BankOfMom", 39: "UnownPrinter", 40: "MapRadio", 41: "UnownPuzzle",
+	34: "BankOfMom", 39: "UnownPrinter", 40: "MapRadio",
 	42: "SlotMachine", 43: "CardFlip", 57: "GameCornerPrizeMonCheckDex",
 	75: "GiveShuckle", 76: "ReturnShuckie",
 	82: "CheckForLuckyNumberWinners",

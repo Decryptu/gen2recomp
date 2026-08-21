@@ -233,6 +233,11 @@ const MONEY_WINDOW_KIND_OF: Dictionary = {
 ## chamber, where Gold and Silver's cells carry only the puzzle sign. A preceding
 ## `setval` puts the `UNOWNWORDS_*` index in wScriptVar. Not to be read as 41,
 ## which is `UnownPuzzle` on both and is the sliding puzzle itself.
+## `UnownPuzzle`, the sliding puzzle each of the four Ruins of Alph chambers
+## opens. The map's own `setval` in front of it names which picture; the special
+## answers `wSolvedUnownPuzzle` in wScriptVar, which the `iftrue` after the
+## `closetext` reads. 41 on both profiles, being under `special_index`'s split.
+const SPECIAL_UNOWN_PUZZLE: int = 41
 const SPECIAL_DISPLAY_UNOWN_WORDS: int = 135
 const SPECIAL_RANDOM_UNSEEN_WILD_MON: int = 91
 const SPECIAL_RANDOM_PHONE_WILD_MON: int = 92
@@ -894,6 +899,9 @@ func complete_runtime_request(result: Dictionary) -> Dictionary:
 		## Neither routine writes anything a script reads: each returns and the
 		## map's own `waitbutton` presses the text it left standing.
 		&"name_rater_requested", &"move_deleter_requested",
+		## `UnownPuzzle` answers `wSolvedUnownPuzzle`, which is zero for a board
+		## left on START and one for a solved one.
+		&"unown_puzzle_requested",
 	]:
 		if not bool(result.get("ok", false)):
 			return _fail(
@@ -2867,6 +2875,13 @@ func _execute_special(special: int) -> Dictionary:
 				"special": special,
 				"kind": &"toggle_decorations_visibility",
 				"defaults": true,
+			})
+		SPECIAL_UNOWN_PUZZLE:
+			return _stage_runtime_request(&"unown_puzzle_requested", {
+				"special": special,
+				## `maskbits NUM_UNOWN_PUZZLES` is what bounds the operand, so a
+				## value outside the four wraps rather than failing.
+				"puzzle": _script_value & 0x3,
 			})
 		SPECIAL_DISPLAY_UNOWN_WORDS:
 			## The word the wall spells, staged as the text `JoyWaitAorB` holds

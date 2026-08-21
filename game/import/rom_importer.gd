@@ -342,6 +342,10 @@ static func verify_layout(rom: RomFile) -> Dictionary:
 	if not gs_intro["ok"]:
 		return gs_intro
 
+	var unown_puzzle: Dictionary = verify_unown_puzzle(rom, layout)
+	if not unown_puzzle["ok"]:
+		return unown_puzzle
+
 	var credits: Dictionary = verify_credits(rom, layout)
 	if not credits["ok"]:
 		return credits
@@ -1521,6 +1525,35 @@ static func verify_intro_movie(rom: RomFile, layout: Dictionary) -> Dictionary:
 			}
 	return {"ok": true, "message": "Intro movie verified."}
 
+
+## `_UnownPuzzle`'s art. The walk is most of the check: seven records whose
+## lengths are the sizes the routine copies into VRAM, each address the previous
+## entry's own consumed length, so one wrong pin fails the next entry.
+##
+## What the walk cannot see is that a puzzle picture is square: the four are
+## six by six tiles because `ConvertLoadedPuzzlePieces` doubles them into the
+## twelve-by-twelve grid the sixteen three-by-three pieces are cut from.
+static func verify_unown_puzzle(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var entry: Dictionary = layout.get("unown_puzzle", {})
+	if entry.is_empty() or int(entry.get("section", -1)) < 0:
+		return {"ok": true, "message": "No Unown puzzle on this cartridge."}
+
+	var section: Dictionary = read_unown_puzzle_section(rom, layout)
+	if section.is_empty():
+		return {"ok": false, "message": "The Unown puzzle section does not walk."}
+
+	var side: int = RomLayout.UNOWN_PUZZLE_PICTURE_TILES
+	for name: String in RomLayout.UNOWN_PUZZLE_PICTURES:
+		var tiles: int = int(section[name].size()) / Gen2Tiles.TILE_BYTES
+		if tiles != side * side:
+			return {
+				"ok": false,
+				"message": "The %s puzzle is not %d by %d tiles." % [name, side, side],
+			}
+
+	if RomLayout.predef_palette_offset(layout, RomLayout.PREDEFPAL_UNOWN_PUZZLE) < 0:
+		return {"ok": false, "message": "No PredefPals pin for the Unown puzzle palette."}
+	return {"ok": true, "message": "Unown puzzle verified."}
 
 ## `GoldSilverIntro`. The section walk is most of the check; what is left is the
 ## three palette runs outside it and the two metatile maps, which name their own
@@ -4058,6 +4091,7 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		"gs_intro": _import_gs_intro(rom, layout),
 		"oak_ratings": _import_oak_ratings(rom, layout),
 		"pokecenter_pc": _import_pokecenter_pc(rom, layout),
+		"unown_puzzle": _import_unown_puzzle(rom, layout),
 		"unown_words": Array(read_unown_words(rom, layout)),
 		"unown_walls": Array(read_unown_walls(rom, layout)),
 		"credits": _import_credits(rom, layout),
@@ -5411,6 +5445,90 @@ func _strip_sheet_entry(tiles: int) -> Dictionary:
 	}
 
 
+## `_UnownPuzzle`'s art section. `PuzzlePieceBorderData.TileBordersGFX` is pinned
+## on its own because thirty-four bytes of code sit between it and the run;
+## everything from `UnownPuzzleCursorGFX` on is one walk, each address the
+## previous entry's consumed length, with no alignment between them.
+##
+## Returns {name: PackedByteArray} in `UNOWN_PUZZLE_SECTION` order plus
+## `tile_borders`, or an empty Dictionary if any entry does not decompress to
+## its own size.
+static func read_unown_puzzle_section(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var entry: Dictionary = layout.get("unown_puzzle", {})
+	var borders: int = int(entry.get("tile_borders", -1))
+	var at: int = int(entry.get("section", -1))
+	if borders < 0 or at < 0:
+		return {}
+	var border_bytes: int = RomLayout.UNOWN_PUZZLE_BORDER_TILES * Gen2Tiles.TILE_BYTES
+	if not rom.in_bounds(borders, border_bytes):
+		return {}
+	var lz := Gen2Lz.new()
+	var out: Dictionary = {"tile_borders": rom.slice(borders, border_bytes)}
+	for row: Array in RomLayout.UNOWN_PUZZLE_SECTION:
+		var name: String = String(row[0])
+		var wanted: int = int(row[2]) * Gen2Tiles.TILE_BYTES
+		var raw: PackedByteArray = PackedByteArray()
+		var consumed: int = 0
+		if String(row[1]) == "raw":
+			if not rom.in_bounds(at, wanted):
+				return {}
+			raw = rom.slice(at, wanted)
+			consumed = wanted
+		else:
+			raw = lz.decompress(rom.bytes(), at)
+			consumed = lz.consumed
+			if lz.failed or raw.size() != wanted:
+				return {}
+		out[name] = raw
+		at += consumed
+		## The four pictures' own `.lz` files are zero-padded past the `$ff` the
+		## decompressor stops on: four bytes after Ho-Oh's stream, fifteen after
+		## Aerodactyl's, ten after Kabuto's, none after START>CANCEL's. A `$00`
+		## after a terminator cannot be a command, so the fill is skipped rather
+		## than modelled as an alignment, which no power of two fits. The walk
+		## still checks itself: every entry behind the fill has to decompress to
+		## exactly its own size.
+		while rom.in_bounds(at) and rom.u8(at) == 0:
+			at += 1
+	return out
+
+
+## The seven strips above, written the way the intro's are, plus the one palette
+## `_CGB_UnownPuzzle` draws the whole screen in.
+func _import_unown_puzzle_sheets(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var section: Dictionary = read_unown_puzzle_section(rom, layout)
+	if section.is_empty():
+		return {}
+	var directory: String = RomCache.directory_for(rom.id, rom.sha1)
+	var out: Dictionary = {}
+	var rows: Array = [
+		["tile_borders", "raw", RomLayout.UNOWN_PUZZLE_BORDER_TILES]
+	]
+	rows.append_array(RomLayout.UNOWN_PUZZLE_SECTION)
+	for row: Array in rows:
+		var name: String = String(row[0])
+		var tiles: int = int(row[2])
+		var path: String = RomCache.tile_path(directory, "unown_puzzle_%s" % name)
+		if not RomCache.write_indices(
+			path, Gen2Tiles.decode_2bpp_strip(section[name], 0, tiles)
+		):
+			return {}
+		out["unown_puzzle_%s" % name] = _strip_sheet_entry(tiles)
+	return out
+
+
+## `_CGB_UnownPuzzle`: `PalPacket_UnownPuzzle` names PREDEFPAL_UNOWN_PUZZLE for
+## all four background palettes, and object palette 0 is the same entry with its
+## first colour overwritten red, which is the colour the cursor is drawn in.
+func _import_unown_puzzle(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var palette: Array = _import_predef_palette(
+		rom, layout, RomLayout.PREDEFPAL_UNOWN_PUZZLE
+	)
+	if palette.is_empty():
+		return {}
+	return {"palette": palette}
+
+
 ## `GameFreakDittoGFX`, the one LZ run in the splash. `GameFreakPresentsInit`
 ## splits it over `vTiles0` and `vTiles1` as 128 tiles each, and the OAM sets
 ## index the result with a stride of $10, so it is kept as one strip of 256 and
@@ -5779,6 +5897,7 @@ func _import_tiles(rom: RomFile, layout: Dictionary, on_progress: Callable) -> D
 	written.merge(_import_pc_sheets(rom, layout), true)
 	written.merge(_import_intro_sheets(rom, layout), true)
 	written.merge(_import_gs_intro_sheets(rom, layout), true)
+	written.merge(_import_unown_puzzle_sheets(rom, layout), true)
 	var done: int = 0
 	for name: String in sheets:
 		var sheet: Dictionary = sheets[name]
