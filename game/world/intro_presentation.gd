@@ -117,6 +117,20 @@ func push_move_player_pic(right: bool) -> void:
 		push(KEEP, from + index * step, MOVE_STEP_FRAMES)
 
 
+## Applies the queued step's own palette byte and pic column without spending a
+## frame. A routine writes its first palette before the `DelayFrames` that holds
+## it, so a screen drawn between the push and the first VBlank is already in the
+## state the step names rather than one frame behind it.
+func sync() -> void:
+	if finished() or _step_frame != 0:
+		return
+	var step: Array = _steps[_step]
+	if int(step[0]) != KEEP:
+		_bgp = int(step[0])
+	if int(step[1]) != KEEP:
+		_column = int(step[1])
+
+
 ## Advances one source frame. False once the queue has run out, which is what
 ## tells a screen the routine it is standing in has returned.
 func advance_frame() -> bool:

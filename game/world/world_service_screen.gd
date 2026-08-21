@@ -1374,7 +1374,7 @@ func _dial_image() -> Image:
 	var day: int = clampi(_cursor, 0, Gen2ClockSetScreen.DAYS.size() - 1)
 	var prompt: String = _summary if not _summary.is_empty() \
 		else "What day is it?"
-	return _clock_page.render(Gen2ClockSetScreen.DAYS[day], prompt, -1, true)
+	return _clock_page.render(Gen2ClockSetScreen.DAYS[day], prompt, -1, &"day")
 
 
 ## The `menu_coords` box this mode's own list sits in. `null` draws no box,

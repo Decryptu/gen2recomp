@@ -133,9 +133,16 @@ func _drive(step: Vector2i) -> void:
 		_presses_run = step.x
 		return
 	if _what == "clock":
+		# `x` is A presses and `y` raw frames after them, so a fade or a
+		# `DelayFrames` run can be photographed partway as well as settled.
+		var clock: Gen2ClockSetScreen = _screen as Gen2ClockSetScreen
 		while _presses_run < step.x:
-			_screen.handle_button(Gen2Button.A)
+			_settle_frames(clock)
+			clock.handle_button(Gen2Button.A)
 			_presses_run += 1
+			_frames_run = 0
+		clock.advance_frames(maxi(step.y - _frames_run, 0))
+		_frames_run = maxi(step.y, _frames_run)
 		return
 	var speech: Gen2OakSpeechScreen = _screen as Gen2OakSpeechScreen
 	if _what == "speech":
@@ -144,7 +151,7 @@ func _drive(step: Vector2i) -> void:
 			_frames_run += 1
 		return
 	while _presses_run < step.x:
-		_settle(speech)
+		_settle_frames(speech)
 		speech.handle_button(Gen2Button.A)
 		_presses_run += 1
 		_frames_run = 0
@@ -154,11 +161,13 @@ func _drive(step: Vector2i) -> void:
 	_frames_run = maxi(step.y, _frames_run)
 
 
-func _settle(speech: Gen2OakSpeechScreen) -> void:
+## Spends whatever `DelayFrames` run or printing text a screen is standing in.
+func _settle_frames(screen: Node) -> void:
 	for _pass: int in 40:
-		if speech.animation_frames_left() == 0:
+		var owed: int = int(screen.call(&"animation_frames_left"))
+		if owed == 0:
 			return
-		speech.advance_frames(speech.animation_frames_left())
+		screen.call(&"advance_frames", owed)
 
 
 ## One capture per step, each after a fresh pair of rendered frames so the
