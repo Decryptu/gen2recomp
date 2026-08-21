@@ -700,6 +700,7 @@ func _battle_dump() -> PackedByteArray:
 	_write_hud(data, int(_layout["player_hud"]), RomLayout.PLAYER_HUD_TILES)
 	_write_bar_palettes(data)
 	_write_battle_object_palettes(data)
+	_write_stats_screen_palettes(data)
 	_write_stats_tiles(data)
 	return data
 
@@ -725,6 +726,19 @@ func _write_bar_palettes(data: PackedByteArray) -> void:
 	for index: int in RomLayout.BAR_PALETTE_NAMES.size():
 		var at: int = RomLayout.bar_palette_offset(_layout, index)
 		_write_palette(data, at, RomLayout.BAR_PALETTES[index])
+
+
+## `StatsScreenPagePals` and the `StatsScreenPals` tints behind it, one run.
+func _write_stats_screen_palettes(data: PackedByteArray) -> void:
+	for index: int in RomLayout.STATS_PAGE_PALETTES:
+		_write_palette(
+			data, RomLayout.stats_page_palette_offset(_layout, index),
+			RomLayout.STATS_SCREEN_PAGE_PALETTES[index]
+		)
+		_write_palette(
+			data, RomLayout.stats_page_tint_offset(_layout, index),
+			[RomLayout.STATS_SCREEN_PAGE_TINTS[index]]
+		)
 
 
 ## The six `BattleObjectPals`, checked the same way and for the same reason.
@@ -780,6 +794,17 @@ func _write_hud(data: PackedByteArray, at: int, tiles: int) -> void:
 func test_battle_graphics_that_count_up_verify() -> void:
 	var result: Dictionary = RomImporter.verify_battle_graphics(_rom(_battle_dump()), _layout)
 	assert_true(result["ok"], result["message"])
+
+
+## The stats screen's own run, checked the same way: its tints are the page
+## palettes' colour 1, so a run right in one half and wrong in the other is not
+## the run.
+func test_a_stats_page_palette_that_is_not_the_pinned_one_fails() -> void:
+	var data: PackedByteArray = _battle_dump()
+	data[RomLayout.stats_page_tint_offset(_layout, 1)] = 0x00
+	var result: Dictionary = RomImporter.verify_battle_graphics(_rom(data), _layout)
+	assert_false(result["ok"])
+	assert_string_contains(String(result["message"]), "Stats page tint 1")
 
 
 ## A palette table one table out still decodes into colours, so the check is the

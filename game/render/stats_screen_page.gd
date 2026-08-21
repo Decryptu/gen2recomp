@@ -277,33 +277,81 @@ func draw(page: Dictionary) -> PackedByteArray:
 	return indices
 
 
-## The page as pixels, with the HP bar blended over it in its own colour: the
-## hardware gives every tile a palette and one index buffer carries one, which
-## is how [Gen2PartyMenuPage] draws the same bar.
+## `_CGB_StatsScreenHPPals`' attrmap, as (x, y, width, height, palette) boxes
+## over the zeroes `WipeAttrmap` leaves: the upper half on the mon's own palette,
+## the exp bar's ten cells on the exp palette, and one palette per 2x2 page
+## indicator from slot [constant FIRST_PAGE_SLOT] on. The source's three blocks
+## are three `FillBoxCGB` calls at fixed columns; here they follow
+## [method page_indicators], so a registered page's block is coloured like the
+## cartridge's are.
+const MON_ROWS: int = 8
+const EXP_ATTR_AT: Vector2i = Vector2i(10, 16)
+const EXP_ATTR_WIDTH: int = 10
+const MON_SLOT: int = 1
+const EXP_SLOT: int = 2
+const FIRST_PAGE_SLOT: int = 3
+
+
+static func attributes(count: int = NUM_PAGES) -> PackedInt32Array:
+	var boxes: Array = [
+		[0, 0, COLUMNS, MON_ROWS, MON_SLOT],
+		[EXP_ATTR_AT.x, EXP_ATTR_AT.y, EXP_ATTR_WIDTH, 1, EXP_SLOT],
+	]
+	var indicators: Array[Vector2i] = page_indicators(count)
+	for index: int in indicators.size():
+		boxes.append([
+			indicators[index].x, indicators[index].y, PAGE_INDICATOR_STEP,
+			PAGE_INDICATOR_STEP, FIRST_PAGE_SLOT + index,
+		])
+	return Gen2PicImage.attribute_boxes(boxes, COLUMNS, ROWS)
+
+
+## The page as pixels. The hardware gives every tile a palette and one index
+## buffer carries one, so the HP bar, the exp bar, the front pic's own square and
+## the three page indicators are the attrmap rather than four blended layers.
+## Slot 0 is the HP palette, which is what `WipeAttrmap` leaves every other cell on.
+##
+## `LoadStatsScreenPals` writes the open page's colour over colour 0 of the HP
+## and exp palettes, which is what tints the lower screen pink, green or blue.
+## An egg never reaches it: `EggStatsInit` jumps past `StatsScreen_LoadPage`, so
+## its screen keeps the white both palettes came in with.
 func render(page: Dictionary, data: GameData) -> Image:
-	var image: Image = Gen2PicImage.from_indices(
-		draw(page), COLUMNS * TILE, ROWS * TILE,
-		Gen2Palette.pic_palette(PackedColorArray([Color.WHITE, Color.BLACK]))
-	)
-	if data == null or bool(page.get("egg", false)) \
-		or int(page.get("page", PINK_PAGE)) != PINK_PAGE:
-		return image
+	var indices: PackedByteArray = draw(page)
 	var width: int = COLUMNS * TILE
-	var buffer := PackedByteArray()
-	buffer.resize(width * ROWS * TILE)
+	if data == null:
+		return Gen2PicImage.from_indices(
+			indices, width, ROWS * TILE,
+			Gen2Palette.pic_palette(PackedColorArray([Color.WHITE, Color.BLACK]))
+		)
+
+	var egg: bool = bool(page.get("egg", false))
+	var number: int = int(page.get("page", PINK_PAGE))
 	var hp: int = int(page.get("hp", 0))
-	var max_hp: int = int(page.get("max_hp", 0))
-	hud.draw_hp_bar(buffer, width, HP_BAR, hp, max_hp)
-	var lit: int = Gen2BattleHud.bar_pixels(hp, max_hp, Gen2BattleHud.HP_BAR_TILES * TILE)
-	var fill: Image = Gen2PicImage.from_indices(
-		buffer, width, ROWS * TILE,
-		data.bar_palette(GameData.hp_bar_palette_name(lit)), true
+	var lit: int = Gen2BattleHud.bar_pixels(
+		hp, int(page.get("max_hp", 0)), Gen2BattleHud.HP_BAR_TILES * TILE
 	)
-	var at := Vector2i((HP_BAR.x + 2) * TILE, HP_BAR.y * TILE)
-	image.blend_rect(
-		fill, Rect2i(at, Vector2i(Gen2BattleHud.HP_BAR_TILES * TILE, TILE)), at
+	var tint: Color = Color.WHITE if egg else data.stats_page_tint(number)
+	var palettes: Array = [
+		_tinted(data.bar_palette(GameData.hp_bar_palette_name(lit)), tint),
+		data.egg_palette() if egg \
+			else data.palette(int(page.get("species", 0)), bool(page.get("shiny", false))),
+		_tinted(data.bar_palette(GameData.EXP_BAR_PALETTE), tint),
+	]
+	var count: int = page_count()
+	for index: int in count:
+		palettes.append(data.stats_page_palette(PINK_PAGE + index))
+	return Gen2PicImage.from_attributes(
+		indices, width, ROWS * TILE, attributes(count), COLUMNS, palettes
 	)
-	return image
+
+
+## `LoadStatsScreenPals`' two writes, which replace colour 0 and nothing else.
+func _tinted(palette: PackedColorArray, colour: Color) -> PackedColorArray:
+	if palette.is_empty():
+		return palette
+	var out: PackedColorArray = palette.duplicate()
+	out[0] = colour
+	return out
 
 
 ## `PrintTempMonStats`: the five names down one column and the five numbers down

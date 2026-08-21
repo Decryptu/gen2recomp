@@ -364,11 +364,13 @@ func _verify_screen(game_id: StringName, data: GameData) -> void:
 			0, "Restores HP.", name_cells
 		)
 		var image: Image = page.image(data, map, pocket)
-		_r.check(
+		if not _r.check(
 			image != null and image.get_width() == Gen2Screen.WIDTH
 				and image.get_height() == Gen2Screen.HEIGHT,
 			"%s: pocket %d did not compose a screen." % [game_id, pocket]
-		)
+		):
+			continue
+		_check_pack_palettes(game_id, data, image, pocket)
 	_r.check(
 		names.size() == RomLayout.PACK_POCKETS,
 		"%s: the four pocket names are %d distinct pieces." % [game_id, names.size()]
@@ -383,6 +385,57 @@ func _verify_screen(game_id: StringName, data: GameData) -> void:
 	print("%s: four pockets drawn, %d palettes, female pack %s." % [
 		game_id, RomLayout.PACK_PALETTES, "yes" if female else "no",
 	])
+
+
+## `_CGB_PackPals`' five `FillBoxCGB` calls, transcribed from the source rather
+## than read off [Gen2PackPage]: a colour a cell is drawn in has to come from the
+## palette its own slot names. A size assertion passes on a screen composed in
+## one palette, which is what the pack looked like before the attrmap was drawn
+## through.
+const SOURCE_PACK_BOXES: Array = [
+	[0, 0, 10, 1, 1],
+	[10, 0, 10, 1, 2],
+	[7, 2, 1, 9, 3],
+	[0, 7, 5, 3, 4],
+	[0, 3, 5, 3, 5],
+]
+
+
+func _check_pack_palettes(
+	game_id: StringName, data: GameData, image: Image, pocket: int
+) -> void:
+	var columns: int = Gen2PackPage.COLUMNS
+	var slots: PackedInt32Array = Gen2PicImage.attribute_boxes(
+		SOURCE_PACK_BOXES, columns, Gen2PackPage.ROWS
+	)
+	if not _r.check(
+		Array(Gen2PackPage.attributes()) == Array(slots),
+		"%s: the pack's attrmap is not `_CGB_PackPals`'." % game_id
+	):
+		return
+	var palettes: Array = []
+	for slot: int in RomLayout.PACK_PALETTES:
+		var colours := PackedColorArray()
+		for colour: Color in data.pack_palette(slot):
+			colours.append(Color8(
+				int(roundf(colour.r * 255.0)), int(roundf(colour.g * 255.0)),
+				int(roundf(colour.b * 255.0)), int(roundf(colour.a * 255.0))
+			))
+		palettes.append(colours)
+	for row: int in Gen2PackPage.ROWS:
+		for column: int in columns:
+			var allowed: PackedColorArray = palettes[slots[row * columns + column]]
+			for y: int in Gen2Font.TILE:
+				for x: int in Gen2Font.TILE:
+					var at := Vector2i(
+						column * Gen2Font.TILE + x, row * Gen2Font.TILE + y
+					)
+					if allowed.has(image.get_pixel(at.x, at.y)):
+						continue
+					_r.check(false, "%s: pocket %d cell %d,%d is off its own palette." % [
+						game_id, pocket, column, row,
+					])
+					return
 
 
 ## `PrintItemDescription` and `PrintMoveDescription`: every row the pack can

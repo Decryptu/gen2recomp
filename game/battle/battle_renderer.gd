@@ -604,7 +604,7 @@ func _draw_panels() -> void:
 		var gained: PackedByteArray = _new_buffer()
 		if player_hud:
 			_hud.draw_exp_bar(gained, Gen2Screen.WIDTH, exp_pixels)
-		_show_layer(_exp_bar, gained, _data.bar_palette("exp"))
+		_show_layer(_exp_bar, gained, _data.bar_palette(GameData.EXP_BAR_PALETTE))
 
 	_draw_hud_balls()
 

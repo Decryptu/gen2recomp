@@ -134,10 +134,7 @@ func advance() -> void:
 ## The page as pixels with the icon composed on top: it is an object, so colour
 ## 0 is transparent and it is blended rather than written into the buffer.
 func render(page: Dictionary, data: GameData) -> Image:
-	var image: Image = Gen2PicImage.from_indices(
-		draw(page), COLUMNS * TILE, ROWS * TILE,
-		Gen2Palette.pic_palette(PackedColorArray([Color.WHITE, Color.BLACK]))
-	)
+	var image: Image = _background(page, data)
 	if data == null or _frame < 0:
 		return image
 	var colors: PackedColorArray = data.party_menu_icon_palette()
@@ -151,6 +148,34 @@ func render(page: Dictionary, data: GameData) -> Image:
 			ICON_AT + Vector2i((quadrant & 1) * TILE, (quadrant >> 1) * TILE)
 		)
 	return image
+
+
+## `_CGB_MoveList`: `PREDEFPAL_GOLDENROD` over the whole screen, and one
+## `FillBoxCGB` putting the Pokémon's own HP palette on the nine cells beside the
+## nickname. Its `SetHPPal` reads `wPlayerHPPal`, so the colour follows how much
+## of the HP bar the party menu behind it was lighting.
+const HP_ATTRIBUTE: Array = [11, 1, 9, 2, 1]
+
+
+static func attributes() -> PackedInt32Array:
+	return Gen2PicImage.attribute_boxes([HP_ATTRIBUTE], COLUMNS, ROWS)
+
+
+func _background(page: Dictionary, data: GameData) -> Image:
+	var indices: PackedByteArray = draw(page)
+	if data == null:
+		return Gen2PicImage.from_indices(
+			indices, COLUMNS * TILE, ROWS * TILE,
+			Gen2Palette.pic_palette(PackedColorArray([Color.WHITE, Color.BLACK]))
+		)
+	var lit: int = Gen2BattleHud.bar_pixels(
+		int(page.get("hp", 0)), int(page.get("max_hp", 0)),
+		Gen2BattleHud.HP_BAR_TILES * TILE
+	)
+	return Gen2PicImage.from_attributes(
+		indices, COLUMNS * TILE, ROWS * TILE, attributes(), COLUMNS,
+		[data.move_screen_palette(), data.bar_palette(GameData.hp_bar_palette_name(lit))]
+	)
 
 
 ## The whole 160x144 screen as palette indices. [param page] is

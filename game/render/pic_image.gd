@@ -46,6 +46,71 @@ static func from_indices(
 	return Image.create_from_data(width, height, false, Image.FORMAT_RGBA8, pixels)
 
 
+## An image from a row-major index buffer plus `wAttrmap`: one palette index per
+## tile, so a screen the hardware draws in several palettes is one buffer here
+## too rather than a layer per colour. [param slots] is [param columns] wide and
+## row-major, and a slot naming no palette falls back on the first.
+##
+## `FillBoxCGB` and `ByteFill` over an attrmap `WipeAttrmap` cleared are what
+## every `_CGB_*` layout writes, so a caller's own `attributes()` is that list of
+## boxes flattened once.
+static func from_attributes(
+	indices: PackedByteArray,
+	width: int,
+	height: int,
+	slots: PackedInt32Array,
+	columns: int,
+	palettes: Array
+) -> Image:
+	if palettes.is_empty():
+		return Image.create_empty(maxi(width, 1), maxi(height, 1), false, Image.FORMAT_RGBA8)
+	if width <= 0 or height <= 0 or indices.size() < width * height:
+		return Image.create_empty(maxi(width, 1), maxi(height, 1), false, Image.FORMAT_RGBA8)
+
+	var lookups: Array[PackedByteArray] = []
+	for palette: Variant in palettes:
+		lookups.append(_lookup(palette as PackedColorArray, false))
+
+	var tile: int = Gen2Font.TILE
+	var pixels: PackedByteArray = PackedByteArray()
+	pixels.resize(width * height * CHANNELS)
+	for y: int in height:
+		@warning_ignore("integer_division")
+		var row: int = (y / tile) * columns
+		for x: int in width:
+			@warning_ignore("integer_division")
+			var slot: int = row + x / tile
+			var lookup: PackedByteArray = lookups[
+				clampi(slots[slot] if slot < slots.size() else 0, 0, lookups.size() - 1)
+			]
+			var at: int = int(indices[y * width + x]) * CHANNELS
+			var to: int = (y * width + x) * CHANNELS
+			pixels[to] = lookup[at]
+			pixels[to + 1] = lookup[at + 1]
+			pixels[to + 2] = lookup[at + 2]
+			pixels[to + 3] = lookup[at + 3]
+
+	return Image.create_from_data(width, height, false, Image.FORMAT_RGBA8, pixels)
+
+
+## An attrmap from a list of `FillBoxCGB` boxes, each (x, y, width, height,
+## palette) over the zeroes `WipeAttrmap` leaves.
+static func attribute_boxes(
+	boxes: Array, columns: int, rows: int
+) -> PackedInt32Array:
+	var out := PackedInt32Array()
+	out.resize(columns * rows)
+	for box: Variant in boxes:
+		var cells: Array = box as Array
+		for row: int in int(cells[3]):
+			for column: int in int(cells[2]):
+				var x: int = int(cells[0]) + column
+				var y: int = int(cells[1]) + row
+				if x >= 0 and x < columns and y >= 0 and y < rows:
+					out[y * columns + x] = int(cells[4])
+	return out
+
+
 ## One cell out of a pic atlas, cropped to the pic's real size.
 ## [param pic] is [method GameData.species_pic]'s answer: which atlas, which slot
 ## and how much of the cell is filled. A cell is the size of the largest pic of

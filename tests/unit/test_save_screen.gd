@@ -475,6 +475,37 @@ func test_the_snapshot_carries_the_dvs_and_stat_experience_a_page_cannot_reach()
 	assert_eq(int(mon.stat_exp["attack"]), 25600)
 
 
+## `_CGB_StatsScreenHPPals`' attrmap: the upper eight rows on the mon's own
+## palette, the exp bar's ten cells on the exp palette, one slot per page
+## indicator, and everything else on the HP palette `WipeAttrmap` leaves. The
+## source's three blocks are fixed columns; a registered page moves the run, so
+## the attrmap follows `page_indicators` rather than repeating them.
+func test_the_stats_screen_attrmap_colours_the_upper_half_the_bars_and_the_pages() -> void:
+	var columns: int = Gen2StatsScreenPage.COLUMNS
+	var slots: PackedInt32Array = Gen2StatsScreenPage.attributes()
+	assert_eq(slots[7 * columns + 19], Gen2StatsScreenPage.MON_SLOT, "the divider row")
+	assert_eq(slots[8 * columns], 0, "the row under it is the HP palette's")
+	assert_eq(slots[16 * columns + 10], Gen2StatsScreenPage.EXP_SLOT)
+	assert_eq(slots[16 * columns + 9], 0, "the cell before the exp bar's cap")
+	for index: int in Gen2StatsScreenPage.NUM_PAGES:
+		var at: Vector2i = Gen2StatsScreenPage.page_indicators(
+			Gen2StatsScreenPage.NUM_PAGES
+		)[index]
+		assert_eq(
+			slots[at.y * columns + at.x], Gen2StatsScreenPage.FIRST_PAGE_SLOT + index
+		)
+	var four: PackedInt32Array = Gen2StatsScreenPage.attributes(
+		Gen2StatsScreenPage.NUM_PAGES + 1
+	)
+	var moved: Vector2i = Gen2StatsScreenPage.page_indicators(
+		Gen2StatsScreenPage.NUM_PAGES + 1
+	)[0]
+	assert_eq(
+		four[moved.y * columns + moved.x], Gen2StatsScreenPage.FIRST_PAGE_SLOT,
+		"a fourth page moves the run left and takes the first slot with it"
+	)
+
+
 ## `.d_up` and `.d_down` neither wrap nor reach past the party, and each reload
 ## is a `PlayMonCry2`. The first member is poisoned rather than asleep or frozen,
 ## so `CheckFaintedFrzSlp` lets both cries through.
