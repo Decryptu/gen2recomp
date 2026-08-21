@@ -108,7 +108,13 @@ static func from_battle_party(
 			saved_mon.caught_gender = previous.caught_gender
 			saved_mon.caught_level = previous.caught_level
 			saved_mon.caught_location = previous.caught_location
-			saved_mon.nickname = previous.nickname
+			# `UpdateSpeciesNameIfNotNicknamed`: a party member that evolved
+			# during the battle takes the new species' name unless it was
+			# nicknamed, which is the one thing the old row does not decide.
+			saved_mon.nickname = Gen2Evolution.nickname_after_evolution(
+				party.mons[fought - 1].data, previous.nickname,
+				previous.species, saved_mon.species
+			)
 			saved_mon.original_trainer = previous.original_trainer
 		out.party.append(saved_mon)
 	return out

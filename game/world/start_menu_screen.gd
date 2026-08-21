@@ -1462,7 +1462,11 @@ func _use_summary(item: Dictionary, result: Dictionary) -> String:
 			item_name, int(result.get("repel_steps", 0)),
 		]
 	if StringName(result.get("effect", &"")) == &"evolution" and _data != null:
-		var nickname: String = _target_name(int(result.get("party_index", -1)))
+		## Both boxes read wStringBuffer2, which `GetNickname` filled before the
+		## species was replaced, so neither may be built from the party row: it
+		## already carries the new species and, for an un-nicknamed Pokemon, the
+		## new name.
+		var nickname: String = String(result.get("evolving_name", ""))
 		return "%s %s" % [
 			Gen2Evolution.evolving_text(nickname),
 			Gen2Evolution.evolved_text(nickname, String(

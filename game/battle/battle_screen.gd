@@ -11,6 +11,9 @@ signal item_used(item: int, target: int)
 ## event rather than the battle result. The host owns the flag, since the battle
 ## engine is scene-free and holds no world state.
 signal enemy_seen(species: int)
+## `.proceed`'s `SetSeenAndCaughtMon` on the species a party member became. The
+## write is the world's, the way `enemy_seen`'s is.
+signal party_evolved(species: int)
 
 ## Owns the battle, the events and the text box; decides nothing about how they
 ## are drawn. A [Gen2Battle] resolves the turn and answers with events; this
@@ -3815,6 +3818,11 @@ func _apply_event_state(event: Dictionary) -> void:
 			# which answers correctly on its own even when the index that gained
 			# it is a benched participant rather than the one on screen.
 			_refresh_exp_bar()
+		Gen2Battle.EVOLVED:
+			# The dex write is all this screen owes the event: nothing here draws
+			# `EvolutionAnimation`, and the panel's own species follows the next
+			# `_push_view`.
+			party_evolved.emit(int(event["new_species"]))
 		Gen2Battle.GREW_LEVEL:
 			# The level number in the panel belongs to whoever is on screen, so it
 			# only moves when the index that grew is the one currently active: a

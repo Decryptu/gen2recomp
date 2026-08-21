@@ -72,7 +72,8 @@ func _with_evolution_rows() -> GameData:
 
 
 ## `.item` never calls `IsMonHoldingEverstone`; only `.level`, `.happiness`,
-## `.trade` and `EVOLVE_STAT` do.
+## `.trade` and `EVOLVE_STAT` do. `EvoStoneEffect` is where the pack refuses one,
+## which is Gen2WorldPartyHost's own test, not this predicate's.
 func test_a_stone_evolves_an_everstone_holder_and_a_trade_does_not() -> void:
 	var data: GameData = _with_evolution_rows()
 	var mon := Gen2BattleMon.create(data, Fixture.BULBASAUR, 20, [])

@@ -2435,6 +2435,7 @@ func _open_battle_host(request: Dictionary) -> void:
 	host.z_index = 10
 	host.mouse_filter = Control.MOUSE_FILTER_STOP
 	add_child(host)
+	host.party_evolved.connect(_on_party_evolved)
 	host.battle_finished.connect(_on_battle_finished)
 	host.enemy_seen.connect(_on_enemy_seen)
 	if not tutorial:
@@ -2479,6 +2480,12 @@ func _open_battle_host(request: Dictionary) -> void:
 func _on_enemy_seen(species: int) -> void:
 	if _world != null and _world.state != null:
 		_world.state.set_species_seen(species)
+
+
+## `.proceed`'s `SetSeenAndCaughtMon`, the write a level evolution owes the dex.
+func _on_party_evolved(species: int) -> void:
+	if _world != null and _world.state != null:
+		_world.state.set_species_caught(species)
 
 
 func _on_capture_requested(ball: int) -> void:
