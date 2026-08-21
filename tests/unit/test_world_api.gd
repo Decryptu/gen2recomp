@@ -2173,7 +2173,7 @@ func test_player_walk_step_starts_a_cell_behind_and_never_moves_the_committed_ce
 	assert_eq(world.player_pixel_position(), Gen2WorldAPI.PLAYER_VIEW_CELL * 16)
 
 
-func test_the_interpolated_camera_origin_does_not_pan_a_step_early() -> void:
+func test_the_camera_origin_follows_the_player_one_pass_behind() -> void:
 	var world: Gen2WorldAPI = _world()
 	# Standing still, the hardware page origin and the camera agree.
 	assert_eq(world.player_position_cells(), Vector2(8.0, 6.0))
@@ -2187,15 +2187,24 @@ func test_the_interpolated_camera_origin_does_not_pan_a_step_early() -> void:
 	assert_eq(world.player_position_cells(), Vector2(8.0, 6.0))
 	assert_eq(world.visible_origin_cells(), Vector2(4.0, 2.0))
 
+	# `ScrollScreen` runs after `NextOverworldFrame`, so the scroll a pass
+	# computed is written two frames after the sprite moved: the camera stands
+	# still on the pass the walk starts and the player is drawn two pixels ahead
+	# of it, which is `sprite_x - scx` of 62 on the cartridge.
 	assert_true(world.advance_player_step_pass())
 	assert_eq(world.player_position_cells(), Vector2(7.875, 6.0))
-	assert_eq(world.visible_origin_cells(), Vector2(3.875, 2.0))
+	assert_eq(world.visible_origin_cells(), Vector2(4.0, 2.0))
+	assert_eq(world.player_pixel_position(), Vector2i(62, 64))
 
-	# The step lands on the committed cell, where the two agree again.
+	# The step lands on the committed cell with the camera still one pass behind,
+	# and the pass after it, which moves nothing, is where the two agree again.
 	_finish_player_step(world)
 	assert_false(world.player_step_in_progress())
 	assert_eq(world.player_position_cells(), Vector2(7.0, 6.0))
+	assert_eq(world.visible_origin_cells(), Vector2(3.125, 2.0))
+	assert_false(world.advance_player_step_pass())
 	assert_eq(world.visible_origin_cells(), Vector2(world.visible_screen_origin_cell()))
+	assert_eq(world.player_pixel_position(), Gen2WorldAPI.PLAYER_VIEW_CELL * 16)
 
 
 func test_the_interpolated_camera_origin_runs_off_the_map_like_the_page_does() -> void:

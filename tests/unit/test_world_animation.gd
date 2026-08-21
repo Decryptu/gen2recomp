@@ -55,11 +55,40 @@ func _write_cache() -> void:
 			{"operation": "water", "tile": 0},
 			{"operation": "done"},
 		],
+	}, {
+		# `TilesetForestAnim`'s own four tree commands, in its order: the pair
+		# and then the pair the source offsets by a frame, with the timer bump
+		# after both so all four see the same `wTileAnimationTimer`.
+		"number": 2,
+		"block_count": 1,
+		"tile_count": RomLayout.TILESET_TILE_COUNT,
+		"meta": meta,
+		"collision": [],
+		"palette_map": [0],
+		"animation_commands": [
+			{"operation": "forest_left"},
+			{"operation": "forest_right"},
+			{"operation": "forest_left_2"},
+			{"operation": "forest_right_2"},
+			{"operation": "timer_8"},
+			{"operation": "done"},
+		],
 	}])
 	RomCache.write_json(RomCache.world_maps_path(_directory), [{
 		"group": 1,
 		"number": 1,
 		"tileset": 0,
+		"environment": 0,
+		"width_blocks": 1,
+		"height_blocks": 1,
+		"blocks": [0],
+		"collision": [0, 0, 0, 0],
+		"collision_width": 2,
+		"collision_height": 2,
+	}, {
+		"group": 1,
+		"number": 3,
+		"tileset": 2,
 		"environment": 0,
 		"width_blocks": 1,
 		"height_blocks": 1,
@@ -83,6 +112,7 @@ func _write_cache() -> void:
 	pixels.resize(RomLayout.TILESET_TILE_COUNT * Gen2Tiles.TILE_PIXELS)
 	RomCache.write_indices(RomCache.world_tile_path(_directory, 0), pixels)
 	RomCache.write_indices(RomCache.world_tile_path(_directory, 1), pixels)
+	RomCache.write_indices(RomCache.world_tile_path(_directory, 2), pixels)
 
 	var palettes: Array = []
 	for _group: int in RomLayout.WORLD_PALETTE_GROUP_COUNT:
@@ -100,7 +130,20 @@ func _write_cache() -> void:
 	for frame: int in range(1, 4):
 		for y: int in frame:
 			water[frame * 16 + y * 2] = 0xFF
-	RomCache.write_json(RomCache.world_animation_assets_path(_directory), {"water": water})
+	# `ForestTreeLeftFrames` and `ForestTreeRightFrames`, four tiles in a row,
+	# each filled with its own index so a written tile names the frame it came
+	# from: 1 and 2 are the left tree's, 3 and 4 the right tree's.
+	var forest: Array = []
+	forest.resize(64)
+	for index: int in forest.size():
+		forest[index] = 0
+	for tile: int in 4:
+		for y: int in 8:
+			forest[tile * 16 + y * 2] = 0xFF if (tile & 1) == 0 else 0
+			forest[tile * 16 + y * 2 + 1] = 0xFF if (tile & 1) == 1 else 0
+	RomCache.write_json(
+		RomCache.world_animation_assets_path(_directory), {"water": water, "forest": forest}
+	)
 	RomCache.write_json(RomCache.manifest_path(_directory), {
 		"format_version": RomCache.FORMAT_VERSION,
 		"game_id": "testanimation",
@@ -208,3 +251,55 @@ func test_reload_tileset_keeps_the_place_a_connection_crossing_left() -> void:
 	# A warp is the other setup script and does reset it.
 	animation.configure(neighbour)
 	assert_eq(animation.command_index(), 0)
+
+
+## The four tree commands read `wCelebiEvent` on every tick, so an ordinary visit
+## to Ilex Forest draws both trees on their first frame and the restless one
+## alternates, with `...Animation2`'s `xor %10` a frame ahead of its pair.
+func test_the_forest_trees_stand_still_until_the_celebi_event_is_set() -> void:
+	var data: GameData = GameData.open_directory(_directory)
+	var world := Gen2WorldAPI.open(data, 1, 3, Vector2i.ZERO)
+	var animation := Gen2WorldAnimation.new()
+	animation.configure(world)
+
+	# Two whole cycles of the six commands, which leaves wTileAnimationTimer at
+	# 2 and both trees on the frame the `jr nz` branch never leaves.
+	for _command: int in 12:
+		animation.tick()
+	assert_eq(_tree_frame(animation, 0x0C), 0)
+	assert_eq(_tree_frame(animation, 0x0F), 0)
+
+	world.state.set_engine_flag(Gen2WorldState.engine_flag(
+		Gen2WorldState.ENGINE_FOREST_IS_RESTLESS, Gen2WorldState.is_crystal_profile(data)
+	))
+	# An even timer is `GetForestTreeFrame`'s own zero, so the pair draws the
+	# first frame and the `xor %10` pair the second.
+	_tick_pair(animation)
+	assert_eq(_tree_frame(animation, 0x0C), 0)
+	assert_eq(_tree_frame(animation, 0x0F), 0)
+	_tick_pair(animation)
+	assert_eq(_tree_frame(animation, 0x0C), 1)
+	assert_eq(_tree_frame(animation, 0x0F), 1)
+
+	# The bump and the rewind, and then the odd timer answers the other way round.
+	_tick_pair(animation)
+	_tick_pair(animation)
+	assert_eq(_tree_frame(animation, 0x0C), 1)
+	assert_eq(_tree_frame(animation, 0x0F), 1)
+	_tick_pair(animation)
+	assert_eq(_tree_frame(animation, 0x0C), 0)
+	assert_eq(_tree_frame(animation, 0x0F), 0)
+
+
+func _tick_pair(animation: Gen2WorldAnimation) -> void:
+	animation.tick()
+	animation.tick()
+
+
+## Which of the two frames a tree tile is holding, read off the fixture asset's
+## own marking: frame 0 lights the first plane and frame 1 the second, so the
+## palette index of a lit pixel is 1 or 2. The strip is one row of tiles, so a
+## tile's first pixel is its own column of row zero rather than a tile-sized
+## stride into the array.
+func _tree_frame(animation: Gen2WorldAnimation, tile: int) -> int:
+	return 0 if animation.current_indices()[tile * Gen2Tiles.TILE_WIDTH] == 1 else 1
