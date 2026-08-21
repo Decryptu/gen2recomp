@@ -131,6 +131,12 @@ var _evolution_save: Gen2SaveData = null
 ## `OverworldHatchEgg`'s screen and the save whose party it has already written.
 var _hatch_host: Gen2EggHatchScreen = null
 var _hatch_save: Gen2SaveData = null
+## `special NameRater`'s screen and the save whose party row it may rename.
+var _name_rater_host: Gen2NameRaterScreen = null
+var _name_rater_save: Gen2SaveData = null
+## `special MoveDeletion`'s screen. It needs no save of its own beside it: the
+## moves and their PP belong to the save it was handed and it writes them itself.
+var _move_deleter_host: Gen2MoveDeleterScreen = null
 ## Whether a field-move message is on screen waiting for its acknowledge. The
 ## world is idle while it is, the same way a script text pause holds it.
 var _field_move_text: bool = false
@@ -610,6 +616,10 @@ func advance_frame() -> void:
 		_evolution_host.advance_frame()
 	if _hatch_host != null:
 		_hatch_host.advance_frame()
+	if _name_rater_host != null:
+		_name_rater_host.advance_frame()
+	if _move_deleter_host != null:
+		_move_deleter_host.advance_frame()
 	_spending_frame = false
 
 
@@ -752,7 +762,8 @@ func _overlay_open() -> bool:
 		or _start_menu_host != null or _party_host != null \
 		or _hall_of_fame_host != null or _trainer_card_host != null \
 		or _pokedex_host != null or _credits_host != null \
-		or _evolution_host != null or _hatch_host != null
+		or _evolution_host != null or _hatch_host != null \
+		or _name_rater_host != null or _move_deleter_host != null
 
 
 ## Wandering objects keep to themselves while anything else owns the world. A
@@ -851,6 +862,15 @@ func _handle_button(button: int) -> bool:
 	## map loop suspended in exactly the same place.
 	if _hatch_host != null:
 		_hatch_host.handle_button(button)
+		return true
+	## `special NameRater` runs inside `opentext`, so the map loop is suspended
+	## behind it the same way and its own two screens are reached through it.
+	if _name_rater_host != null:
+		_name_rater_host.handle_button(button)
+		return true
+	## `special MoveDeletion` is the same shape one house further on.
+	if _move_deleter_host != null:
+		_move_deleter_host.handle_button(button)
 		return true
 	## Before the PC and the party overlay because the Hall of Fame is the one
 	## overlay a script opens with nothing behind it: there is no map to go back
@@ -1209,6 +1229,127 @@ func _on_hatch_closed() -> void:
 	if _renderer != null:
 		_renderer.refresh()
 	_refresh_labels()
+
+
+## `special NameRater`. `_NameRater` owns its own boxes and both of the screens
+## it opens, so the whole routine is one host and the script stays suspended
+## behind it, which is what `opentext` left it doing.
+func _open_name_rater() -> bool:
+	if _name_rater_host != null or _world == null or _data == null:
+		return false
+	var texts: Dictionary = Gen2WorldHost.name_rater_texts(_data)
+	if texts.is_empty():
+		_script_prompt = "Name Rater unavailable: name_rater_text_unavailable"
+		return false
+	var save: Gen2SaveData = _embedded_party_save()
+	if save == null:
+		_script_prompt = "The Name Rater needs a validated save"
+		return false
+	var host := Gen2NameRaterScreen.new()
+	host.set_context(_data, save, texts, _world.player_name(), _world.player_id())
+	host.finished.connect(_on_name_rater_finished)
+	host.closed.connect(_on_name_rater_closed)
+	host.z_index = 30
+	_name_rater_save = save
+	_name_rater_host = host
+	_screen.display(host)
+	_script_prompt = "Name Rater"
+	_refresh_labels()
+	return true
+
+
+## The `CopyBytes` and the text `.done` ends on. The text is put in the world's
+## own speech box rather than pressed here: `special NameRater` returns as soon
+## as `PrintText` has drawn it and the script's `waitbutton` is that press.
+func _on_name_rater_finished(
+	party_index: int, nickname: String, ending_text: String
+) -> void:
+	if party_index >= 0 and _name_rater_save != null:
+		Gen2WorldPartyHost.rename_party_mon(_name_rater_save, party_index, nickname)
+	if not ending_text.is_empty() and _text_box != null and _text_box.font != null:
+		_apply_text_box_options()
+		_text_awaits_press = false
+		_text_box.show_text(ending_text, false)
+		_text_box.visible = true
+
+
+func _on_name_rater_closed() -> void:
+	var host: Gen2NameRaterScreen = _name_rater_host
+	_name_rater_host = null
+	_name_rater_save = null
+	if host != null:
+		Gen2Screen.drop(host)
+	if _renderer != null:
+		_renderer.refresh()
+	if _world != null:
+		_show_script_results(_world.complete_runtime_request({"ok": true}))
+	_refresh_labels()
+
+
+## `special MoveDeletion`, hosted exactly as `special NameRater` is.
+func _open_move_deleter() -> bool:
+	if _move_deleter_host != null or _world == null or _data == null:
+		return false
+	var texts: Dictionary = Gen2WorldHost.move_deleter_texts(_data)
+	if texts.is_empty():
+		_script_prompt = "Move deleter unavailable: move_deleter_text_unavailable"
+		return false
+	var save: Gen2SaveData = _embedded_party_save()
+	if save == null:
+		_script_prompt = "The move deleter needs a validated save"
+		return false
+	var host := Gen2MoveDeleterScreen.new()
+	host.set_context(_data, save, texts)
+	host.finished.connect(_on_move_deleter_finished)
+	host.closed.connect(_on_move_deleter_closed)
+	host.sfx_requested.connect(_play_sfx)
+	host.z_index = 30
+	_move_deleter_host = host
+	_screen.display(host)
+	_script_prompt = "Move deleter"
+	_refresh_labels()
+	return true
+
+
+## The screen has already written the row, since the moves and their PP belong
+## to the save it was handed. What is left is the text `.done` ends on, which
+## the script's own `waitbutton` presses.
+func _on_move_deleter_finished(
+	_party_index: int, _move_index: int, ending_text: String
+) -> void:
+	if ending_text.is_empty() or _text_box == null or _text_box.font == null:
+		return
+	_apply_text_box_options()
+	_text_awaits_press = false
+	_text_box.show_text(ending_text, false)
+	_text_box.visible = true
+
+
+func _on_move_deleter_closed() -> void:
+	var host: Gen2MoveDeleterScreen = _move_deleter_host
+	_move_deleter_host = null
+	if host != null:
+		Gen2Screen.drop(host)
+	if _renderer != null:
+		_renderer.refresh()
+	if _world != null:
+		_show_script_results(_world.complete_runtime_request({"ok": true}))
+	_refresh_labels()
+
+
+## Public screenshot driver for `special MoveDeletion`, the same way
+## [method preview_name_rater] is: no fixture cell reaches it.
+func preview_move_deleter() -> void:
+	if _world == null or _data == null or _move_deleter_host != null:
+		return
+	var save: Gen2SaveData = _embedded_party_save()
+	if save == null or save.party.is_empty():
+		_script_prompt = "Move deleter preview needs a party"
+		_refresh_labels()
+		return
+	save.party[0].is_egg = false
+	_injected_save = save
+	_open_move_deleter()
 
 
 ## `EnterMap`'s own tail, which a warp reaches once its setup script has run and
@@ -1973,6 +2114,27 @@ func preview_item_evolution_use() -> void:
 		if int((rows[index] as Dictionary).get("item", 0)) == int(stone["item"]):
 			_start_menu_host.set("_pack_cursor", index)
 			break
+
+
+## Public screenshot driver for `special NameRater`, which no cell of the
+## fixture maps reaches: it stands a member the player caught in the first party
+## slot and opens the routine on it, so every box, both questions and the party
+## list can be photographed on any map.
+func preview_name_rater() -> void:
+	if _world == null or _data == null or _name_rater_host != null:
+		return
+	var save: Gen2SaveData = _embedded_party_save()
+	if save == null or save.party.is_empty():
+		_script_prompt = "Name Rater preview needs a party"
+		_refresh_labels()
+		return
+	var mon: Gen2SaveMon = save.party[0]
+	mon.is_egg = false
+	mon.original_trainer = save.player_name
+	mon.ot_id = save.player_id
+	_injected_save = save
+	_world.set_player_id(save.player_id)
+	_open_name_rater()
 
 
 ## Public screenshot driver and scene-test entry for `OverworldHatchEgg`: it
@@ -4260,6 +4422,14 @@ func _show_script_results(results: Array) -> void:
 					_script_prompt = _bug_contest_placings_text(judged)
 					_show_script_results(judged_results)
 					return
+				if StringName(request.get("kind", &"")) == &"name_rater_requested":
+					if _open_name_rater():
+						break
+					continue
+				if StringName(request.get("kind", &"")) == &"move_deleter_requested":
+					if _open_move_deleter():
+						break
+					continue
 				if StringName(request.get("kind", &"")) == &"swarm_requested":
 					var values: Dictionary = request.get("values", {})
 					var swarm_results: Array = _world.complete_runtime_request({

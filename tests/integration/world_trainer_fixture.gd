@@ -92,6 +92,8 @@ static func build(game_id: StringName = GAME_ID) -> GameData:
 	_write_battle_graphics(directory, manifest)
 	_write_splash_graphics(directory, manifest, game_id == RomRegistry.CRYSTAL)
 	_write_menu_text(manifest)
+	_write_name_rater_text(manifest)
+	_write_move_deleter_text(manifest)
 	_write_pokecenter_pc(manifest)
 	_write_unown_words(manifest)
 	_write_credits(directory, manifest, crystal_commands)
@@ -378,6 +380,40 @@ static func _write_overworld_graphics(directory: String) -> void:
 	icon.resize(8 * Gen2Tiles.TILE_PIXELS)
 	icon.fill(1)
 	RomCache.write_indices(RomCache.overworld_icon_path(directory, 1), icon)
+
+
+## `engine/events/name_rater.asm`'s ten boxes, shortened but keeping the two
+## things the routine reads: which ending each is, and the `wStringBuffer1`
+## markers `_NameRaterPerfectNameText` carries twice.
+static func _write_name_rater_text(manifest: Dictionary) -> void:
+	manifest["name_rater_text"] = {
+		"hello": "Hello, hello!",
+		"which_mon": "Which POKéMON?",
+		"better_name": "Hm… <RAM_D073>…\nA decent name.",
+		"what_name": "What name, then?",
+		"finished": "That's a better\nname than before!",
+		"come_again": "OK, then. Come\nagain sometime.",
+		"perfect_name": "Hm… <RAM_D073>?\nTreat <RAM_D073>\nwith loving care.",
+		"egg": "Whoa… That's just\nan EGG.",
+		"same_name": "But this new name\nis much better!",
+		"named": "This POKéMON is\nnow named <RAM_D073>.",
+	}
+
+
+## `engine/events/move_deleter.asm`'s eight, shortened the same way: which
+## ending each is, and the one `wStringBuffer1` marker `_AskDeleteMoveText`
+## carries.
+static func _write_move_deleter_text(manifest: Dictionary) -> void:
+	manifest["move_deleter_text"] = {
+		"knows_one": "That POKéMON knows\nonly one move.",
+		"ask_delete": "Oh, make it forget\n<RAM_D073>?",
+		"forgot": "Done! Your POKéMON\nforgot the move.",
+		"egg": "An EGG doesn't\nknow any moves!",
+		"come_again": "No? Come visit me\nagain.",
+		"which_move": "Which move should\nit forget, then?",
+		"intro": "Um… I'm the MOVE\nDELETER.",
+		"which_mon": "Which POKéMON?",
+	}
 
 
 ## The start menu's nine descriptions and the pack's five texts, as the cartridge

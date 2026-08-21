@@ -156,6 +156,16 @@ const SNORLAX_PROXIMITY_CELLS: Array[Vector2i] = [
 ## special_index() already normalizes. maps/KurtsHouse.asm's `.AskApricorn`
 ## branches on wScriptVar afterwards, one label per apricorn.
 const SPECIAL_SELECT_APRICORN_FOR_KURT: int = 86
+## MoveDeletion, 33 in both profiles: it sits below the first index the two
+## tables disagree on, so `special_index()` leaves it alone. `MoveDeletion` owns
+## the same shape `NameRater` does, one house further on, so it is one host
+## request as well.
+const SPECIAL_MOVE_DELETION: int = 33
+## NameRater, 87 in Crystal and 86 in Gold/Silver, which special_index()
+## already normalizes. `_NameRater` owns its own texts, its two `YesNoBox`es and
+## the party list `SelectMonFromParty` opens, so the whole routine is one host
+## request; the map script's own `waitbutton` follows it.
+const SPECIAL_NAME_RATER: int = 87
 ## DisplayUnownWords, which is Crystal's alone: pokegold's table stops well
 ## before it, so no Gold or Silver script can reach this index and neither dump
 ## ships the words. The four wall patterns are Crystal bg events, two per
@@ -770,6 +780,9 @@ func complete_runtime_request(result: Dictionary) -> Dictionary:
 		## `BugContestJudging` answers with the placing, which the results script
 		## reads out of wScriptVar exactly as the marts and the PC do.
 		&"bug_contest_judging_requested",
+		## Neither routine writes anything a script reads: each returns and the
+		## map's own `waitbutton` presses the text it left standing.
+		&"name_rater_requested", &"move_deleter_requested",
 	]:
 		if not bool(result.get("ok", false)):
 			return _fail(
@@ -2491,6 +2504,14 @@ func _execute_special(special: int) -> Dictionary:
 			_emit_runtime_event(&"roaming_mons_initialized", {
 				"special": special,
 				"count": state.roaming_mons().size() if state != null else 0,
+			})
+		SPECIAL_NAME_RATER:
+			return _stage_runtime_request(&"name_rater_requested", {
+				"special": special,
+			})
+		SPECIAL_MOVE_DELETION:
+			return _stage_runtime_request(&"move_deleter_requested", {
+				"special": special,
 			})
 		SPECIAL_SELECT_APRICORN_FOR_KURT:
 			## Both of the special's boxes are the host's; it answers with the

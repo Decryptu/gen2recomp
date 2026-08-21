@@ -1264,6 +1264,28 @@ const MART_TEXT_AT: Dictionary = {
 	"ask_more": 0x1AB,
 }
 
+## A `text_far` stub is `TX_FAR`, a two-byte address, a bank byte and a
+## `text_end`, so a run of them declared together is walked at this stride. The
+## two runs below are each one contiguous block, which is what makes one pinned
+## address per dump enough for either.
+const TEXT_FAR_STUB_BYTES: int = 5
+
+## `engine/events/name_rater.asm`'s ten stubs, in the file's own order, which is
+## `_NameRater` reaching them with `.egg` ahead of `.samename`. Byte identical on
+## all three cartridges.
+const NAME_RATER_TEXT_ORDER: Array[String] = [
+	"hello", "which_mon", "better_name", "what_name", "finished",
+	"come_again", "perfect_name", "egg", "same_name", "named",
+]
+
+## `engine/events/move_deleter.asm`'s eight, in the file's own order rather than
+## the routine's: `MoveDeletion` lays them out between `.onlyonemove` and
+## `.DeleteMove`. Byte identical on all three cartridges as well.
+const MOVE_DELETER_TEXT_ORDER: Array[String] = [
+	"knows_one", "ask_delete", "forgot", "egg", "come_again", "which_move",
+	"intro", "which_mon",
+]
+
 ## `Landmarks` (data/maps/landmarks.asm): `db x + 8, y + 16` then a name pointer,
 ## so the stored bytes are already shadow-OAM coordinates and the raw x,y are
 ## screen pixels. Gold and Silver ship no `BATTLE TOWER`, so every landmark from
@@ -2051,6 +2073,10 @@ const GOLD_SILVER: Dictionary = {
 	"default_mart": 0x16469,
 	"bargain_mart": 0x15EDA,
 	"mart_text": 0x16063,
+	## `NameRaterHelloText`, bank $3e:$7919 in both dumps.
+	"name_rater_text": 0xFB919,
+	## `MoveDeletion.MoveKnowsOneText`, bank $0b:$43dc in both dumps.
+	"move_deleter_text": 0x2C3DC,
 	"fruit_trees": 0x44091,
 	## `SpawnPoints` and `Flypoints`, each located by the byte column that is the
 	## same on all three dumps: the spawn coordinates at a stride of four, and
@@ -2483,6 +2509,10 @@ const CRYSTAL: Dictionary = {
 	"default_mart": 0x16214,
 	"bargain_mart": 0x15C51,
 	"mart_text": 0x15E0E,
+	## `NameRaterHelloText`, bank $3e:$780f.
+	"name_rater_text": 0xFB80F,
+	## `MoveDeletion.MoveKnowsOneText`, bank $0b:$45d1.
+	"move_deleter_text": 0x2C5D1,
 	"fruit_trees": 0x44097,
 	"spawn_points": 0x152AB,
 	"flypoints": 0x91C5E,
@@ -3023,6 +3053,24 @@ static func pokecenter_pc_text_offset(layout: Dictionary, name: String) -> int:
 	if at < 0 or not POKECENTER_PC_TEXT_AT.has(name):
 		return -1
 	return at + int(POKECENTER_PC_TEXT_AT[name])
+
+
+## Where the move deleter's `text_far` stub [param name] names sits.
+static func move_deleter_text_offset(layout: Dictionary, name: String) -> int:
+	var at: int = int(layout.get("move_deleter_text", -1))
+	var index: int = MOVE_DELETER_TEXT_ORDER.find(name)
+	if at < 0 or index < 0:
+		return -1
+	return at + index * TEXT_FAR_STUB_BYTES
+
+
+## Where the Name Rater's `text_far` stub [param name] names sits.
+static func name_rater_text_offset(layout: Dictionary, name: String) -> int:
+	var at: int = int(layout.get("name_rater_text", -1))
+	var index: int = NAME_RATER_TEXT_ORDER.find(name)
+	if at < 0 or index < 0:
+		return -1
+	return at + index * TEXT_FAR_STUB_BYTES
 
 
 ## Where the mart's `text_far` stub [param name] names sits.

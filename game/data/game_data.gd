@@ -77,6 +77,8 @@ var _intro_movie: Dictionary = {}
 var _gs_intro: Dictionary = {}
 var _menu_text: Dictionary = {}
 var _mart_text: Dictionary = {}
+var _name_rater_text: Dictionary = {}
+var _move_deleter_text: Dictionary = {}
 var _battle_object_palettes: Dictionary = {}
 var _indices: Dictionary = {}
 var _world_maps: Array = []
@@ -187,6 +189,10 @@ static func open_directory(path: String) -> GameData:
 	data._menu_text = raw_menu_text if raw_menu_text is Dictionary else {}
 	var raw_mart_text: Variant = manifest.get("mart_text", {})
 	data._mart_text = raw_mart_text if raw_mart_text is Dictionary else {}
+	var raw_name_rater_text: Variant = manifest.get("name_rater_text", {})
+	data._name_rater_text = raw_name_rater_text if raw_name_rater_text is Dictionary else {}
+	var raw_move_deleter_text: Variant = manifest.get("move_deleter_text", {})
+	data._move_deleter_text = raw_move_deleter_text if raw_move_deleter_text is Dictionary else {}
 	data._species = data._read_array(RomCache.species_path(path))
 	data._moves = data._read_array(RomCache.moves_path(path))
 	data._tmhm_moves = data._read_int_array(RomCache.tmhm_moves_path(path))
@@ -1450,6 +1456,22 @@ func menu_text(key: String) -> String:
 ## imported before them.
 func mart_text(name: String) -> String:
 	return String(_mart_text.get(name, ""))
+
+
+## One of `engine/events/name_rater.asm`'s own boxes, by the name
+## `RomLayout.NAME_RATER_TEXT_ORDER` gives its stub, still carrying
+## [Gen2TextStream]'s marker for the nickname. Empty on a cache imported before
+## them.
+func name_rater_text(name: String) -> String:
+	return String(_name_rater_text.get(name, ""))
+
+
+## One of `engine/events/move_deleter.asm`'s own boxes, by the name
+## `RomLayout.MOVE_DELETER_TEXT_ORDER` gives its stub, still carrying
+## [Gen2TextStream]'s marker for the move name. Empty on a cache imported before
+## them.
+func move_deleter_text(name: String) -> String:
+	return String(_move_deleter_text.get(name, ""))
 
 
 ## `.MenuDesc`'s line for one start-menu item, by the item's own kind. Empty for

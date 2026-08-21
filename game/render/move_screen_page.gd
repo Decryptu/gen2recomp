@@ -4,7 +4,8 @@ extends RefCounted
 ## The move screen (`MoveScreenLoop` in `engine/pokemon/mon_menu.asm`), on the
 ## tile grid the hardware uses.
 ##
-## `SetUpMoveScreenBG` draws the two boxes, the nickname and the two arrows once;
+## `SetUpMoveScreenBG` draws the two boxes and the nickname once and
+## `MoveScreenLoop` adds the two arrows, which `ChooseMoveToDelete` does not;
 ## `SetUpMoveList` fills the list; `PlaceMoveData` fills the bottom box with
 ## whichever row the cursor is on. Swapping replaces that box with `Where?`
 ## instead, which is `.moving_move`.
