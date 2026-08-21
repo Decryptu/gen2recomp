@@ -22,7 +22,9 @@ const GROUPS: Dictionary = {
 		&"cut", &"surf", &"whirlpool", &"strength", &"headbutt", &"rock_smash",
 		&"field_move_prompts",
 	],
-	&"terrain": [&"ledge_hops", &"side_walls", &"drawn_blocks", &"story_map_ids"],
+	&"terrain": [
+		&"ledge_hops", &"side_walls", &"drawn_blocks", &"story_map_ids", &"map_data",
+	],
 	&"johto": [
 		&"radio_tower", &"rising_badge", &"command_queues", &"item_balls",
 		&"route_27", &"magnet_train", &"scripted_scenes",
