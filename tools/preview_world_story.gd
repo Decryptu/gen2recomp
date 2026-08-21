@@ -169,7 +169,7 @@ const BLACKTHORN_GYM_PUSHES: Array = [
 const DRAGON_SHRINE_ANSWERS: Array[int] = [0, 0, 1, 0, 1]
 
 ## How many hardware frames one pushed boulder may spend sliding before the walk
-## calls it stuck. The slide is STEP_FRAMES_BOULDER_PUSH, well inside this.
+## calls it stuck. The slide is STEP_PASSES_BOULDER_PUSH, well inside this.
 const OBJECT_STEP_FRAME_BUDGET: int = 64
 
 ## Route 44's Ice Path door and then every warp cell the cave is crossed by, in
@@ -8260,7 +8260,7 @@ func _push_boulder_run(
 
 
 ## Spends hardware frames until no object is mid-step. A pushed boulder slides
-## for STEP_FRAMES_BOULDER_PUSH frames and refuses a second push until it stands
+## for STEP_PASSES_BOULDER_PUSH frames and refuses a second push until it stands
 ## again, so this has to spend the frames rather than ask for them at once.
 func _settle_object_steps(world: Gen2WorldAPI, random: RandomNumberGenerator) -> void:
 	for _frame: int in OBJECT_STEP_FRAME_BUDGET:
@@ -8271,7 +8271,7 @@ func _settle_object_steps(world: Gen2WorldAPI, random: RandomNumberGenerator) ->
 				break
 		if not stepping:
 			return
-		world.advance_object_steps_frame(random)
+		world.advance_object_steps_pass(random)
 
 
 ## Mahogany Town east to Blackthorn City, on the same world, state and save.

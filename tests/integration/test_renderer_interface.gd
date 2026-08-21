@@ -424,8 +424,8 @@ func test_a_visible_encounter_provider_is_driven_validated_drawn_and_fought() ->
 	## Mid-step it is DRAWN across two cells, and a wild standing in either of
 	## them stands inside it, so `step_offset_cells()` puts both in the list.
 	trainer.step_direction = Vector2i(1, 0)
-	trainer.step_frames_total = 8
-	trainer.step_frames_remaining = 4
+	trainer.step_passes_total = 8
+	trainer.step_passes_remaining = 4
 	_world_screen._encounters.advance_frame()
 	var walking: PackedVector2Array = provider.get("context")["occupied"]
 	assert_true(walking.has(Vector2(6, 3)), "the cell it is committed to")

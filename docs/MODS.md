@@ -1050,10 +1050,13 @@ fractional cell, from one cell behind the committed cell down to zero. The
 logical cell commits at the start of the step; the fraction is presentation only
 and never reaches collision, events or the snapshot. `applymovement` applies its
 whole stream at once, so a scripted path commits together and the offset trails
-by as many cells as are left to draw; `advance_scripted_steps_frame()` drains
-that trail, 16 frames a step for the slow commands, 8 for plain, 4 for bike
-speed. `Gen2WorldObject.frame` is the cartridge's `Facings` index, 0 to 3,
-changing every four frames the way `SetFacingStepAction` does.
+by as many cells as are left to draw; `advance_scripted_steps_pass()` drains
+that trail, 16 overworld passes a step for the slow commands, 8 for plain, 4 for
+bike speed. A pass is two hardware frames
+(`Gen2WorldAPI.FRAMES_PER_OVERWORLD_PASS`, `MaxOverworldDelay`), so a plain step
+covers its cell in sixteen of them. `Gen2WorldObject.frame` is the cartridge's
+`Facings` index, 0 to 3, changing every four passes the way
+`SetFacingStepAction` does.
 `mods/examples/voxel_preview/` reads all of it.
 
 A hop is the one step with a second axis.

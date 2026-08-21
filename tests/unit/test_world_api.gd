@@ -867,7 +867,7 @@ func test_ledge_hop_crosses_two_cells_after_an_ordinary_step_is_blocked() -> voi
 	assert_eq(world.repel_steps(), 1)
 
 	# The presentation offset starts two cells behind and eases to zero over
-	# STEP_FRAMES_HOP frames, the same generic step system a one-cell walk
+	# STEP_PASSES_HOP frames, the same generic step system a one-cell walk
 	# uses with a magnitude-2 direction.
 	assert_true(world.player_step_in_progress())
 	assert_eq(world.player_step_offset_cells(), Vector2(0, -2))
@@ -884,9 +884,9 @@ func test_a_ledge_hop_lifts_the_sprite_and_an_ordinary_step_does_not() -> void:
 	assert_eq(world.player_jump_offset(), 0, "standing still is on the ground")
 	assert_eq(world.move_result(Vector2i.DOWN)["kind"], &"ledge_hop")
 	var arc: Array = []
-	for _frame: int in Gen2WorldAPI.STEP_FRAMES_HOP:
+	for _frame: int in Gen2WorldAPI.STEP_PASSES_HOP:
 		arc.append(world.player_jump_offset())
-		world.advance_player_step_frame()
+		world.advance_player_step_pass()
 	assert_eq(arc, Gen2WorldAPI.JUMP_OFFSETS)
 	assert_eq(world.player_jump_offset(), 0, "and the arc ends with the step")
 
@@ -896,10 +896,10 @@ func test_a_ledge_hop_lifts_the_sprite_and_an_ordinary_step_does_not() -> void:
 	assert_eq(lifted.move_result(Vector2i.DOWN)["kind"], &"ledge_hop")
 	var cell: Vector2i = lifted.player_cell
 	var highest: float = 0.0
-	for _frame: int in Gen2WorldAPI.STEP_FRAMES_HOP:
+	for _frame: int in Gen2WorldAPI.STEP_PASSES_HOP:
 		highest = maxf(highest, lifted.player_height_offset_pixels())
 		assert_eq(lifted.player_cell, cell, "the cell is the landing cell throughout")
-		lifted.advance_player_step_frame()
+		lifted.advance_player_step_pass()
 	assert_eq(highest, 12.0, "the top of .y_offsets, above the ground")
 	assert_eq(lifted.player_height_offset_pixels(), 0.0, "and back down on landing")
 
@@ -911,9 +911,9 @@ func test_a_ledge_hop_lifts_the_sprite_and_an_ordinary_step_does_not() -> void:
 	## UpdateJumpPosition, so the step after the hop is on the ground for the
 	## whole of it however the hop left the flag.
 	assert_true(bool(world.move_result(Vector2i.DOWN).get("ok", false)), "a walk off the ledge")
-	for _frame: int in Gen2WorldAPI.STEP_FRAMES_WALK:
+	for _frame: int in Gen2WorldAPI.STEP_PASSES_WALK:
 		assert_eq(world.player_jump_offset(), 0, "the walk after a hop has no arc")
-		world.advance_player_step_frame()
+		world.advance_player_step_pass()
 
 
 func test_ledge_hop_refuses_a_direction_the_code_does_not_allow() -> void:
@@ -1019,12 +1019,12 @@ func test_strength_push_slides_the_boulder_over_the_slow_step_duration() -> void
 	var boulder: Gen2WorldObject = _boulder_at(world, BOULDER_LANDING)
 	assert_not_null(boulder)
 	assert_true(boulder.is_stepping())
-	assert_eq(boulder.step_frames_total, Gen2WorldAPI.STEP_FRAMES_BOULDER_PUSH)
+	assert_eq(boulder.step_passes_total, Gen2WorldAPI.STEP_PASSES_BOULDER_PUSH)
 
 	var random := RandomNumberGenerator.new()
 	random.seed = 7
-	for _frame: int in Gen2WorldAPI.STEP_FRAMES_BOULDER_PUSH:
-		world.advance_object_steps_frame(random)
+	for _frame: int in Gen2WorldAPI.STEP_PASSES_BOULDER_PUSH:
+		world.advance_object_steps_pass(random)
 	assert_false(boulder.is_stepping())
 	assert_false(boulder.is_idle())
 	assert_eq(boulder.cell, BOULDER_LANDING)
@@ -2187,7 +2187,7 @@ func test_the_interpolated_camera_origin_does_not_pan_a_step_early() -> void:
 	assert_eq(world.player_position_cells(), Vector2(8.0, 6.0))
 	assert_eq(world.visible_origin_cells(), Vector2(4.0, 2.0))
 
-	assert_true(world.advance_player_step_frame())
+	assert_true(world.advance_player_step_pass())
 	assert_eq(world.player_position_cells(), Vector2(7.875, 6.0))
 	assert_eq(world.visible_origin_cells(), Vector2(3.875, 2.0))
 
@@ -2214,22 +2214,22 @@ func test_advance_player_step_spends_exactly_one_frame_per_call() -> void:
 	assert_true(world.move(Vector2i.LEFT))
 	assert_eq(world.player_cell, Vector2i(7, 6))
 
-	assert_true(world.advance_player_step_frame())
+	assert_true(world.advance_player_step_pass())
 	assert_eq(world.player_step_offset_cells(), Vector2(0.875, 0.0))
 
-	# STEP_FRAMES_WALK is 8, one of which is spent above.
+	# STEP_PASSES_WALK is 8, one of which is spent above.
 	for _frame: int in 4:
-		assert_true(world.advance_player_step_frame())
+		assert_true(world.advance_player_step_pass())
 	assert_eq(world.player_step_offset_cells(), Vector2(3.0 / 8.0, 0.0))
 	assert_eq(world.player_cell, Vector2i(7, 6))
 
 	for _frame: int in 3:
-		assert_true(world.advance_player_step_frame())
+		assert_true(world.advance_player_step_pass())
 	assert_false(world.player_step_in_progress())
 	assert_eq(world.player_step_offset_cells(), Vector2.ZERO)
 	assert_eq(world.player_cell, Vector2i(7, 6))
 	assert_eq(world.player_walk_frame(), 0, "SetFacingStanding restores the resting cel")
-	assert_false(world.advance_player_step_frame())
+	assert_false(world.advance_player_step_pass())
 
 
 func test_player_step_does_not_affect_cell_collision_or_events() -> void:
@@ -2268,8 +2268,8 @@ func test_connection_transition_spends_a_step() -> void:
 	assert_eq(world.map_id(), Vector2i(1, 2))
 	assert_true(world.player_step_in_progress())
 	assert_eq(world.player_step_offset_cells(), Vector2(-1, 0))
-	for _frame: int in Gen2WorldAPI.STEP_FRAMES_WALK:
-		world.advance_player_step_frame()
+	for _frame: int in Gen2WorldAPI.STEP_PASSES_WALK:
+		world.advance_player_step_pass()
 	assert_false(world.player_step_in_progress())
 	assert_eq(world.player_step_offset_cells(), Vector2.ZERO)
 
@@ -2327,7 +2327,7 @@ func _advance_object_frames(
 	world: Gen2WorldAPI, frames: int, random: RandomNumberGenerator
 ) -> void:
 	for _frame: int in frames:
-		world.advance_object_steps_frame(random)
+		world.advance_object_steps_pass(random)
 
 
 ## Spends the frames the player's step still owes. Bounded rather than a while
@@ -2337,7 +2337,7 @@ func _finish_player_step(world: Gen2WorldAPI) -> void:
 	for _frame: int in 64:
 		if not world.player_step_in_progress():
 			return
-		world.advance_player_step_frame()
+		world.advance_player_step_pass()
 
 
 func test_wander_object_commits_its_cell_and_eases_over_the_slow_step() -> void:
@@ -2348,10 +2348,10 @@ func test_wander_object_commits_its_cell_and_eases_over_the_slow_step() -> void:
 	var start: Vector2i = object.cell
 
 	# The first frame is the object's turn at the movement function.
-	assert_true(world.advance_object_steps_frame(random))
+	assert_true(world.advance_object_steps_pass(random))
 	assert_true(object.is_stepping())
 	# StepVectors' slow row is 16 frames, half the player's walking speed.
-	assert_eq(object.step_frames_total, Gen2WorldAPI.STEP_FRAMES_NPC_WALK)
+	assert_eq(object.step_passes_total, Gen2WorldAPI.STEP_PASSES_NPC_WALK)
 	# The cell commits when the step starts, exactly as InitStep and the
 	# player's own walk do; only the drawn offset trails behind it.
 	assert_ne(object.cell, start)
@@ -2360,7 +2360,7 @@ func test_wander_object_commits_its_cell_and_eases_over_the_slow_step() -> void:
 	# The deciding frame starts the step without spending one of its frames,
 	# the way the source runs the movement function and the step function on
 	# separate frames, so the full duration follows it.
-	_advance_object_frames(world, Gen2WorldAPI.STEP_FRAMES_NPC_WALK, random)
+	_advance_object_frames(world, Gen2WorldAPI.STEP_PASSES_NPC_WALK, random)
 	assert_false(object.is_stepping())
 	assert_eq(object.step_offset_cells(), Vector2.ZERO)
 	assert_eq(abs(object.cell.x - start.x) + abs(object.cell.y - start.y), 1)
@@ -2422,7 +2422,7 @@ func test_a_swim_wander_object_moves_across_its_pond_within_its_radius() -> void
 
 	var visited: Dictionary = {object.cell: true}
 	for _frame: int in 1024:
-		world.advance_object_steps_frame(random)
+		world.advance_object_steps_pass(random)
 		visited[object.cell] = true
 	assert_eq(
 		visited.keys().size(), 2,
@@ -2438,16 +2438,16 @@ func test_wander_object_waits_its_rolled_idle_before_deciding_again() -> void:
 	var random := RandomNumberGenerator.new()
 	random.seed = 4242
 
-	_advance_object_frames(world, 1 + Gen2WorldAPI.STEP_FRAMES_NPC_WALK, random)
+	_advance_object_frames(world, 1 + Gen2WorldAPI.STEP_PASSES_NPC_WALK, random)
 	assert_false(object.is_stepping())
 	# The step's final frame rolls the next wait, exactly as
 	# StepFunction_ContinueWalk jumps to RandomStepDuration_Slow. That mask is
 	# $7F, so the wait never exceeds 127 frames.
 	assert_true(object.is_idle())
-	assert_true(object.idle_frames_remaining <= Gen2WorldAPI.IDLE_MASK_SLOW)
+	assert_true(object.idle_passes_remaining <= Gen2WorldAPI.IDLE_MASK_SLOW)
 
 	var resting_cell: Vector2i = object.cell
-	var idle_frames: int = object.idle_frames_remaining
+	var idle_frames: int = object.idle_passes_remaining
 	_advance_object_frames(world, idle_frames, random)
 	assert_eq(object.cell, resting_cell)
 	assert_false(object.is_idle())
@@ -2462,7 +2462,7 @@ func test_blocked_wander_object_keeps_its_cell_and_waits() -> void:
 	random.seed = 77
 	var start: Vector2i = object.cell
 
-	assert_false(world.advance_object_steps_frame(random))
+	assert_false(world.advance_object_steps_pass(random))
 	assert_eq(object.cell, start)
 	assert_false(object.is_stepping())
 	# _RandomWalkContinue's .new_duration branch waits again rather than
@@ -2483,7 +2483,7 @@ func test_wander_object_never_leaves_its_source_radius() -> void:
 	var strayed: Vector2i = Vector2i.MAX
 	var visited: Dictionary = {}
 	for _frame: int in 2000:
-		world.advance_object_steps_frame(random)
+		world.advance_object_steps_pass(random)
 		visited[object.cell] = true
 		if abs(object.cell.x - origin.x) > 1 or abs(object.cell.y - origin.y) > 1:
 			strayed = object.cell
@@ -2511,7 +2511,7 @@ func test_spin_templates_turn_without_starting_a_step() -> void:
 		assert_false(object.is_stepping())
 		var mask: int = Gen2WorldAPI.IDLE_MASK_SLOW \
 			if movement == Gen2WorldObject.MOVEMENT_SPINRANDOM_SLOW else Gen2WorldAPI.IDLE_MASK_FAST
-		assert_true(object.idle_frames_remaining <= mask)
+		assert_true(object.idle_passes_remaining <= mask)
 
 
 func test_standing_objects_are_never_moved_by_the_driver() -> void:
@@ -2523,7 +2523,7 @@ func test_standing_objects_are_never_moved_by_the_driver() -> void:
 	var facing: int = object.facing
 
 	for _frame: int in 300:
-		assert_false(world.advance_object_steps_frame(random))
+		assert_false(world.advance_object_steps_pass(random))
 	assert_eq(object.cell, start)
 	assert_eq(object.facing, facing)
 
@@ -2538,12 +2538,12 @@ func test_object_driver_spends_exactly_one_frame_per_call() -> void:
 	random.seed = 90210
 
 	# The deciding frame starts the step without spending one of its frames.
-	assert_true(world.advance_object_steps_frame(random))
-	assert_eq(object.step_frames_remaining, Gen2WorldAPI.STEP_FRAMES_NPC_WALK)
+	assert_true(world.advance_object_steps_pass(random))
+	assert_eq(object.step_passes_remaining, Gen2WorldAPI.STEP_PASSES_NPC_WALK)
 	for _frame: int in 4:
-		assert_true(world.advance_object_steps_frame(random))
+		assert_true(world.advance_object_steps_pass(random))
 	assert_eq(
-		object.step_frames_remaining, Gen2WorldAPI.STEP_FRAMES_NPC_WALK - 4
+		object.step_passes_remaining, Gen2WorldAPI.STEP_PASSES_NPC_WALK - 4
 	)
 
 
@@ -2559,7 +2559,7 @@ func test_object_steps_do_not_survive_a_map_transition() -> void:
 	for _frame: int in 600:
 		if object.is_stepping():
 			break
-		world.advance_object_steps_frame(random)
+		world.advance_object_steps_pass(random)
 	assert_true(object.is_stepping())
 
 	var result: Dictionary = world.try_warp()
@@ -2597,7 +2597,7 @@ func test_object_driver_ignores_a_missing_generator() -> void:
 	var world: Gen2WorldAPI = _wandering_world()
 	var object: Gen2WorldObject = world.objects[0]
 	var start: Vector2i = object.cell
-	assert_false(world.advance_object_steps_frame(null))
+	assert_false(world.advance_object_steps_pass(null))
 	assert_eq(object.cell, start)
 	assert_false(object.is_stepping())
 
@@ -2629,7 +2629,7 @@ func test_follower_carries_the_player_walk_step_offset() -> void:
 	assert_eq(follower.cell, Vector2i(6, 6))
 	# A follower keeps the player's pace, not the slower wandering one.
 	assert_true(follower.is_stepping())
-	assert_eq(follower.step_frames_total, Gen2WorldAPI.STEP_FRAMES_WALK)
+	assert_eq(follower.step_passes_total, Gen2WorldAPI.STEP_PASSES_WALK)
 	# The follower moved right, into the cell the player left, so it is drawn
 	# one cell to the left of its committed cell as the step begins.
 	assert_eq(follower.step_offset_cells(), Vector2(-1.0, 0.0))
@@ -2978,11 +2978,11 @@ func test_a_step_into_grass_takes_one_rustle_per_step() -> void:
 	assert_eq(rustles.size(), 1)
 	assert_eq(rustles[0]["object_index"], -1, "the player is index -1")
 	assert_eq(rustles[0]["cell"], Vector2i(5, 10))
-	assert_eq(rustles[0]["frames"], Gen2WorldAPI.STEP_FRAMES_WALK - 1)
+	assert_eq(rustles[0]["frames"], Gen2WorldAPI.STEP_PASSES_WALK - 1)
 	assert_true(world.take_grass_rustles().is_empty(), "the flag is taken once")
 
-	for _frame: int in Gen2WorldAPI.STEP_FRAMES_WALK:
-		world.advance_player_step_frame()
+	for _frame: int in Gen2WorldAPI.STEP_PASSES_WALK:
+		world.advance_player_step_pass()
 	assert_true(bool(world.move_result(Vector2i.UP).get("ok", false)))
 	assert_true(world.take_grass_rustles().is_empty(), "the cell left behind is not grass")
 
@@ -3925,7 +3925,7 @@ func test_a_press_in_a_new_direction_turns_on_the_spot_before_it_walks() -> void
 	assert_eq(world.player_walk_frame(), 0, "StepFunction_Turn stays standing")
 
 	while world.player_step_in_progress():
-		world.advance_player_step_frame()
+		world.advance_player_step_pass()
 	assert_eq(world.player_walk_frame(), 0, "the completed turn stays standing")
 	var walk: Dictionary = world.player_input_move(Vector2i.RIGHT)
 	assert_true(walk["ok"])
@@ -4065,8 +4065,8 @@ func test_the_turning_movement_commands_step_or_turn_as_their_source_does() -> v
 	assert_eq(world.player_facing, Gen2WorldSprite.FACING_UP)
 	# One cell of trail, at turn_in's own STEP_WALK duration.
 	assert_eq(world.player_step_offset_cells(), Vector2(0.0, 1.0))
-	for _frame: int in Gen2WorldAPI.STEP_FRAMES_WALK:
-		world.advance_player_step_frame()
+	for _frame: int in Gen2WorldAPI.STEP_PASSES_WALK:
+		world.advance_player_step_pass()
 	assert_eq(world.player_step_offset_cells(), Vector2.ZERO)
 	assert_eq(_final_status(_run_script(world, dispatched)), &"complete")
 
@@ -4090,8 +4090,8 @@ func test_a_scripted_jump_step_covers_two_cells_and_arcs_over_them() -> void:
 	assert_eq(object.cell, start + Vector2i(2, 0), "two cells, committed at once")
 
 	var highest: float = 0.0
-	for _frame: int in Gen2WorldAPI.STEP_FRAMES_WALK * 2:
-		assert_true(world.advance_scripted_steps_frame())
+	for _frame: int in Gen2WorldAPI.STEP_PASSES_WALK * 2:
+		assert_true(world.advance_scripted_steps_pass())
 		highest = maxf(highest, object.height_offset_pixels())
 	assert_eq(highest, 12.0, "the top of .y_offsets")
 	assert_eq(object.step_offset_cells(), Vector2.ZERO, "and the whole hop is drawn")
@@ -4115,16 +4115,16 @@ func test_script_movement_leaves_a_trail_the_renderer_walks_a_step_at_a_time() -
 	assert_eq(object.cell, start + Vector2i(2, 0), "both cells commit at once")
 	assert_eq(object.step_offset_cells(), Vector2(-2.0, 0.0), "and the drawing is behind both")
 
-	# Each of the two cells costs STEP_FRAMES_WALK frames.
-	for _frame: int in Gen2WorldAPI.STEP_FRAMES_WALK:
-		assert_true(world.advance_scripted_steps_frame())
+	# Each of the two cells costs STEP_PASSES_WALK frames.
+	for _frame: int in Gen2WorldAPI.STEP_PASSES_WALK:
+		assert_true(world.advance_scripted_steps_pass())
 	assert_eq(object.step_offset_cells(), Vector2(-1.0, 0.0), "one step drawn, one to go")
 	assert_eq(object.cell, start + Vector2i(2, 0), "and no cell moved with it")
 
-	for _frame: int in Gen2WorldAPI.STEP_FRAMES_WALK:
-		world.advance_scripted_steps_frame()
+	for _frame: int in Gen2WorldAPI.STEP_PASSES_WALK:
+		world.advance_scripted_steps_pass()
 	assert_eq(object.step_offset_cells(), Vector2.ZERO)
-	assert_false(world.advance_scripted_steps_frame())
+	assert_false(world.advance_scripted_steps_pass())
 
 
 ## `NormalStep` writes OBJECT_FACING where it starts each step, so a stream whose
@@ -4147,14 +4147,14 @@ func test_a_turning_stream_is_drawn_facing_each_leg_in_turn() -> void:
 	assert_eq(world.dispatch_script_events()[0]["status"], &"waiting")
 
 	assert_eq(object.facing, Gen2WorldSprite.FACING_DOWN, "the first leg")
-	for _frame: int in Gen2WorldAPI.STEP_FRAMES_WALK:
-		world.advance_scripted_steps_frame()
+	for _frame: int in Gen2WorldAPI.STEP_PASSES_WALK:
+		world.advance_scripted_steps_pass()
 	assert_eq(object.facing, Gen2WorldSprite.FACING_DOWN, "still the second")
-	for _frame: int in Gen2WorldAPI.STEP_FRAMES_WALK:
-		world.advance_scripted_steps_frame()
+	for _frame: int in Gen2WorldAPI.STEP_PASSES_WALK:
+		world.advance_scripted_steps_pass()
 	assert_eq(object.facing, Gen2WorldSprite.FACING_RIGHT, "and the last one turns")
-	for _frame: int in Gen2WorldAPI.STEP_FRAMES_WALK:
-		world.advance_scripted_steps_frame()
+	for _frame: int in Gen2WorldAPI.STEP_PASSES_WALK:
+		world.advance_scripted_steps_pass()
 	assert_eq(object.step_offset_cells(), Vector2.ZERO)
 
 
@@ -4184,7 +4184,7 @@ func test_applymovement_holds_the_script_until_the_trail_has_been_drawn() -> voi
 	assert_true(world.pending_runtime_request().is_empty(), "no host answers a wait")
 
 	# Two `step` commands, so the wait outlasts the first one's frames.
-	for _frame: int in Gen2WorldAPI.STEP_FRAMES_WALK:
+	for _frame: int in Gen2WorldAPI.STEP_PASSES_WALK:
 		assert_true(
 			world.advance_script_presentation_frame().is_empty()
 		)
@@ -4305,7 +4305,7 @@ func _types_of(result: Dictionary) -> Array[StringName]:
 	return types
 
 
-## The two drivers own different objects. advance_object_steps_frame() decides
+## The two drivers own different objects. advance_object_steps_pass() decides
 ## movement and a screen stops calling it while a script runs, which is exactly
 ## when a scripted trail has to keep being drawn, so draining it there as well
 ## would walk it at twice the speed.
@@ -4325,14 +4325,14 @@ func test_the_movement_driver_leaves_a_scripted_trail_to_its_own_driver() -> voi
 
 	var random := RandomNumberGenerator.new()
 	random.seed = 7
-	for _frame: int in Gen2WorldAPI.STEP_FRAMES_WALK:
-		world.advance_object_steps_frame(random)
+	for _frame: int in Gen2WorldAPI.STEP_PASSES_WALK:
+		world.advance_object_steps_pass(random)
 	assert_eq(object.step_offset_cells(), Vector2(-1.0, 0.0), "untouched by the other driver")
 
 	@warning_ignore("integer_division")
-	var half: int = Gen2WorldAPI.STEP_FRAMES_WALK / 2
+	var half: int = Gen2WorldAPI.STEP_PASSES_WALK / 2
 	for _frame: int in half:
-		assert_true(world.advance_scripted_steps_frame())
+		assert_true(world.advance_scripted_steps_pass())
 	assert_eq(object.step_offset_cells(), Vector2(-0.5, 0.0))
 
 
@@ -4355,14 +4355,14 @@ func test_a_scripted_player_stream_trails_and_advances_the_walk_frame() -> void:
 	assert_eq(world.player_step_offset_cells(), Vector2(0.0, 2.0))
 	assert_eq(world.player_walk_frame(), 0)
 
-	for _frame: int in Gen2WorldAPI.STEP_FRAMES_WALK:
-		assert_true(world.advance_player_step_frame())
+	for _frame: int in Gen2WorldAPI.STEP_PASSES_WALK:
+		assert_true(world.advance_player_step_pass())
 	assert_eq(world.player_step_offset_cells(), Vector2(0.0, 1.0), "one step drawn")
 	# Eight frames in, the counter is on its third drawing: stand, walk, stand.
 	assert_eq(world.player_walk_frame(), 2)
 
-	for _frame: int in Gen2WorldAPI.STEP_FRAMES_WALK:
-		world.advance_player_step_frame()
+	for _frame: int in Gen2WorldAPI.STEP_PASSES_WALK:
+		world.advance_player_step_pass()
 	assert_eq(world.player_step_offset_cells(), Vector2.ZERO)
 	assert_eq(world.player_cell, Vector2i(7, 4))
 	assert_eq(world.player_walk_frame(), 0, "EndSpriteMovement leaves the player standing")
@@ -5217,7 +5217,7 @@ func test_trainer_approach_crosses_water_a_wandering_object_could_not() -> void:
 	assert_eq(trainer.cell, Vector2i(8, 7))
 	# TrainerWalkToPlayer passes 1 to ComputePathToWalkToPlayer, which selects
 	# `step` rather than `slow_step`: StepVectors' normal row, 8 frames.
-	assert_eq(trainer.step_frames_total, Gen2WorldAPI.STEP_FRAMES_WALK)
+	assert_eq(trainer.step_passes_total, Gen2WorldAPI.STEP_PASSES_WALK)
 	assert_true(world.advance_trainer_approach_step(0, Vector2i.UP)["ok"])
 	assert_eq(trainer.cell, Vector2i(8, 6))
 

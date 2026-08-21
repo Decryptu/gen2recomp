@@ -29,29 +29,29 @@ const TRAINER_SHOCK_FRAMES: int = 60
 ## StepVectors' normal-speed row: 2 pixels per frame for 8 frames, the source
 ## duration for ordinary player walking (engine/overworld/map_objects.asm). The
 ## trainer approach shares it: see advance_trainer_approach_step().
-const STEP_FRAMES_WALK: int = 8
+const STEP_PASSES_WALK: int = 8
 ## A ledge hop is two chained STEP_WALK-duration cells back to back
 ## (engine/overworld/map_objects.asm's StepFunction_PlayerJump: .initjump/
 ## .stepjump then .initland/.stepland, each timed by the same InitStep call
 ## the ordinary walk uses). OBJECT_JUMP_HEIGHT/UpdateJumpPosition supplies the
 ## vertical arc exposed by player_jump_offset() and drawn by the world renderer.
-const STEP_FRAMES_HOP: int = STEP_FRAMES_WALK * 2
+const STEP_PASSES_HOP: int = STEP_PASSES_WALK * 2
 ## StepVectors' slow row: 1 pixel per frame for 16 frames. _RandomWalkContinue
 ## calls InitStep with a direction of 0 to 3, which indexes that first row, so
 ## a wandering object steps at half the player's walking speed.
-const STEP_FRAMES_NPC_WALK: int = 16
+const STEP_PASSES_NPC_WALK: int = 16
 ## MovementFunction_Strength calls InitStep with `direction | 0`, so a pushed
 ## boulder indexes that same slow row and slides at a wandering NPC's speed.
-const STEP_FRAMES_BOULDER_PUSH: int = STEP_FRAMES_NPC_WALK
+const STEP_PASSES_BOULDER_PUSH: int = STEP_PASSES_NPC_WALK
 ## `Movement_tree_shake`'s own `ld a, 24`, spent as a STEP_TYPE_SLEEP.
 const TREE_SHAKE_FRAMES: int = 24
 ## StepVectors' fast row: 4 pixels per frame for 4 frames, which the bike-speed
 ## movement commands reach through `STEP_BIKE`.
-const STEP_FRAMES_FAST: int = 4
+const STEP_PASSES_FAST: int = 4
 ## `StepFunction_Turn` (engine/overworld/map_objects.asm): two frames standing,
 ## then the new facing is written and two more, so a turn on the spot costs
 ## four frames and no cell.
-const STEP_FRAMES_TURN: int = 4
+const STEP_PASSES_TURN: int = 4
 ## How long each scripted step command takes, from the `STEP_*` speed it passes
 ## to `InitStep` (engine/overworld/movement.asm) and that row of `StepVectors`.
 ##
@@ -69,21 +69,21 @@ const STEP_FRAMES_TURN: int = 4
 ## `turn_step` is the one command that is not here: `TurnStep` sets
 ## STEP_TYPE_TURN, never calls `InitStep`, and `StepFunction_Turn` is two frames
 ## of standing and two of the new facing. It is filed with `turn_head` below.
-const SCRIPTED_STEP_FRAMES: Dictionary = {
-	&"slow_step": STEP_FRAMES_NPC_WALK,
-	&"step": STEP_FRAMES_WALK,
-	&"big_step": STEP_FRAMES_FAST,
-	&"slow_slide_step": STEP_FRAMES_NPC_WALK,
-	&"slide_step": STEP_FRAMES_WALK,
-	&"fast_slide_step": STEP_FRAMES_FAST,
-	&"slow_jump_step": STEP_FRAMES_NPC_WALK,
-	&"jump_step": STEP_FRAMES_WALK,
-	&"fast_jump_step": STEP_FRAMES_FAST,
-	&"turn_away": STEP_FRAMES_NPC_WALK,
-	&"turn_in": STEP_FRAMES_WALK,
-	&"turn_waterfall": STEP_FRAMES_FAST,
+const SCRIPTED_STEP_PASSES: Dictionary = {
+	&"slow_step": STEP_PASSES_NPC_WALK,
+	&"step": STEP_PASSES_WALK,
+	&"big_step": STEP_PASSES_FAST,
+	&"slow_slide_step": STEP_PASSES_NPC_WALK,
+	&"slide_step": STEP_PASSES_WALK,
+	&"fast_slide_step": STEP_PASSES_FAST,
+	&"slow_jump_step": STEP_PASSES_NPC_WALK,
+	&"jump_step": STEP_PASSES_WALK,
+	&"fast_jump_step": STEP_PASSES_FAST,
+	&"turn_away": STEP_PASSES_NPC_WALK,
+	&"turn_in": STEP_PASSES_WALK,
+	&"turn_waterfall": STEP_PASSES_FAST,
 }
-## The three rows of SCRIPTED_STEP_FRAMES that are a hop: two cells, twice the
+## The three rows of SCRIPTED_STEP_PASSES that are a hop: two cells, twice the
 ## frames, and the arc `UpdateJumpPosition` draws over them.
 const JUMP_STEP_KINDS: Array[StringName] = [
 	&"slow_jump_step", &"jump_step", &"fast_jump_step",
@@ -110,6 +110,24 @@ const BGEVENT_IFNOTSET: int = 6
 const BGEVENT_ITEM: int = 7
 const BGEVENT_COPY: int = 8
 
+## `HandleMap` spends `NextOverworldFrame` in the middle of every pass and
+## `MaxOverworldDelay` is 2 (engine/overworld/events.asm), so the whole
+## overworld runs one pass per two hardware frames: every map object's step,
+## every landmark sign countdown and every joypad read is a pass's, never a
+## screen frame's. Measured on a real cartridge with
+## `.claude/oracle/overworld/trace_walk.py`: an ordinary walk step is eight
+## passes of two pixels and sixteen frames. Every `PASSES` count below is in
+## that unit, and [Gen2WorldScreen] is what spends the two frames.
+const FRAMES_PER_OVERWORLD_PASS: int = 2
+
+
+## Hardware frames for a count of overworld passes. Anything spending frames
+## against a duration read off the source, a driver or a preview, goes through
+## this rather than multiplying by hand.
+static func passes_in_frames(passes: int) -> int:
+	return passes * FRAMES_PER_OVERWORLD_PASS
+
+
 ## `InitMapNameSign`. `wCurLandmark` is -1 on a map that has no name to show,
 ## and the five landmarks `.CheckSpecialMap` names get no sign either, alongside
 ## `LANDMARK_SPECIAL` itself. Crystal indices, since the sign is Crystal's own
@@ -117,7 +135,9 @@ const BGEVENT_COPY: int = 8
 ## maps 15 and 17, which `.CheckNationalParkGate` names because their
 ## environment is not `GATE`.
 const MAP_NAME_SIGN_NO_LANDMARK: int = -1
-const MAP_NAME_SIGN_FRAMES: int = 60
+## `wLandmarkSignTimer`, decremented once per `PlaceMapNameSign` and so once
+## per overworld pass, which is two hardware frames.
+const MAP_NAME_SIGN_PASSES: int = 60
 const NATIONAL_PARK_GATE_GROUP: int = 10
 const NATIONAL_PARK_GATE_MAPS: Array[int] = [15, 17]
 const MAP_NAME_SIGN_SILENT_LANDMARKS: Array[int] = [
@@ -274,8 +294,8 @@ var _phone_ring_request: Dictionary = {}
 ## a renderer draws the sprite. Never read by collision, events or the
 ## snapshot.
 var _player_step_direction: Vector2i = Vector2i.ZERO
-var _player_step_frames_total: int = 0
-var _player_step_frames_remaining: int = 0
+var _player_step_passes_total: int = 0
+var _player_step_passes_remaining: int = 0
 ## Gen2WorldObject.step_began for the player.
 var _player_step_began: bool = false
 ## Whether the step in flight is a ledge hop, which is the only one the source
@@ -650,7 +670,7 @@ func player_pixel_position() -> Vector2i:
 
 
 func player_step_in_progress() -> bool:
-	return _player_step_frames_remaining > 0
+	return _player_step_passes_remaining > 0
 
 
 ## `UpdateJumpPosition`'s `.y_offsets`: the pixel a jumping sprite is drawn above
@@ -666,10 +686,10 @@ const JUMP_OFFSETS: Array[int] = [
 ## is in flight. Presentation only: `player_cell` committed to the landing cell
 ## when the hop started.
 func player_jump_offset() -> int:
-	if not _player_jumping or _player_step_frames_total <= 0:
+	if not _player_jumping or _player_step_passes_total <= 0:
 		return 0
-	var spent: int = _player_step_frames_total - _player_step_frames_remaining
-	return jump_offset_at(spent, _player_step_frames_total)
+	var spent: int = _player_step_passes_total - _player_step_passes_remaining
+	return jump_offset_at(spent, _player_step_passes_total)
 
 
 ## The table entry a jump of [param total] frames is on after [param spent] of
@@ -705,9 +725,9 @@ func player_step_offset_cells() -> Vector2:
 	var behind := Vector2.ZERO
 	for entry: Dictionary in _player_queued_steps:
 		behind -= Vector2(entry["direction"] as Vector2i)
-	if _player_step_frames_remaining > 0 and _player_step_frames_total > 0:
+	if _player_step_passes_remaining > 0 and _player_step_passes_total > 0:
 		behind -= Vector2(_player_step_direction) \
-			* (float(_player_step_frames_remaining) / float(_player_step_frames_total))
+			* (float(_player_step_passes_remaining) / float(_player_step_passes_total))
 	return behind
 
 
@@ -717,7 +737,7 @@ func player_walk_frame() -> int:
 	## StepFunction_Turn writes OBJECT_WALKING = STANDING for the whole four
 	## frames. Once an ordinary step ends, SetFacingStanding selects the standing
 	## drawing even though OBJECT_STEP_FRAME itself retains its counter.
-	if _player_step_frames_remaining <= 0 or _player_step_direction == Vector2i.ZERO:
+	if _player_step_passes_remaining <= 0 or _player_step_direction == Vector2i.ZERO:
 		return 0
 	return (_player_step_frame >> 2) & 3
 
@@ -740,7 +760,7 @@ func _queue_player_step(
 	direction: Vector2i, frames: int, jumping: bool = false,
 	facing: Vector2i = Vector2i.ZERO
 ) -> void:
-	if _player_step_frames_remaining > 0 or not _player_queued_steps.is_empty():
+	if _player_step_passes_remaining > 0 or not _player_queued_steps.is_empty():
 		_player_scripted_steps = true
 		_player_queued_steps.append({
 			"direction": direction, "frames": maxi(0, frames), "jumping": jumping,
@@ -783,8 +803,8 @@ func _begin_player_step(
 	## it. `_try_ledge_hop` and a `jump_step` raise the flag again.
 	_player_jumping = jumping
 	_player_step_direction = direction
-	_player_step_frames_total = maxi(0, frames)
-	_player_step_frames_remaining = _player_step_frames_total
+	_player_step_passes_total = maxi(0, frames)
+	_player_step_passes_remaining = _player_step_passes_total
 	_player_step_began = direction != Vector2i.ZERO
 
 
@@ -792,8 +812,8 @@ func _clear_player_step() -> void:
 	_player_step_began = false
 	_player_jumping = false
 	_player_step_direction = Vector2i.ZERO
-	_player_step_frames_total = 0
-	_player_step_frames_remaining = 0
+	_player_step_passes_total = 0
+	_player_step_passes_remaining = 0
 	_player_queued_steps.clear()
 	_player_scripted_steps = false
 	_player_step_frame = 0
@@ -804,12 +824,12 @@ func _clear_player_step() -> void:
 ## This only shrinks a presentation offset that starts and ends at player_cell;
 ## it never changes player_cell, collision or event results, and a caller that
 ## never starts a step sees no difference.
-func advance_player_step_frame() -> bool:
-	if _player_step_frames_remaining <= 0:
+func advance_player_step_pass() -> bool:
+	if _player_step_passes_remaining <= 0:
 		return false
 	_player_step_frame = (_player_step_frame + 1) & 0x0F
-	_player_step_frames_remaining -= 1
-	if _player_step_frames_remaining <= 0:
+	_player_step_passes_remaining -= 1
+	if _player_step_passes_remaining <= 0:
 		_start_next_player_step()
 	return true
 
@@ -1115,7 +1135,7 @@ func complete_surf() -> Dictionary:
 	movement_mode = MOVEMENT_SURF
 	player_sprite_number = int(request["sprite"])
 	player_cell = request["cell"]
-	_start_player_step(request["direction"], STEP_FRAMES_NPC_WALK)
+	_start_player_step(request["direction"], STEP_PASSES_NPC_WALK)
 	return {
 		"ok": true,
 		"kind": &"surf_applied",
@@ -2372,7 +2392,7 @@ func take_grass_rustles() -> Array:
 			out.append({
 				"object_index": -1,
 				"cell": player_cell,
-				"frames": maxi(0, _player_step_frames_total - 1),
+				"frames": maxi(0, _player_step_passes_total - 1),
 			})
 	for object: Gen2WorldObject in objects:
 		if not object.step_began:
@@ -2385,7 +2405,7 @@ func take_grass_rustles() -> Array:
 		out.append({
 			"object_index": object.index,
 			"cell": object.cell,
-			"frames": maxi(0, object.step_frames_total - 1),
+			"frames": maxi(0, object.step_passes_total - 1),
 		})
 	return out
 
@@ -2428,7 +2448,7 @@ func start_trainer_approach(
 	object.set_emote(TRAINER_SHOCK_EMOTE, true, TRAINER_SHOCK_FRAMES)
 	plan["emote_id"] = TRAINER_SHOCK_EMOTE
 	plan["emote_frames"] = TRAINER_SHOCK_FRAMES
-	plan["step_frames"] = STEP_FRAMES_WALK
+	plan["step_passes"] = STEP_PASSES_WALK
 	return plan
 
 
@@ -2470,7 +2490,7 @@ func trainer_approach_plan(
 ## calls CanObjectMoveInDirection. That is what walks Cerulean Gym's swimmers
 ## over their own pool.
 ##
-## STEP_FRAMES_WALK, not the slow row: TrainerWalkToPlayer passes 1 in d and
+## STEP_PASSES_WALK, not the slow row: TrainerWalkToPlayer passes 1 in d and
 ## `.GetPathToPlayer`'s `push de`/`pop af` hands it to
 ## ComputePathToWalkToPlayer, whose `ld b, a` selects `.MovementData`'s `step`
 ## row (engine/overworld/player_object.asm, home/movement.asm).
@@ -2486,7 +2506,7 @@ func advance_trainer_approach_step(object_index: int, direction: Vector2i) -> Di
 			"object_index": object_index, "cell": destination,
 		}
 	object.cell = destination
-	object.start_step(direction, STEP_FRAMES_WALK)
+	object.start_step(direction, STEP_PASSES_WALK)
 	var key: String = _object_key(current_map.group, current_map.number, object_index)
 	_object_position_overrides[key] = object.cell
 	_object_facing_overrides[key] = object.facing
@@ -3979,7 +3999,7 @@ func _apply_object_movement(event: Dictionary) -> Array:
 			object.queue_step(Vector2i.ZERO, 0, false, turn)
 			final_facing = _facing_for_direction(turn)
 			continue
-		if SCRIPTED_STEP_FRAMES.has(kind):
+		if SCRIPTED_STEP_PASSES.has(kind):
 			var direction: Vector2i = _movement_direction(int(command.get("direction", 0)))
 			var jumping: bool = kind in JUMP_STEP_KINDS
 			var cells: int = 2 if jumping else 1
@@ -3991,9 +4011,9 @@ func _apply_object_movement(event: Dictionary) -> Array:
 				# The cell commits here, as it does for every other step in this
 				# runtime; only the drawing trails. A stream applies in one call,
 				# so the whole path is queued and drawn a step at a time by
-				# advance_scripted_steps_frame().
+				# advance_scripted_steps_pass().
 				object.queue_step(
-					direction * cells, int(SCRIPTED_STEP_FRAMES[kind]) * cells, jumping,
+					direction * cells, int(SCRIPTED_STEP_PASSES[kind]) * cells, jumping,
 					direction,
 				)
 				_advance_followers(object_index, vacated)
@@ -4105,7 +4125,7 @@ func _apply_player_movement(event: Dictionary) -> Array:
 				_movement_direction(int(command.get("direction", 0))),
 			)
 			continue
-		if SCRIPTED_STEP_FRAMES.has(kind):
+		if SCRIPTED_STEP_PASSES.has(kind):
 			var direction: Vector2i = _movement_direction(int(command.get("direction", 0)))
 			var jumping: bool = kind in JUMP_STEP_KINDS
 			var cells: int = 2 if jumping else 1
@@ -4114,7 +4134,7 @@ func _apply_player_movement(event: Dictionary) -> Array:
 				var vacated: Vector2i = player_cell
 				player_cell = destination
 				_queue_player_step(
-					direction * cells, int(SCRIPTED_STEP_FRAMES[kind]) * cells, jumping,
+					direction * cells, int(SCRIPTED_STEP_PASSES[kind]) * cells, jumping,
 					direction,
 				)
 				_advance_followers(-1, vacated)
@@ -4619,7 +4639,7 @@ func _object_landing_cells(
 ## advance after each successful player step.
 ##
 ## One movement decision per eligible object per call. A caller wanting the
-## source's pacing uses advance_object_steps_frame(), which spends the step and
+## source's pacing uses advance_object_steps_pass(), which spends the step and
 ## idle durations this records.
 func advance_objects(random: RandomNumberGenerator) -> int:
 	var moved: int = 0
@@ -4659,7 +4679,7 @@ func _decide_object_movement(object: Gen2WorldObject, random: RandomNumberGenera
 		return false
 	object.cell = destination
 	object.apply_direction(direction)
-	object.start_step(direction, STEP_FRAMES_NPC_WALK)
+	object.start_step(direction, STEP_PASSES_NPC_WALK)
 	return true
 
 
@@ -4670,14 +4690,14 @@ func _decide_object_movement(object: Gen2WorldObject, random: RandomNumberGenera
 ## STEP_TYPE_SLEEP and STEP_TYPE_FROM_MOVEMENT cycle. The cell commits when the
 ## step starts, matching InitStep and the player path, and only the presentation
 ## offset trails. Returns true when something a renderer draws changed.
-func advance_object_steps_frame(random: RandomNumberGenerator) -> bool:
+func advance_object_steps_pass(random: RandomNumberGenerator) -> bool:
 	if random == null or objects.is_empty():
 		return false
 	var changed: bool = false
 	for object: Gen2WorldObject in objects:
 		if not object.active or object.deleted:
 			continue
-		# A scripted trail belongs to advance_scripted_steps_frame(), which runs
+		# A scripted trail belongs to advance_scripted_steps_pass(), which runs
 		# while a script does. Draining it here as well would walk it at twice
 		# the speed on every frame both drivers run.
 		if object.scripted_steps:
@@ -4714,12 +4734,12 @@ func advance_object_steps_frame(random: RandomNumberGenerator) -> bool:
 ## Drains the presentation trail an `applymovement` left on the objects it moved,
 ## and nothing else.
 ##
-## Separate from [method advance_object_steps_frame] because that one decides
+## Separate from [method advance_object_steps_pass] because that one decides
 ## movement and a caller stops calling it while a script runs, which is exactly
 ## when a scripted stream needs drawing. This decides nothing, rolls nothing and
 ## writes no cell: every cell the stream names committed when it was applied.
 ## Returns true when something a renderer draws moved.
-func advance_scripted_steps_frame() -> bool:
+func advance_scripted_steps_pass() -> bool:
 	var changed: bool = false
 	for object: Gen2WorldObject in objects:
 		if object.scripted_steps and not object.deleted and object.tick_step():
@@ -4733,7 +4753,7 @@ func advance_scripted_steps_frame() -> bool:
 ## The two waits are `ScriptEvents`'s own: SCRIPT_WAIT_MOVEMENT, which ends when
 ## the stream an `applymovement` started has been drawn, and the counted delay
 ## `pause`, `wait`, `deactivatefacing` and `showemote` spend. A host calls this
-## once per frame beside [method advance_scripted_steps_frame], which is what
+## once per frame beside [method advance_scripted_steps_pass], which is what
 ## draws the movement the first one waits for.
 func advance_script_wait_frame() -> Array:
 	var wait: Dictionary = pending_script_wait()
@@ -4779,8 +4799,8 @@ func _complete_script_wait() -> Array:
 ## no render loop of its own: the trails and then the wait that is watching them.
 ## A screen calls the three parts itself, in the order it already draws them.
 func advance_script_presentation_frame() -> Array:
-	advance_player_step_frame()
-	advance_scripted_steps_frame()
+	advance_player_step_pass()
+	advance_scripted_steps_pass()
 	return advance_script_wait_frame()
 
 
@@ -4880,11 +4900,11 @@ func _step_follower(follower_index: int, target_cell: Vector2i, exact: bool) -> 
 	if follower == null:
 		player_cell = destination
 		player_facing = _facing_for_direction(direction)
-		_queue_player_step(direction, STEP_FRAMES_WALK)
+		_queue_player_step(direction, STEP_PASSES_WALK)
 		return
 	follower.cell = destination
 	follower.apply_direction(direction)
-	follower.queue_step(direction, STEP_FRAMES_WALK)
+	follower.queue_step(direction, STEP_PASSES_WALK)
 	var override_key: String = _object_key(
 		current_map.group, current_map.number, follower_index
 	)
@@ -4920,7 +4940,7 @@ func player_input_move(direction: Vector2i) -> Dictionary:
 		var pressed_facing: int = _facing_for_direction(direction)
 		if pressed_facing != player_facing:
 			player_facing = pressed_facing
-			_start_player_step(Vector2i.ZERO, STEP_FRAMES_TURN)
+			_start_player_step(Vector2i.ZERO, STEP_PASSES_TURN)
 			return {
 				"ok": true, "kind": &"turn", "facing": player_facing, "cell": player_cell,
 			}
@@ -5064,7 +5084,7 @@ func _forced_step(direction: Vector2i, destination: Vector2i) -> Dictionary:
 	player_facing = _facing_for_direction(direction)
 	state.count_step()
 	_advance_followers(-1, from_cell)
-	_start_player_step(direction, STEP_FRAMES_WALK)
+	_start_player_step(direction, STEP_PASSES_WALK)
 	return {
 		"ok": true,
 		"kind": &"forced_move",
@@ -5121,7 +5141,7 @@ func _try_push_boulder(direction: Vector2i, destination: Vector2i) -> Dictionary
 	var fall: Dictionary = stone_queue_script(boulder)
 	# FIXED_FACING is set on the boulder's movement data, so InitStep skips the
 	# OBJECT_DIRECTION write and the sprite keeps facing down while it slides.
-	boulder.start_step(direction, STEP_FRAMES_BOULDER_PUSH)
+	boulder.start_step(direction, STEP_PASSES_BOULDER_PUSH)
 	_remember_object_position(boulder)
 	var pushed: Dictionary = {
 		"index": boulder.index,
@@ -5172,7 +5192,7 @@ func _try_ledge_hop(direction: Vector2i) -> Dictionary:
 	player_facing = _facing_for_direction(direction)
 	state.count_step()
 	_advance_followers(-1, from_cell)
-	_start_player_step(direction * 2, STEP_FRAMES_HOP, true)
+	_start_player_step(direction * 2, STEP_PASSES_HOP, true)
 	return {
 		"ok": true,
 		"kind": &"ledge_hop",
@@ -5576,7 +5596,7 @@ func dig_request() -> Dictionary:
 ## `.BikeCheck`'s downhill branch is not modelled: `BIKEFLAGS_DOWNHILL_F` is set
 ## by nothing in either pin, so no map can ask for the slower non-down step.
 func _step_frames_for_movement() -> int:
-	return STEP_FRAMES_FAST if movement_mode == MOVEMENT_BIKE else STEP_FRAMES_WALK
+	return STEP_PASSES_FAST if movement_mode == MOVEMENT_BIKE else STEP_PASSES_WALK
 
 
 ## `BikeFunction`'s `.TryBike`: `.CheckEnvironment` first, then the state the
