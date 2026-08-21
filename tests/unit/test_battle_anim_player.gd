@@ -173,6 +173,28 @@ func test_incobj_retires_an_object_with_the_null_callback() -> void:
 	)
 
 
+## `BattleAnim_UpdateOAM_All` tests the slot's index once, at the top of its
+## loop, so the object whose own callback has just deinitialised itself still
+## reaches `BattleAnimOAMUpdate` and is drawn one last time. Measured on a real
+## cartridge: TACKLE's `anim_incobj 1` frees the target's two rows on the frame
+## it runs and OAM still holds their sprites for that frame.
+func test_an_object_that_deletes_itself_is_drawn_one_last_time() -> void:
+	var player: Gen2BattleAnimPlayer = _player(
+		SPAWN + [0x01] + [0xD6, 0x01] + [0x01] + RET
+	)
+	player.advance_frame()
+	player.advance_frame()
+	var before: int = player.sprites().size()
+	player.advance_frame()
+	assert_eq(player.objects().size(), 0, "the null callback deinitialised it")
+	assert_eq(
+		player.sprites().size(), before,
+		"the freed slot is still drawn on the frame it was freed"
+	)
+	player.advance_frame()
+	assert_eq(player.sprites().size(), 0, "and on no frame after it")
+
+
 ## `anim_setobj` writes the index rather than stepping it, and an index no object
 ## carries finds nothing rather than writing over slot zero.
 func test_setobj_writes_the_index_and_an_unknown_one_finds_nothing() -> void:

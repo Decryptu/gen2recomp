@@ -116,6 +116,7 @@ func run(r: RefCounted) -> void:
 		_verify_substitute_pic(game_id, data)
 		_run_every_animation(game_id, data)
 		_play_every_animation(game_id, data)
+		_verify_tackle_frames(game_id, data)
 		_verify_the_entrance(game_id, data)
 		_verify_the_transition(game_id, data)
 
@@ -129,6 +130,74 @@ const SEND_OUT_EFFECTS: Dictionary = {0: [0x0B], 1: [0x01, 0x06]}
 ## And how long each takes: the two `anim_wait`s of `.Normal` and the ten of
 ## `.Shiny`, plus the frame each batch of commands between them spends.
 const SEND_OUT_FRAMES: Dictionary = {0: 39, 1: 69}
+
+
+## TACKLE, frame by frame, against a real cartridge: `.claude/oracle/battle`'s
+## `trace_move_anim.py` reads the shadow OAM and `wBattleAnimDelay` of a live
+## fight, and these are the three runs of sprite counts it recorded.
+##
+## Fourteen is the target's two rows, lifted off the tilemap by
+## `anim_battlergfx_1row`; thirty adds `BATTLE_ANIM_OBJ_HIT_BIG_YFIX`, whose
+## frameset is `oamframe 0, 6` and so lasts seven frames.
+##
+## The last run is the one number a reading gets wrong. `anim_incobj 1` frees the
+## target's rows through `BattleAnimFunc_Null`, and `BattleAnim_UpdateOAM_All`
+## has already passed the index test for that slot, so the freed object is drawn
+## one last time: eleven frames, not ten. The cartridge's own frames are 26 to
+## 56, one of them a repeat of the frame before it, which is a loop that overran
+## VBlank rather than a state of its own.
+## Crystal's row is the measured one. Gold and Silver run
+## `BattleAnim_TargetObj_1Row` where Crystal runs `..._2Row`, which is the
+## profile split [constant TACKLE_BG_EFFECTS] already pins, so their target is
+## seven sprites rather than fourteen and every run length is the same.
+## Both sides are measured. On the enemy's turn the target is the player, whose
+## picture is six columns rather than seven, so the two runs differ by the two
+## rows and nothing else.
+const TACKLE_SPRITE_RUNS: Dictionary = {
+	&"crystal": [
+		[[14, 12], [30, 7], [14, 11], [0, 2]],
+		[[12, 12], [28, 7], [12, 11], [0, 2]],
+	],
+	&"gold": [
+		[[7, 12], [23, 7], [7, 11], [0, 2]],
+		[[6, 12], [22, 7], [6, 11], [0, 2]],
+	],
+	&"silver": [
+		[[7, 12], [23, 7], [7, 11], [0, 2]],
+		[[6, 12], [22, 7], [6, 11], [0, 2]],
+	],
+}
+
+
+func _verify_tackle_frames(game_id: StringName, data: GameData) -> void:
+	var anims: Gen2BattleAnimData = Gen2BattleAnimData.from_game_data(data)
+	if not _r.check(anims != null, "%s: no battle animation data in the cache." % game_id):
+		return
+	for enemy_turn: bool in [false, true]:
+		var player: Gen2BattleAnimPlayer = Gen2BattleAnimPlayer.create(
+			anims, TACKLE_INDEX, enemy_turn
+		)
+		if not _r.check(player != null, "%s: TACKLE would not start." % game_id):
+			continue
+		var runs: Array = []
+		var frames: int = 0
+		while player.advance_frame() and frames < MAX_FRAMES:
+			frames += 1
+			var count: int = player.sprites().size()
+			if runs.is_empty() or int((runs[-1] as Array)[0]) != count:
+				runs.append([count, 1])
+			else:
+				(runs[-1] as Array)[1] = int((runs[-1] as Array)[1]) + 1
+		var expected: Array = (TACKLE_SPRITE_RUNS[game_id] as Array)[1 if enemy_turn else 0]
+		_r.check(
+			runs == expected,
+			"%s: TACKLE draws %s sprites on the %s side, not the cartridge's %s." % [
+				game_id, runs, "enemy" if enemy_turn else "player", expected,
+			]
+		)
+		print("%s: TACKLE draws %s over %d frames on the %s side." % [
+			game_id, runs, frames, "enemy" if enemy_turn else "player",
+		])
 
 
 ## `ANIM_SEND_OUT_MON`, which every entrance plays and which nothing else in the

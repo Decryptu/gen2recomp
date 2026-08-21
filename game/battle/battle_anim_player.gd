@@ -487,14 +487,20 @@ func _execute_bg_effects() -> void:
 
 ## `BattleAnim_UpdateOAM_All`: every live object stepped and drawn, in slot
 ## order, stopping at the first one whose sprites would not fit.
+##
+## The slot's index byte is tested once, at the top of the loop, so an object
+## whose own callback calls `DeinitBattleAnimation` still reaches
+## `BattleAnimOAMUpdate` and is **drawn one last time where it stands**;
+## `DeinitBattleAnimation` clears the index and nothing else, so the frameset
+## steps normally on that pass. Measured against a real cartridge: TACKLE's
+## `anim_incobj 1` frees the target's two rows on the frame it runs and OAM
+## still holds their fourteen sprites for that frame.
 func _update_oam() -> void:
 	_sprites = []
 	for object: Gen2BattleAnimObject in _objects:
 		if object == null or not object.active():
 			continue
 		_do_battle_anim_frame(object)
-		if not object.active():
-			continue
 		var update: Dictionary = object.oam_update(_data, _enemy_turn, _anim_index)
 		var new_sprites: Array = update["sprites"]
 		if _sprites.size() + new_sprites.size() > MAX_SPRITES:
