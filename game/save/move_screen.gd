@@ -171,8 +171,14 @@ func snapshot() -> Dictionary:
 			"type_name": _data.type_name(int(record.get("type", 0))),
 			"description": String(record.get("description", "")),
 		})
+	## `SetUpMoveScreenBG`'s `SetHPPal` colours the box beside the nickname, and
+	## the pixel count it reads is `wPlayerHPPal`'s last writer rather than a
+	## fresh one, which in play is this Pokémon's own bar in the party list.
+	var battle_mon: Gen2BattleMon = Gen2SaveBattleAdapter.to_battle_mon(_data, mon)
 	return {
 		"species": mon.species,
+		"hp": mon.hp,
+		"max_hp": battle_mon.max_hp() if battle_mon != null else 0,
 		"nickname": mon.nickname if not mon.nickname.is_empty() \
 			else String(_data.species(mon.species).get("name", "")),
 		"level": mon.level,

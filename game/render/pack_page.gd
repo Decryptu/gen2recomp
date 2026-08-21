@@ -317,16 +317,7 @@ func draw_move_list(map: PackedInt32Array, names: Array, cursor: int) -> void:
 
 ## `_CGB_PackPals`' attrmap, as one palette index per cell.
 static func attributes() -> PackedInt32Array:
-	var out := PackedInt32Array()
-	out.resize(COLUMNS * ROWS)
-	for box: Array in ATTRIBUTES:
-		for row: int in int(box[3]):
-			for column: int in int(box[2]):
-				var x: int = int(box[0]) + column
-				var y: int = int(box[1]) + row
-				if x < COLUMNS and y < ROWS:
-					out[y * COLUMNS + x] = int(box[4])
-	return out
+	return Gen2PicImage.attribute_boxes(ATTRIBUTES, COLUMNS, ROWS)
 
 
 ## The whole screen as pixels. [param female] is Kris's pack and her own
@@ -339,23 +330,13 @@ func image(
 	var palettes: Array = []
 	for slot: int in RomLayout.PACK_PALETTES:
 		var colors: PackedColorArray = data.pack_palette(slot, female)
-		palettes.append(colors if not colors.is_empty() else data.pack_palette(slot))
-	var out := Image.create(Gen2Screen.WIDTH, Gen2Screen.HEIGHT, false, Image.FORMAT_RGBA8)
-	for row: int in ROWS:
-		for column: int in COLUMNS:
-			var palette: PackedColorArray = palettes[
-				clampi(slots[row * COLUMNS + column], 0, palettes.size() - 1)
-			]
-			if palette.is_empty():
-				continue
-			for y: int in TILE:
-				for x: int in TILE:
-					var at_x: int = column * TILE + x
-					var at_y: int = row * TILE + y
-					out.set_pixel(at_x, at_y, palette[
-						clampi(indices[at_y * Gen2Screen.WIDTH + at_x], 0, palette.size() - 1)
-					])
-	return out
+		if colors.is_empty():
+			colors = data.pack_palette(slot)
+		palettes.append(colors if not colors.is_empty() \
+			else Gen2Palette.pic_palette(PackedColorArray([Color.WHITE, Color.BLACK])))
+	return Gen2PicImage.from_attributes(
+		indices, Gen2Screen.WIDTH, Gen2Screen.HEIGHT, slots, COLUMNS, palettes
+	)
 
 
 ## Resolves every tile number to pixels: the menu sheet, the pocket's own

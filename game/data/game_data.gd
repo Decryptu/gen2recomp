@@ -53,6 +53,8 @@ var _egg_pic: Dictionary = {}
 var _tiles: Dictionary = {}
 var _bar_palettes: Dictionary = {}
 var _battle_grayscale_palette: Array = []
+var _move_screen_palette: Array = []
+var _stats_screen_palettes: Dictionary = {}
 var _player_palettes: Dictionary = {}
 var _transition_palettes: Dictionary = {}
 var _card_palettes: Dictionary = {}
@@ -139,6 +141,8 @@ static func open_directory(path: String) -> GameData:
 	data._tiles = manifest.get("tiles", {})
 	data._bar_palettes = manifest.get("bar_palettes", {})
 	data._battle_grayscale_palette = manifest.get("battle_grayscale_palette", [])
+	data._move_screen_palette = manifest.get("move_screen_palette", [])
+	data._stats_screen_palettes = manifest.get("stats_screen_palettes", {})
 	data._player_palettes = manifest.get("player_palettes", {})
 	data._transition_palettes = manifest.get("transition_palettes", {})
 	data._card_palettes = manifest.get("card_palettes", {})
@@ -1863,8 +1867,10 @@ func footprint_tiles(number: int) -> PackedInt32Array:
 	])
 
 
-## The three bar palettes in `GetHPPal`'s own order.
+## The three bar palettes in `GetHPPal`'s own order, and `ExpBarPalette`'s key
+## beside them, both as [method bar_palette] takes them.
 const HP_BAR_PALETTE_NAMES: Array[String] = ["hp_green", "hp_yellow", "hp_red"]
+const EXP_BAR_PALETTE: String = "exp"
 
 
 ## Which HP bar palette a bar of [param lit] pixels is drawn in. The colour
@@ -2010,6 +2016,50 @@ func battle_grayscale_palette() -> PackedColorArray:
 		return PackedColorArray()
 	var out := PackedColorArray()
 	for packed: Variant in _battle_grayscale_palette:
+		out.append(Gen2Palette.from_packed(int(packed)))
+	return out
+
+
+## `_CGB_MoveList`'s background palette, `PredefPals`' `GOLDENROD`. White and
+## black on a cartridge with no pin for it, which is what the screen was drawn
+## in before it was imported.
+func move_screen_palette() -> PackedColorArray:
+	return _predef_colors(_move_screen_palette)
+
+
+## One of `StatsScreenPagePals`, the whole four-colour palette a page indicator
+## block wears. Pages past the cartridge's three are this project's own
+## ([method Gen2StatsScreenPage.page_count]), so they cycle the three.
+func stats_page_palette(page: int) -> PackedColorArray:
+	var pages: Variant = _stats_screen_palettes.get("pages", [])
+	if not pages is Array or (pages as Array).is_empty():
+		return Gen2Palette.pic_palette(PackedColorArray([Color.WHITE, Color.BLACK]))
+	return _predef_colors((pages as Array)[_stats_page_index(page, (pages as Array).size())])
+
+
+## One of `StatsScreenPals`, the colour `LoadStatsScreenPals` writes over colour
+## 0 of the HP and exp palettes, so the open page tints the lower screen. White
+## for a cartridge with no pin, which draws the page the way it was drawn before.
+func stats_page_tint(page: int) -> Color:
+	var tints: Variant = _stats_screen_palettes.get("tints", [])
+	if not tints is Array or (tints as Array).is_empty():
+		return Color.WHITE
+	return Gen2Palette.from_packed(
+		int((tints as Array)[_stats_page_index(page, (tints as Array).size())])
+	)
+
+
+## `LoadStatsScreenPals`' own `dec c`: the pink page is 1 and the table starts
+## at 0.
+func _stats_page_index(page: int, count: int) -> int:
+	return posmod(page - Gen2StatsScreenPage.PINK_PAGE, count)
+
+
+func _predef_colors(stored: Variant) -> PackedColorArray:
+	if not stored is Array or (stored as Array).size() < RomLayout.PREDEF_PALETTE_COLORS:
+		return Gen2Palette.pic_palette(PackedColorArray([Color.WHITE, Color.BLACK]))
+	var out := PackedColorArray()
+	for packed: Variant in stored as Array:
 		out.append(Gen2Palette.from_packed(int(packed)))
 	return out
 

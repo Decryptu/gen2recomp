@@ -3113,7 +3113,9 @@ static func verify_frames(rom: RomFile, layout: Dictionary) -> Dictionary:
 
 
 ## The battle HUD's graphics, checked by the one thing they do that nothing else
-## in the section does: they count.
+## in the section does: they count. The pinned palette values every bar and page
+## is drawn with are checked here too, the stats screen's included: they are the
+## same bars and the same kind of check.
 ##
 ## A bar's fill levels are consecutive tiles each lighting one more column, so
 ## the ink climbs by exactly two pixels a step, which a wrong offset does not
@@ -3136,6 +3138,30 @@ static func verify_battle_graphics(rom: RomFile, layout: Dictionary) -> Dictiona
 						RomLayout.BAR_PALETTE_NAMES[index], colour, wanted[colour], read,
 					],
 				}
+
+	# `StatsScreenPagePals` and `StatsScreenPals`, one run and one check: the
+	# three tints are the three page palettes' own colour 1, so a run that reads
+	# right in both halves cannot be the wrong run.
+	for index: int in RomLayout.STATS_PAGE_PALETTES:
+		var page: int = RomLayout.stats_page_palette_offset(layout, index)
+		var wanted_page: Array = RomLayout.STATS_SCREEN_PAGE_PALETTES[index]
+		for colour: int in wanted_page.size():
+			var read_page: int = rom.u16le(page + colour * Gen2Palette.COLOR_BYTES)
+			if read_page != int(wanted_page[colour]):
+				return {
+					"ok": false,
+					"message": "Stats page palette %d colour %d: expected $%04X, read $%04X." % [
+						index, colour, wanted_page[colour], read_page,
+					],
+				}
+		var tint: int = rom.u16le(RomLayout.stats_page_tint_offset(layout, index))
+		if tint != int(RomLayout.STATS_SCREEN_PAGE_TINTS[index]):
+			return {
+				"ok": false,
+				"message": "Stats page tint %d: expected $%04X, read $%04X." % [
+					index, RomLayout.STATS_SCREEN_PAGE_TINTS[index], tint,
+				],
+			}
 
 	# `BattleObjectPals`, checked the same way and for the same reason: a palette
 	# table one table out still decodes into colours.
@@ -3927,6 +3953,8 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		"player_palettes": _import_player_palettes(rom, layout),
 		"transition_palettes": _import_transition_palettes(rom, layout),
 		"battle_grayscale_palette": _import_battle_grayscale_palette(rom, layout),
+		"move_screen_palette": _import_move_screen_palette(rom, layout),
+		"stats_screen_palettes": _import_stats_screen_palettes(rom, layout),
 		"card_palettes": _import_card_palettes(rom, layout),
 		"pokedex_palettes": _import_pokedex_palettes(rom, layout),
 		"pc_palette": _import_pc_palette(rom, layout),
@@ -4536,13 +4564,44 @@ func _import_bar_palettes(rom: RomFile, layout: Dictionary) -> Dictionary:
 ## is entered until `GetSGBLayout SCGB_BATTLE_COLORS` runs, several hundred
 ## frames later on the far side of `BattleIntroSlidingPics`.
 func _import_battle_grayscale_palette(rom: RomFile, layout: Dictionary) -> Array:
-	var at: int = RomLayout.predef_palette_offset(layout, RomLayout.PREDEFPAL_BLACKOUT)
+	return _import_predef_palette(rom, layout, RomLayout.PREDEFPAL_BLACKOUT)
+
+
+## `_CGB_MoveList`'s background palette, `PREDEFPAL_GOLDENROD`, which is the one
+## colour on the move screen that is not a bar or a mon icon.
+func _import_move_screen_palette(rom: RomFile, layout: Dictionary) -> Array:
+	return _import_predef_palette(rom, layout, RomLayout.PREDEFPAL_GOLDENROD)
+
+
+## One whole `PredefPals` entry. Empty for a layout with no pin, which is what a
+## caller that draws white and black falls back on.
+func _import_predef_palette(rom: RomFile, layout: Dictionary, index: int) -> Array:
+	var at: int = RomLayout.predef_palette_offset(layout, index)
 	if at < 0 or not rom.in_bounds(at, RomLayout.PREDEF_PALETTE_SIZE):
 		return []
 	var out: Array = []
-	for index: int in RomLayout.PREDEF_PALETTE_COLORS:
-		out.append(rom.u16le(at + index * Gen2Palette.COLOR_BYTES))
+	for colour: int in RomLayout.PREDEF_PALETTE_COLORS:
+		out.append(rom.u16le(at + colour * Gen2Palette.COLOR_BYTES))
 	return out
+
+
+## `StatsScreenPagePals` and `StatsScreenPals`: the three page indicators' whole
+## palettes, and the three colours `LoadStatsScreenPals` tints the open page's
+## background with.
+func _import_stats_screen_palettes(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var pages: Array = []
+	var tints: Array = []
+	for index: int in RomLayout.STATS_PAGE_PALETTES:
+		var page: int = RomLayout.stats_page_palette_offset(layout, index)
+		var tint: int = RomLayout.stats_page_tint_offset(layout, index)
+		if page < 0 or not rom.in_bounds(tint, Gen2Palette.COLOR_BYTES):
+			return {}
+		var colors: Array = []
+		for colour: int in RomLayout.STATS_PAGE_PALETTE_COLORS:
+			colors.append(rom.u16le(page + colour * Gen2Palette.COLOR_BYTES))
+		pages.append(colors)
+		tints.append(rom.u16le(tint))
+	return {"pages": pages, "tints": tints}
 
 
 ## The six `BattleObjectPals` an animation object is drawn with, four colours

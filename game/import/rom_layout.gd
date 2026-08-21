@@ -1129,6 +1129,9 @@ const GS_INTRO_SHELLDER_LAPRAS_PALETTES: int = 3
 ## Despite the name it is not black: $7FFF, $1CE7, $0C62, $0000, the grayscale
 ## ramp the whole battle is drawn in until `GetSGBLayout SCGB_BATTLE_COLORS`
 ## runs, which is after `BattleIntroSlidingPics`. Identical in all three dumps.
+## `_CGB_MoveList`'s own background palette, which is why the move screen is
+## the same warm gold as Goldenrod City rather than white.
+const PREDEFPAL_GOLDENROD: int = 0x10
 const PREDEFPAL_BLACKOUT: int = 0x1A
 const PREDEF_PALETTE_COLORS: int = 4
 const PREDEF_PALETTE_SIZE: int = PREDEF_PALETTE_COLORS * Gen2Palette.COLOR_BYTES
@@ -1366,6 +1369,44 @@ const BAR_PALETTE_NAMES: Array = ["hp_green", "hp_yellow", "hp_red", "exp"]
 const BAR_PALETTES: Array = [
 	[0x3F5E, 0x02E0], [0x3F5E, 0x02BF], [0x3F5E, 0x001F], [0x3F5E, 0x7E24],
 ]
+
+## `StatsScreenPagePals` (gfx/stats/pages.pal) and `StatsScreenPals`
+## (gfx/stats/stats.pal), one contiguous run: three whole four-colour palettes
+## the stats screen's three page indicators wear, then the three single colours
+## `LoadStatsScreenPals` writes over colour 0 of `wBGPals1` palettes 0 and 2, so
+## the open page tints the whole lower screen and the exp bar's trough.
+##
+## The two labels are read as one record because the second follows the first
+## with nothing between it, which is what locates both from one pin.
+const STATS_PAGE_PALETTES: int = 3
+const STATS_PAGE_PALETTE_COLORS: int = 4
+const STATS_PAGE_TINTS_OFFSET: int = (
+	STATS_PAGE_PALETTES * STATS_PAGE_PALETTE_COLORS * Gen2Palette.COLOR_BYTES
+)
+
+## What that run holds, the way [constant BAR_PALETTES] pins the bars': pink,
+## green and blue, identical in all three dumps.
+const STATS_SCREEN_PAGE_PALETTES: Array = [
+	[0x7FFF, 0x7E7F, 0x7DFF, 0x0000],
+	[0x7FFF, 0x3BF5, 0x03F1, 0x0000],
+	[0x7FFF, 0x7FF1, 0x7FF1, 0x0000],
+]
+const STATS_SCREEN_PAGE_TINTS: Array = [0x7E7F, 0x3BF5, 0x7FF1]
+
+
+## The offset of one `StatsScreenPagePals` entry, or -1 for a layout with no pin.
+static func stats_page_palette_offset(layout: Dictionary, index: int) -> int:
+	var base: int = int(layout.get("stats_screen_palettes", -1))
+	return -1 if base < 0 else base \
+		+ index * STATS_PAGE_PALETTE_COLORS * Gen2Palette.COLOR_BYTES
+
+
+## The offset of one `StatsScreenPals` colour, or -1 for a layout with no pin.
+static func stats_page_tint_offset(layout: Dictionary, index: int) -> int:
+	var base: int = int(layout.get("stats_screen_palettes", -1))
+	return -1 if base < 0 else base + STATS_PAGE_TINTS_OFFSET \
+		+ index * Gen2Palette.COLOR_BYTES
+
 
 ## An HP bar is green down to half and yellow down to a fifth, measured in lit
 ## pixels rather than in hit points: what colours the bar is what is drawn.
@@ -1718,6 +1759,7 @@ const GOLD_SILVER: Dictionary = {
 	"font": 0xF82F2,
 	"frames": 0xF88F2,
 	"bar_palettes": 0xAD2D,
+	"stats_screen_palettes": 0x94D3,
 	"battle_font": 0xF86F2,
 	# `FontsExtra_SolidBlackAndUpArrowGFX`' second tile, which is 1bpp here and
 	# a 2bpp sheet of its own on Crystal. Both are unique in their dump.
@@ -2200,6 +2242,7 @@ const CRYSTAL: Dictionary = {
 	"font": 0xF8200,
 	"frames": 0xF8800,
 	"bar_palettes": 0xA8BE,
+	"stats_screen_palettes": 0x8F52,
 	"battle_font": 0xF8600,
 	# `FontsExtra2_UpArrowGFX`, its own 2bpp tile here.
 	"up_arrow": {"offset": 0xF9424, "bits": 2},

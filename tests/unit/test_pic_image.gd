@@ -299,3 +299,40 @@ func test_a_pic_layer_claims_only_its_own_sheets_cells() -> void:
 	)
 	assert_false(Gen2BattleRenderer.claims_tile(banked, true, true, square, banked))
 	assert_false(Gen2BattleRenderer.claims_tile(-1, false, false, square, banked))
+
+
+## `WipeAttrmap` then `FillBoxCGB`: a box is (x, y, width, height, palette) and
+## anything it does not reach stays on palette 0. A box running off the screen is
+## clipped rather than wrapping, which is what `FillBoxCGB`'s own row step does.
+func test_an_attrmap_is_its_boxes_over_the_zeroes_wipeattrmap_leaves() -> void:
+	var slots: PackedInt32Array = Gen2PicImage.attribute_boxes(
+		[[1, 0, 2, 2, 3], [3, 1, 4, 1, 5]], 4, 3
+	)
+	assert_eq(Array(slots), [0, 3, 3, 0, 0, 3, 3, 5, 0, 0, 0, 0])
+
+
+## One index buffer, one palette per tile: the hardware's own shape, and what
+## keeps the stats screen's bars, front pic and page indicators out of layers of
+## their own.
+func test_a_tile_is_drawn_in_the_palette_its_attrmap_slot_names() -> void:
+	var tile: int = Gen2Font.TILE
+	var indices := PackedByteArray()
+	indices.resize(tile * 2 * tile)
+	for x: int in tile * 2:
+		indices[x] = 1
+	var image: Image = Gen2PicImage.from_attributes(
+		indices, tile * 2, tile, Gen2PicImage.attribute_boxes([[1, 0, 1, 1, 1]], 2, 1), 2,
+		[
+			PackedColorArray([Color.WHITE, Color.RED, Color.BLACK, Color.BLACK]),
+			PackedColorArray([Color.WHITE, Color.BLUE, Color.BLACK, Color.BLACK]),
+		]
+	)
+	assert_eq(image.get_pixel(0, 0), Color.RED)
+	assert_eq(image.get_pixel(tile, 0), Color.BLUE)
+	# A slot naming a palette that is not there falls back on the first rather
+	# than reading past the list.
+	var clamped: Image = Gen2PicImage.from_attributes(
+		indices, tile * 2, tile, Gen2PicImage.attribute_boxes([[1, 0, 1, 1, 9]], 2, 1), 2,
+		[PackedColorArray([Color.WHITE, Color.RED, Color.BLACK, Color.BLACK])]
+	)
+	assert_eq(clamped.get_pixel(tile, 0), Color.RED)

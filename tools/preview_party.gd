@@ -21,6 +21,8 @@ extends SceneTree
 
 const FRAMES_BEFORE_CAPTURE: int = 6
 
+const SCREEN_SCENE: PackedScene = preload("res://game/render/gen2_screen.tscn")
+
 ## Item numbers from `constants/item_constants.asm`, the three rows the pack's
 ## own submenu split is worth photographing.
 const ITEM_POTION: int = 0x12
@@ -37,6 +39,10 @@ var _what: String = "party"
 var _programs: Array[String] = [""]
 var _at: int = 0
 var _screen: Control = null
+## The hardware screen the start menu draws into, handed over once both it and
+## the menu are in the tree.
+var _hardware: Gen2Screen = null
+var _menu: Gen2StartMenuScreen = null
 var _elapsed: int = 0
 
 
@@ -73,8 +79,9 @@ func _initialize() -> void:
 		quit(1)
 		return
 	root.add_child(_screen)
-	# Both are window-resolution panels rather than hardware-tile screens, so
-	# they are given the whole window the way a scene root would be.
+	# The party and box views are window-resolution panels, so they are given the
+	# whole window the way a scene root would be; the start menu is a hardware
+	# screen inside one and takes its own layer once both are in the tree.
 	_screen.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	current_scene = _screen
 
@@ -92,7 +99,7 @@ func _build(data: GameData) -> Control:
 		boxes.set_context(data, save, false, true)
 		return boxes
 	if _what == "pack" or _what == "select":
-		return _build_pack(data, save)
+		return _wrap(_build_pack(data, save))
 	## The stats screen's mod seam has no player until a mod is installed, so the
 	## shipped example's own page is registered here: this is the one place the
 	## fourth page and its relaid-out indicators can be looked at.
@@ -134,17 +141,39 @@ func _build_pack(data: GameData, save: Gen2SaveData) -> Control:
 	return menu
 
 
+## `Gen2StartMenuScreen` draws into a [Gen2Screen] the host hands over and into
+## nothing else, so a driver that adds it to a tree and hands it none photographs
+## an empty window. The world screen owns one; here it is built beside the menu.
+func _wrap(menu: Control) -> Control:
+	if menu == null:
+		return null
+	var host := Control.new()
+	_menu = menu as Gen2StartMenuScreen
+	var screen: Gen2Screen = SCREEN_SCENE.instantiate() as Gen2Screen
+	screen.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	host.add_child(screen)
+	host.add_child(menu)
+	_hardware = screen
+	return host
+
+
 func _drive(program: String) -> void:
 	for key: String in program.split(",", false):
 		var button: Variant = BUTTONS.get(key.strip_edges().to_lower(), null)
 		if button == null:
 			push_error("Unknown button %s" % key)
 			continue
-		_screen.handle_button(int(button))
+		var target: Object = _menu if _menu != null else _screen
+		target.call("handle_button", int(button))
 
 
 func _process(_delta: float) -> bool:
 	_elapsed += 1
+	## `Gen2Screen`'s own layers are `@onready`, so the menu is handed the screen
+	## on the first frame rather than while the tree is still being built.
+	if _menu != null and _hardware != null:
+		_menu.set_screen(_hardware)
+		_hardware = null
 	if _elapsed < FRAMES_BEFORE_CAPTURE:
 		return false
 	if _at >= _programs.size():
