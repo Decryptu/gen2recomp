@@ -1380,8 +1380,8 @@ static func _give_pokerus(
 ) -> Dictionary:
 	var count: int = save.party.size()
 	for index: int in count:
-		var mon: Gen2SaveMon = save.party[index]
-		if mon != null and (mon.pokerus & 0x0F) != 0:
+		var carrier: Gen2SaveMon = save.party[index]
+		if carrier != null and (carrier.pokerus & 0x0F) != 0:
 			return _try_spread_pokerus(save, index, random)
 	if not reached_goldenrod:
 		return {}

@@ -3964,6 +3964,17 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		result["message"] = "Could not write manifest."
 		return result
 
+	## [Gen2WorldCatalog]'s sidecar, written here so a player never pays its
+	## scan: it decodes every command of every script this import just wrote,
+	## and the first mod-enabled map entry is where it would otherwise land.
+	## After the manifest, because the scan opens the cache it describes.
+	var catalogued: GameData = GameData.open_directory(directory)
+	if catalogued != null:
+		RomCache.write_json(
+			RomCache.world_catalog_path(directory),
+			Gen2WorldCatalog.build(catalogued).to_dict()
+		)
+
 	result["ok"] = true
 	result["species"] = species.size()
 	result["moves"] = moves.size()

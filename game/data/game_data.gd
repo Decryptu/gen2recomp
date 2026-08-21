@@ -2498,8 +2498,19 @@ func _overlaid(kind: StringName, number: int, base: Dictionary) -> Dictionary:
 ## walk is the whole script corpus and nothing about it changes while a cache is
 ## open. See [Gen2WorldCatalog].
 func catalog() -> Gen2WorldCatalog:
-	if _catalog == null:
-		_catalog = Gen2WorldCatalog.build(self)
+	if _catalog != null:
+		return _catalog
+	## The scan costs about thirteen seconds and its answer is a function of the
+	## cache alone, so it is read from the sidecar the import wrote. A cache from
+	## a build before the sidecar existed, or one whose sidecar is stale, pays
+	## the scan once and then has one.
+	_catalog = Gen2WorldCatalog.from_dict(
+		self, RomCache.read_json(RomCache.world_catalog_path(directory))
+	)
+	if _catalog != null:
+		return _catalog
+	_catalog = Gen2WorldCatalog.build(self)
+	RomCache.write_json(RomCache.world_catalog_path(directory), _catalog.to_dict())
 	return _catalog
 
 

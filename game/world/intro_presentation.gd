@@ -68,9 +68,9 @@ func clear() -> void:
 	_step_frame = 0
 
 
-func push(bgp: int, column: int, frames: int) -> void:
+func push(palette_byte: int, pic_column: int, frames: int) -> void:
 	if frames > 0:
-		_steps.append([bgp, column, frames])
+		_steps.append([palette_byte, pic_column, frames])
 
 
 func push_delay(frames: int) -> void:
@@ -98,8 +98,8 @@ func push_rotate_three_left() -> void:
 
 
 func push_rotate_left_frontpic() -> void:
-	for bgp: int in FRONTPIC_FADE:
-		push(bgp, KEEP, FRONTPIC_FADE_STEP_FRAMES)
+	for palette_byte: int in FRONTPIC_FADE:
+		push(palette_byte, KEEP, FRONTPIC_FADE_STEP_FRAMES)
 
 
 func push_wipe_in_frontpic() -> void:
@@ -173,13 +173,13 @@ func remaining_frames() -> int:
 ## `CopyPals`: displayed colour `i` is the loaded colour the byte's `i`th pair
 ## names, low pair first. Anything that is not a four-colour row is handed back,
 ## since there is no palette for the byte to index.
-static func apply_bgp(row: PackedColorArray, bgp: int) -> PackedColorArray:
+static func apply_bgp(row: PackedColorArray, palette_byte: int) -> PackedColorArray:
 	if row.size() != 4:
 		return row
 	var out := PackedColorArray()
 	out.resize(4)
 	for index: int in 4:
-		out[index] = row[(bgp >> (2 * index)) & 3]
+		out[index] = row[(palette_byte >> (2 * index)) & 3]
 	return out
 
 
