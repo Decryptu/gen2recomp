@@ -35,6 +35,9 @@ extends SceneTree
 ## warp tile named by the two numbers below it, and the picture is
 ## `FadeOutToWhite`'s last order, which is the frame the new map is loaded on:
 ## `crystal 24 7 ... warp 7 1` is the bedroom staircase),
+## `script_fade` (one of the five fade specials over the map, as
+## `crystal 24 4 ... script_fade 46 6`: the first number is the special and the
+## second how many of its frames to spend before the picture),
 ## `door` (`.CheckWarp`'s carpet: the player is walked down onto an interior
 ## door's mat and photographed standing on it, which the step itself no longer
 ## warps: `crystal 24 6 ... door 6 5` is the front door of the player's house),
@@ -261,6 +264,15 @@ func _process(_delta: float) -> bool:
 			## a different picture; the second is 1 for a trainer's, which is the
 			## branch that draws the Poke Ball and floods the map.
 			_screen.preview_battle_transition(_cell.x, _cell.y != 0)
+		elif _kind == &"script_fade":
+			## One of the five fade specials over the map it runs on. The first
+			## number is the special (46 `FadeOutToWhite`, 47 `BattleTowerFade`,
+			## 48 `FadeOutToBlack`, 49 `FadeInFromWhite`, 50 `FadeInFromBlack`)
+			## and the second how many of its frames to spend before the
+			## picture, since each of the four rows is a different screen.
+			_screen.preview_script_fade(maxi(_cell.x, 0))
+			for _frame: int in maxi(_cell.y, 0):
+				_screen.advance_frame()
 		elif _kind == &"level_evolution":
 			## `EvolveAfterBattle`'s own screen, which is a few hundred frames of
 			## picture. The first number is how far into it to photograph rather

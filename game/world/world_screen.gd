@@ -88,6 +88,13 @@ var _pending_step_events: Dictionary = {}
 ## empty on every other frame. The map swaps between the two stages, which is
 ## where the setup script's own list sits.
 var _map_fade: Dictionary = {}
+## The fade one of the five fade specials is inside, `{ orders, white_fill,
+## step_frames, step, frames }`, and the row it left behind once it is done. A
+## `FadeOutToWhite` holds the screen white until its own `FadeInFromWhite` runs,
+## so the last row of a finished fade stays applied rather than snapping back.
+var _script_fade: Dictionary = {}
+var _script_fade_order: int = Gen2WorldPalette.FADE_IDENTITY
+var _script_fade_white: bool = false
 ## `DoBattleTransition` and the battle it is in front of: the encounter is
 ## resolved when the transition starts, and the battle screen is not built until
 ## it has finished.
@@ -514,6 +521,7 @@ func advance_frame() -> void:
 	## Before everything the map draws: the fade owns the frame the map swaps on,
 	## and nothing else runs while `RunMapSetupScript` is spending its own.
 	_advance_map_fade()
+	_advance_script_fade()
 	## `DoBattleTransition`'s own `.loop`, which owns every frame between the
 	## encounter and the battle screen.
 	_advance_battle_transition()
@@ -1418,6 +1426,11 @@ func map_fade() -> Dictionary:
 	return _map_fade.duplicate()
 
 
+## The same for one of the five fade specials, empty on every other frame.
+func script_fade() -> Dictionary:
+	return _script_fade.duplicate()
+
+
 ## `WarpToNewMapScript`. `GetWarpSFX` reads the tile the step landed on, and
 ## `MapSetupScript_Door`'s `FadeOutToWhite` is the first thing the setup script
 ## spends: four palette orders, two frames each, before anything is loaded.
@@ -1473,8 +1486,10 @@ func _apply_map_fade_step() -> void:
 	if _renderer == null or not _renderer.has_method(Gen2ModHost.RENDERER_FADE_METHOD):
 		return
 	if _map_fade.is_empty():
+		## The warp's fade is over; whatever a script fade left standing is what
+		## the screen is drawn with, which is the identity unless one is held.
 		_renderer.call(
-			Gen2ModHost.RENDERER_FADE_METHOD, Gen2WorldPalette.FADE_IDENTITY, false
+			Gen2ModHost.RENDERER_FADE_METHOD, _script_fade_order, _script_fade_white
 		)
 		return
 	var out: bool = StringName(_map_fade["stage"]) == &"out"
@@ -1485,6 +1500,61 @@ func _apply_map_fade_step() -> void:
 	)
 
 
+## `FadeOutToWhite` and its four siblings, opened by the special and stepped from
+## here. The script is already holding for the frames the fade costs, since the
+## runner staged that wait; this is the row the renderer draws with on each of
+## them.
+func _start_script_fade(event: Dictionary) -> void:
+	var orders: Array = event.get("orders", [])
+	if orders.is_empty():
+		return
+	_script_fade = {
+		"orders": orders.duplicate(),
+		"white_fill": bool(event.get("white_fill", false)),
+		"step_frames": maxi(1, int(event.get("step_frames", 1))),
+		"step": 0,
+	}
+	_script_fade["frames"] = int(_script_fade["step_frames"])
+	_apply_script_fade_step()
+
+
+## One frame of it, and the row the last step leaves behind.
+func _advance_script_fade() -> void:
+	if _script_fade.is_empty():
+		return
+	_script_fade["frames"] = int(_script_fade["frames"]) - 1
+	if int(_script_fade["frames"]) > 0:
+		return
+	var step: int = int(_script_fade["step"]) + 1
+	if step >= (_script_fade["orders"] as Array).size():
+		_script_fade = {}
+		return
+	_script_fade["step"] = step
+	_script_fade["frames"] = int(_script_fade["step_frames"])
+	_apply_script_fade_step()
+
+
+func _apply_script_fade_step() -> void:
+	var orders: Array = _script_fade.get("orders", [])
+	var step: int = int(_script_fade.get("step", 0))
+	if step >= orders.size():
+		return
+	_script_fade_order = int(orders[step])
+	_script_fade_white = bool(_script_fade.get("white_fill", false))
+	## The warp's own fade owns the renderer while it runs, so a script fade
+	## under one is held rather than drawn twice.
+	if _map_fade.is_empty():
+		_apply_map_fade_step()
+
+
+## `MapSetupScript_Door`'s own fade in ends with the map's palettes restored, so
+## a row a script fade was holding is dropped where the map is.
+func _clear_script_fade() -> void:
+	_script_fade = {}
+	_script_fade_order = Gen2WorldPalette.FADE_IDENTITY
+	_script_fade_white = false
+
+
 ## The middle of `MapSetupScript_Door`: the map the warp names is loaded with the
 ## screen at its whitest, and `FadeToMapMusic` is the eight-step fade the new
 ## map's track arrives behind rather than a restart.
@@ -1492,6 +1562,7 @@ func _swap_warped_map() -> void:
 	var transition: Dictionary = _world.try_warp()
 	if not bool(transition.get("ok", false)):
 		return
+	_clear_script_fade()
 	_animation.configure(_world, time_of_day)
 	_set_renderer_world()
 	_fade_to_map_music()
@@ -2143,6 +2214,21 @@ func preview_name_rater() -> void:
 ##
 ## [param species] is what is inside the egg; 0 takes the first species the
 ## cache holds, so the driver works on all three without a table.
+## One of the five fade specials on the map that is already open, for a
+## screenshot. The frames it spends are the script's on the real path, so this
+## opens the fade and the caller advances into it.
+func preview_script_fade(special: int) -> void:
+	if not Gen2WorldScriptRunner.FADE_ORDERS_OF.has(special):
+		return
+	_start_script_fade({
+		"orders": Gen2WorldScriptRunner.FADE_ORDERS_OF[special],
+		"white_fill": special in Gen2WorldScriptRunner.FADE_WHITE_FILL_SPECIALS,
+		"step_frames": Gen2WorldPalette.BATTLE_TOWER_FADE_STEP_FRAMES \
+			if special == Gen2WorldScriptRunner.SPECIAL_BATTLE_TOWER_FADE \
+			else Gen2WorldPalette.FADE_STEP_FRAMES,
+	})
+
+
 func preview_egg_hatch(species: int = 0) -> void:
 	if _world == null or _data == null or _hatch_host != null:
 		return
@@ -4301,6 +4387,9 @@ func _show_script_results(results: Array) -> void:
 			elif result_event.get("type", &"") == &"presentation_special_applied" \
 				and StringName(result_event.get("kind", &"")) == &"heal_machine_anim":
 				_start_heal_machine_sounds(result_event)
+			elif result_event.get("type", &"") == &"presentation_special_applied" \
+				and StringName(result_event.get("kind", &"")) == &"palette_fade":
+				_start_script_fade(result_event)
 			elif result_event.get("type", &"") == &"hall_of_fame_requested":
 				## An event, not a runtime request: `halloffame` commits its flag
 				## and runs on, and the source's own `end` is the next command,
@@ -4990,11 +5079,15 @@ func _refresh_party_summary() -> void:
 	var names: Array = []
 	var eggs: Array = []
 	var fainted: Array = []
+	var happiness: Array = []
+	var own_ot: Array = []
 	for member: Variant in save.party:
 		if member is Gen2SaveMon:
 			var mon: Gen2SaveMon = member as Gen2SaveMon
 			if (int(mon.pokerus) & 0x0F) != 0:
 				has_pokerus = true
+			happiness.append(int(mon.happiness))
+			own_ot.append(_is_own_mon(save, mon))
 			species.append(int(mon.species))
 			# CheckPartyMove walks every slot's four move slots; zeroes are empty
 			# slots, not moves, so they are dropped rather than searched.
@@ -5021,9 +5114,48 @@ func _refresh_party_summary() -> void:
 			## `VAR_BOXSPACE`, which Route 29's catching tutorial reads before it
 			## offers to hand a POKé BALL over.
 			"box_free_space": save.box_free_space(),
+			## Per slot, for the two specials that read a happiness byte or an
+			## OT: `GetFirstPokemonHappiness` and
+			## `FindPartyMonThatSpeciesYourTrainerID`.
+			"happiness": happiness,
+			"own_ot": own_ot,
+			## `CheckOwnMonAnywhere`'s answer for every species at once: a mon in
+			## the party or in any box carrying the player's own ID and OT name.
+			"owned_species": _owned_species(save),
 		},
 		fainted
 	)
+
+
+## `CheckOwnMon`'s three tests: the species is the caller's question, and what is
+## left is the player's own ID and OT name.
+func _is_own_mon(save: Gen2SaveData, mon: Gen2SaveMon) -> bool:
+	return int(mon.ot_id) == int(save.player_id) \
+		and mon.original_trainer == save.player_name
+
+
+## `CheckOwnMonAnywhere` for every species in one walk. Its own `ret z` on an
+## empty party is why an empty party owns nothing even when a box does not, and
+## the Day-Care is deliberately not walked: `docs/bugs_and_glitches.md` records
+## that omission as the cartridge's.
+func _owned_species(save: Gen2SaveData) -> Array:
+	var owned: Array = []
+	if save.party.is_empty():
+		return owned
+	var seen: Dictionary = {}
+	for member: Variant in save.party:
+		if member is Gen2SaveMon and _is_own_mon(save, member as Gen2SaveMon):
+			seen[int((member as Gen2SaveMon).species)] = true
+	for box: Variant in save.boxes:
+		if not box is Gen2SaveBox:
+			continue
+		for slot: Variant in (box as Gen2SaveBox).slots:
+			if slot is Gen2SaveMon and _is_own_mon(save, slot as Gen2SaveMon):
+				seen[int((slot as Gen2SaveMon).species)] = true
+	for key: Variant in seen:
+		owned.append(int(key))
+	owned.sort()
+	return owned
 
 
 ## GetPartyNickname's answer for one slot, following the party screen's own rule:

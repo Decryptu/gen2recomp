@@ -120,8 +120,15 @@ const FADE_IDENTITY: int = 0xE4
 ## `ConvertTimePalsDecHL` walks the same four back.
 const FADE_OUT_ORDERS: Array[int] = [0xE4, 0x90, 0x40, 0x00]
 const FADE_IN_ORDERS: Array[int] = [0x00, 0x40, 0x90, 0xE4]
+## `FadeOutToBlack` is `ld c, $9` walked backwards and `FadeInFromBlack`
+## `ld c, $0` walked forwards, which is the other half of the same seven rows.
+## Neither runs `FillWhiteBGColor`, so colour 0 stays the map's on the way out.
+const FADE_TO_BLACK_ORDERS: Array[int] = [0xE4, 0xF9, 0xFE, 0xFF]
+const FADE_FROM_BLACK_ORDERS: Array[int] = [0xFF, 0xFE, 0xF9, 0xE4]
 ## `DelayFrames`' own `ld c, 2` inside either loop.
 const FADE_STEP_FRAMES: int = 2
+## `BattleTowerFade` is `FadeOutToWhite`'s four rows with `ld c, 7` instead.
+const BATTLE_TOWER_FADE_STEP_FRAMES: int = 7
 
 
 ## One step of a palette fade: `CopyPals`' rule, which every `DmgToCgb*Pals`
