@@ -122,3 +122,26 @@ func test_four_slots_is_what_a_battler_carries() -> void:
 	# The two constants are the same number seen from either side of the line, and
 	# a Pokémon that knew five would be trimmed silently on its way into a battle.
 	assert_eq(Gen2Learnset.MOVE_SLOTS, Gen2BattleMon.MAX_MOVES)
+
+
+func test_the_skip_branch_teaches_only_the_levels_between_the_two() -> void:
+	# `wSkipMovesBeforeLevelUp`, which is what a Day-Care retrieval fills with:
+	# a Golbat deposited at 12 and taken back at 19 is offered Confuse Ray and
+	# nothing it already knew.
+	var known: Array = [SCREECH, LEECH_LIFE, SUPERSONIC, BITE]
+	Gen2Learnset.fill_moves(_golbat(), known, 19, 12)
+	assert_eq(known, [LEECH_LIFE, SUPERSONIC, BITE, CONFUSE_RAY])
+
+
+func test_the_skip_branch_fills_an_empty_slot_before_it_shifts() -> void:
+	var known: Array = [SCREECH, 0, 0, 0]
+	Gen2Learnset.fill_moves(_golbat(), known, 19, 12)
+	assert_eq(known, [SCREECH, CONFUSE_RAY, 0, 0])
+
+
+func test_a_move_learned_at_the_level_deposited_at_is_not_offered_again() -> void:
+	# `cp b / jr nc, .GetMove` skips the level itself, so a Golbat put in at 19
+	# and taken out at 19 learns nothing.
+	var known: Array = [SCREECH, 0, 0, 0]
+	Gen2Learnset.fill_moves(_golbat(), known, 19, 19)
+	assert_eq(known, [SCREECH, 0, 0, 0])

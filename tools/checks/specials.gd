@@ -49,7 +49,6 @@ const EXPECTED_DEFERRED: Dictionary = {
 	## work, not a dispatch entry: it opens a screen, spends a transaction, or
 	## reads a save field nothing writes.
 	25: "CheckMagikarpLength", 26: "MagikarpHouseSign",
-	30: "DayCareMan", 31: "DayCareLady", 32: "DayCareManOutside",
 	34: "BankOfMom", 39: "UnownPrinter", 40: "MapRadio", 41: "UnownPuzzle",
 	42: "SlotMachine", 43: "CardFlip", 57: "GameCornerPrizeMonCheckDex",
 	75: "GiveShuckle", 76: "ReturnShuckie",
@@ -63,11 +62,8 @@ const EXPECTED_DEFERRED: Dictionary = {
 	148: "GiveDratini", 149: "SampleKenjiBreakCountdown",
 
 	## Reached by one script row each and by nothing the player can talk to.
-	## `FindPartyMonAboveLevel` is marked `; unused` in the pin's own table, and
-	## the Day-Care's two mon readers belong with the three Day-Care routines
-	## above them.
+	## `FindPartyMonAboveLevel` is marked `; unused` in the pin's own table.
 	0: "WarpToSpawnPoint", 64: "FindPartyMonAboveLevel",
-	69: "DayCareMon1", 70: "DayCareMon2",
 }
 
 ## Decoded `special` operands that name no `SpecialsPointers` entry. Pinned

@@ -362,6 +362,10 @@ static func verify_layout(rom: RomFile) -> Dictionary:
 	if not move_deleter_text["ok"]:
 		return move_deleter_text
 
+	var day_care_text: Dictionary = verify_day_care_text(rom, layout)
+	if not day_care_text["ok"]:
+		return day_care_text
+
 	var map_entry_sign: Dictionary = verify_map_entry_sign(rom, layout)
 	if not map_entry_sign["ok"]:
 		return map_entry_sign
@@ -1167,6 +1171,37 @@ static func verify_move_deleter_text(rom: RomFile, layout: Dictionary) -> Dictio
 			"message": "The move deleter's intro is \"%s\", not his own." % intro,
 		}
 	return {"ok": true, "message": "The move deleter's texts verified."}
+
+
+## The Day-Care's thirty-two `text_far` stubs across its four runs, identified
+## by content the same way: every stub has to decode and the man's opening line
+## has to be his own, which is what says the four pins are the four runs.
+static func verify_day_care_text(rom: RomFile, layout: Dictionary) -> Dictionary:
+	for name: String in day_care_text_names():
+		if read_oak_text(
+			rom, layout, RomLayout.day_care_text_offset(layout, name)
+		).is_empty():
+			return {
+				"ok": false, "message": "The Day-Care's %s text did not decode." % name,
+			}
+	var intro: String = read_oak_text(
+		rom, layout, RomLayout.day_care_text_offset(layout, "man_intro")
+	)
+	if not intro.begins_with("I'm the DAY-CARE"):
+		return {
+			"ok": false,
+			"message": "The Day-Care man's intro is \"%s\", not his own." % intro,
+		}
+	return {"ok": true, "message": "The Day-Care's texts verified."}
+
+
+## Every stub name across the four runs, in run order.
+static func day_care_text_names() -> Array[String]:
+	var out: Array[String] = []
+	for run: Array in RomLayout.DAY_CARE_TEXT_RUNS:
+		for name: Variant in run[1] as Array:
+			out.append(String(name))
+	return out
 
 
 ## `UnownWords`, twenty-six words in form order, A first. Empty on any failure,
@@ -4012,6 +4047,7 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		"mart_text": _import_mart_text(rom, layout),
 		"name_rater_text": _import_name_rater_text(rom, layout),
 		"move_deleter_text": _import_move_deleter_text(rom, layout),
+		"day_care_text": _import_day_care_text(rom, layout),
 		"copyright_string": _import_copyright_string(rom, layout),
 		"copyright_palette": _import_copyright_palette(rom, layout),
 		"presents_palettes": _import_presents_palettes(rom, layout),
@@ -4798,6 +4834,17 @@ func _import_name_rater_text(rom: RomFile, layout: Dictionary) -> Dictionary:
 	for name: String in RomLayout.NAME_RATER_TEXT_ORDER:
 		out[name] = read_oak_text(
 			rom, layout, RomLayout.name_rater_text_offset(layout, name)
+		)
+	return out
+
+
+## The Day-Care's own boxes, by the name
+## `RomImporter.day_care_text_names` gives each stub.
+func _import_day_care_text(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var out: Dictionary = {}
+	for name: String in day_care_text_names():
+		out[name] = read_oak_text(
+			rom, layout, RomLayout.day_care_text_offset(layout, name)
 		)
 	return out
 

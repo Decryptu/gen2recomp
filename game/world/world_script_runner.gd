@@ -168,6 +168,26 @@ const SPECIAL_SELECT_APRICORN_FOR_KURT: int = 86
 ## the same shape `NameRater` does, one house further on, so it is one host
 ## request as well.
 const SPECIAL_MOVE_DELETION: int = 33
+## The Day-Care's five, all below the first index the two tables disagree on, so
+## `special_index()` leaves them alone. `DayCareMan` and `DayCareLady` are the
+## deposit and withdrawal counters; `DayCareManOutside` is the man who brings the
+## egg out and the only one of the five that writes wScriptVar, which its map
+## script branches on; `DayCareMon1` and `DayCareMon2` are the two signs inside,
+## each a line, a cry and the pair's compatibility.
+const SPECIAL_DAY_CARE_MAN: int = 30
+const SPECIAL_DAY_CARE_LADY: int = 31
+const SPECIAL_DAY_CARE_MAN_OUTSIDE: int = 32
+const SPECIAL_DAY_CARE_MON_1: int = 69
+const SPECIAL_DAY_CARE_MON_2: int = 70
+## Which routine each index opens, in the request the host answers.
+const DAY_CARE_ROLE_OF: Dictionary = {
+	SPECIAL_DAY_CARE_MAN: &"man",
+	SPECIAL_DAY_CARE_LADY: &"lady",
+	SPECIAL_DAY_CARE_MAN_OUTSIDE: &"outside",
+	SPECIAL_DAY_CARE_MON_1: &"mon1",
+	SPECIAL_DAY_CARE_MON_2: &"mon2",
+}
+
 ## NameRater, 87 in Crystal and 86 in Gold/Silver, which special_index()
 ## already normalizes. `_NameRater` owns its own texts, its two `YesNoBox`es and
 ## the party list `SelectMonFromParty` opens, so the whole routine is one host
@@ -842,6 +862,24 @@ func complete_runtime_request(result: Dictionary) -> Dictionary:
 			)
 		_events.append({
 			"type": &"trainer_approach_completed",
+			"request": request.duplicate(true),
+			"result": result.duplicate(true),
+		})
+		_pending = {}
+		return advance()
+	if kind == &"day_care_requested":
+		## Four of the five write nothing a script reads, so wScriptVar is left
+		## where it stood unless the result carries one: `DayCareManOutside` is
+		## the only routine of the five with an `ld [wScriptVar], a` in it.
+		if not bool(result.get("ok", false)):
+			return _fail(
+				StringName(result.get("reason", &"runtime_request_failed")), result
+			)
+		if result.has("script_value"):
+			_script_value = int(result["script_value"])
+		_events.append({
+			"type": &"runtime_request_completed",
+			"kind": kind,
 			"request": request.duplicate(true),
 			"result": result.duplicate(true),
 		})
@@ -2740,6 +2778,15 @@ func _execute_special(special: int) -> Dictionary:
 				"kind": _money_window,
 				"money": _money_balance(ACCOUNT_YOUR_MONEY),
 				"coins": _coins_value(),
+			})
+		SPECIAL_DAY_CARE_MAN, SPECIAL_DAY_CARE_LADY, SPECIAL_DAY_CARE_MAN_OUTSIDE, \
+		SPECIAL_DAY_CARE_MON_1, SPECIAL_DAY_CARE_MON_2:
+			## Each of the five owns its own boxes, and the two counters own the
+			## party list and both `YesNoBox`es as well, so the whole routine is
+			## one host request the way `NameRater` is.
+			return _stage_runtime_request(&"day_care_requested", {
+				"special": special,
+				"role": DAY_CARE_ROLE_OF[special],
 			})
 		SPECIAL_NAME_RATER:
 			return _stage_runtime_request(&"name_rater_requested", {

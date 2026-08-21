@@ -79,6 +79,7 @@ var _menu_text: Dictionary = {}
 var _mart_text: Dictionary = {}
 var _name_rater_text: Dictionary = {}
 var _move_deleter_text: Dictionary = {}
+var _day_care_text: Dictionary = {}
 var _battle_object_palettes: Dictionary = {}
 var _indices: Dictionary = {}
 var _world_maps: Array = []
@@ -193,6 +194,8 @@ static func open_directory(path: String) -> GameData:
 	data._name_rater_text = raw_name_rater_text if raw_name_rater_text is Dictionary else {}
 	var raw_move_deleter_text: Variant = manifest.get("move_deleter_text", {})
 	data._move_deleter_text = raw_move_deleter_text if raw_move_deleter_text is Dictionary else {}
+	var raw_day_care_text: Variant = manifest.get("day_care_text", {})
+	data._day_care_text = raw_day_care_text if raw_day_care_text is Dictionary else {}
 	data._species = data._read_array(RomCache.species_path(path))
 	data._moves = data._read_array(RomCache.moves_path(path))
 	data._tmhm_moves = data._read_int_array(RomCache.tmhm_moves_path(path))
@@ -1041,9 +1044,9 @@ func evolutions(number: int) -> Array:
 ## species that named none.
 ##
 ## Move numbers alone: an egg move has no level, unlike a [method learnset] row.
-## Which of them a hatched Pokémon actually knows is the breeding rule, not this
-## table, and no breeding exists here yet; the data is what a mod, a dex screen or
-## a randomizer asks for.
+## Which of them a hatched Pokémon actually knows is the breeding rule rather
+## than this table: [method Gen2WorldDayCare.inherits_move] is that rule, and this
+## is one of the three ways in it reads.
 func egg_moves(number: int) -> Array[int]:
 	var out: Array[int] = []
 	for move_id: Variant in species(number).get("egg_moves", []):
@@ -1500,6 +1503,14 @@ func name_rater_text(name: String) -> String:
 ## them.
 func move_deleter_text(name: String) -> String:
 	return String(_move_deleter_text.get(name, ""))
+
+
+## One of the Day-Care's own boxes, by the name
+## `RomLayout.DAY_CARE_TEXT_RUNS` gives its stub, still carrying
+## [Gen2TextStream]'s markers for the nickname and money it prints. Empty on a
+## cache imported before them.
+func day_care_text(name: String) -> String:
+	return String(_day_care_text.get(name, ""))
 
 
 ## `.MenuDesc`'s line for one start-menu item, by the item's own kind. Empty for

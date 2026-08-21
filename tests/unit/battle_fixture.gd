@@ -36,6 +36,18 @@ const HOOTHOOT: int = 163
 ## The highest species number this table fills.
 const MAX_SPECIES: int = MAGCARGO
 
+## `constants/pokemon_data_constants.asm`'s egg groups, the four the fixture uses.
+const EGG_MONSTER: int = 1
+const EGG_FIELD: int = 5
+const EGG_PLANT: int = 7
+const EGG_DITTO: int = 13
+const EGG_NONE: int = 15
+## `wBaseEggSteps`, the hatch counter every fixture species starts an egg on.
+const HATCH_CYCLES: int = 20
+## Eight `TMHMMoves` bytes with the first TM's bit set and nothing else, which is
+## the one flag [method Gen2WorldDayCare.inherits_move] asks about.
+const TMHM_FLAGS: Array = [1, 0, 0, 0, 0, 0, 0, 0]
+
 const TACKLE: int = 33
 const EMBER: int = 52
 const THUNDERBOLT: int = 85
@@ -209,6 +221,9 @@ const DREAM_EATER_MOVE: int = 263
 
 ## The four fixed-damage effects sharing one command.
 const LEVEL_DAMAGE_MOVE: int = 264
+## `TMHMMoves`' only entry here, which is the one move the fixture's TM flag byte
+## says a species can be taught.
+const TM01_MOVE: int = LEVEL_DAMAGE_MOVE
 const STATIC_DAMAGE_MOVE: int = 265
 const SUPER_FANG_MOVE: int = 266
 const PSYWAVE_MOVE: int = 267
@@ -418,6 +433,9 @@ static func build(directory: String, id: String = "testgame") -> GameData:
 	RomCache.write_json(RomCache.matchups_path(directory), _matchups())
 	RomCache.write_json(RomCache.trainers_path(directory), [])
 	RomCache.write_json(RomCache.happiness_changes_path(directory), HAPPINESS_CHANGES)
+	## `TMHMMoves` with one entry, which is what the fixture's TM flag byte
+	## names: enough for `CanLearnTMHMMove` to have a table to answer from.
+	RomCache.write_json(RomCache.tmhm_moves_path(directory), [TM01_MOVE])
 	RomCache.write_json(RomCache.manifest_path(directory), {
 		"format_version": RomCache.FORMAT_VERSION,
 		"game_id": id,
@@ -481,6 +499,17 @@ static func _species() -> Array:
 		],
 	}
 
+	## The breeding half of a base-stats record, which nothing in a battle reads
+	## and everything in the Day-Care does. Ditto is in its own group, Marowak is
+	## the fixture's No Eggs species, and the rest share EGG_FIELD so an ordinary
+	## pair breeds. `hatch_cycles` and the TM flags are the same for all of them:
+	## the routines read them, and no case here turns on which value.
+	var egg_groups: Dictionary = {
+		DITTO: [EGG_DITTO, EGG_DITTO],
+		MAROWAK: [EGG_NONE, EGG_NONE],
+		BULBASAUR: [EGG_MONSTER, EGG_PLANT],
+	}
+
 	var out: Array = []
 	for number: int in range(1, MAX_SPECIES + 1):
 		var entry: Array = known.get(number, [
@@ -504,6 +533,10 @@ static func _species() -> Array:
 				"condition": 0, "target": 2,
 			}] if number == BULBASAUR else [],
 			"gender_ratio": entry[6],
+			"egg_groups": egg_groups.get(number, [EGG_FIELD, EGG_FIELD]),
+			"hatch_cycles": HATCH_CYCLES,
+			"tmhm": TMHM_FLAGS.duplicate(),
+			"egg_moves": [] if number != HOOTHOOT else [MIST_MOVE],
 			"front_tiles": [7, 7],
 			"dex": {
 				"category": "%s MON" % entry[0],
