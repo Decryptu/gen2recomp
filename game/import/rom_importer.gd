@@ -3949,12 +3949,31 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		"text_bg_palette": _import_text_bg_palette(rom, layout),
 		"battle_object_palettes": _import_battle_object_palettes(rom, layout),
 		"atlases": pics,
+		## `PokemonPalettes` entry EGG, which `Hatch_LoadFrontpicPal` reaches
+		## through `GetBaseData`. It is a species-shaped record with no species
+		## behind it, so it is stored beside the atlases rather than in the
+		## species table every other palette lives in.
+		"egg_pic": {
+			"tiles": RomLayout.EGG_PIC_TILES,
+			"palette": _read_egg_palette(rom, layout),
+		},
 		"tiles": tiles,
 		"complete": true,
 	}
 	if not RomCache.write_json(RomCache.manifest_path(directory), manifest):
 		result["message"] = "Could not write manifest."
 		return result
+
+	## [Gen2WorldCatalog]'s sidecar, written here so a player never pays its
+	## scan: it decodes every command of every script this import just wrote,
+	## and the first mod-enabled map entry is where it would otherwise land.
+	## After the manifest, because the scan opens the cache it describes.
+	var catalogued: GameData = GameData.open_directory(directory)
+	if catalogued != null:
+		RomCache.write_json(
+			RomCache.world_catalog_path(directory),
+			Gen2WorldCatalog.build(catalogued).to_dict()
+		)
 
 	result["ok"] = true
 	result["species"] = species.size()
@@ -5644,6 +5663,15 @@ static func _rows_from_columns(
 	return out
 
 
+## `PokemonPalettes` entry EGG, in the same two-pair shape a species carries.
+func _read_egg_palette(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var at: int = RomLayout.palette_offset(layout, RomLayout.EGG_SPECIES)
+	return {
+		"normal": [rom.u16le(at), rom.u16le(at + 2)],
+		"shiny": [rom.u16le(at + 4), rom.u16le(at + 6)],
+	}
+
+
 func _import_pics(
 	rom: RomFile, layout: Dictionary, species: Array, on_progress: Callable
 ) -> Dictionary:
@@ -5660,6 +5688,27 @@ func _import_pics(
 		RomLayout.FRONTPIC_MAX_TILES, RomLayout.UNOWN_FORMS
 	)
 	var unown_back: Dictionary = _new_atlas(RomLayout.BACKPIC_TILES, RomLayout.UNOWN_FORMS)
+	# `EggPic` is entry EGG of `PokemonPicPointers`, past the 251 species and the
+	# unused slot between them, and `GetEggFrontpic` loads it the way any other
+	# front pic is loaded. It gets an atlas of its own because there is no
+	# species record to hang it on: EGG is a party species, not a Pokemon.
+	var egg_front: Dictionary = _new_atlas(RomLayout.FRONTPIC_MAX_TILES, 1)
+	var egg_side: int = RomLayout.EGG_PIC_TILES
+	## Gold and Silver's table stops at NUM_POKEMON, so `_GetFrontpic` answers
+	## EGG with `ld hl, EggPic` and the pic is at an address like a back pic.
+	## Their picture is a different one.
+	##
+	## Crystal's run carries two animation frames that nothing reads:
+	## `GetEggFrontpic` is `GetMonFrontpic`, not `GetAnimatedFrontpic`, and
+	## `AnimateMon_CheckIfPokemon` refuses EGG before any script is read.
+	var egg_at: int = int(layout.get("egg_pic", -1))
+	if egg_at >= 0:
+		_decode_lz_into(rom, egg_at, egg_side, egg_side, egg_front, 0)
+	else:
+		_decode_into(
+			rom, layout, RomLayout.pic_pointer_offset(layout, RomLayout.EGG_SPECIES, false),
+			egg_side, egg_side, egg_front, 0
+		)
 	var trainer_classes: int = RomLayout.trainer_class_count(layout)
 	var trainers: Dictionary = _new_atlas(RomLayout.TRAINER_PIC_TILES, trainer_classes)
 	# `GetTrainerBackpic`'s three, which are the player standing on the field
@@ -5749,7 +5798,7 @@ func _import_pics(
 	var directory: String = RomCache.directory_for(rom.id, rom.sha1)
 	var atlases: Dictionary = {
 		"front": front, "back": back, "unown_front": unown_front, "unown_back": unown_back,
-		"trainers": trainers, "player_back": player_back,
+		"trainers": trainers, "player_back": player_back, "egg_front": egg_front,
 	}
 	# `AnimateFrontpic` is Crystal's alone, so the two atlases behind the front
 	# pics are written only where something reads them.

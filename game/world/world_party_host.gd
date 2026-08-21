@@ -8,6 +8,17 @@ extends RefCounted
 ## the candidate after both sides have succeeded. The six-party limit is
 ## deliberate until the save model has a real PC-box owner.
 
+## `CAUGHT_EGG_LEVEL`: a hatchling's caught level is 1 whatever level it hatches
+## at, so the stats page shows the egg rather than the hatch.
+const CAUGHT_EGG_LEVEL: int = 1
+## `HatchEggs`' own `ld [hl], $78`, the happiness a hatchling starts on.
+const HATCHED_HAPPINESS: int = 0x78
+## `LANDMARK_GIFT`, the landmark `SetGiftMonCaughtData` writes instead of a map.
+const LANDMARK_GIFT: int = 0x7E
+## `HatchEggs`' own `cp TOGEPI`, the one species whose hatch sets an event flag.
+const SPECIES_TOGEPI: int = 0xAF
+const EVENT_TOGEPI_HATCHED: int = 84
+
 const ITEM_POTION: int = 0x12
 const ITEM_REVIVE: int = 0x27
 const ITEM_MAX_REVIVE: int = 0x28
@@ -541,6 +552,51 @@ static func apply_step_happiness(save: Gen2SaveData, times: int = 1) -> Array[in
 
 
 
+## `Text_BreedHuh`: "Huh?" and then a `para` whose page is empty, because the
+## `text_asm` behind it is the animation rather than a line. The empty page is
+## what the sequence opens on, so the box waits for a press like any other
+## paragraph break.
+const HUH_TEXT: String = "Huh?" + Gen2TextStream.PAGE_BREAK
+
+
+## `_BreedEggHatchText`, whose `wStringBuffer1` is the name the row now carries.
+static func hatch_text(nickname: String) -> String:
+	return "%s came\nout of its EGG!" % nickname
+
+
+## `_BreedAskNicknameText`, the `YesNoBox` after the hatch.
+static func nickname_question(nickname: String) -> String:
+	return "Give a nickname to\n%s?" % nickname
+
+
+## `NamingScreenJumptable`'s `.Pokemon`: the name, `'S` beside it and
+## `NICKNAME?` on the row two below.
+static func nickname_prompt(nickname: String) -> String:
+	return "%s'S\nNICKNAME?" % nickname
+
+
+## `DoEggStep`, spent [param times] over. Each pass walks the party from the
+## front taking one hatch cycle off every egg, and stops on the first egg whose
+## counter reaches zero, so an egg behind that one keeps its cycle for that
+## step. Answers the party index of the egg that is ready to hatch, or -1.
+##
+## The counter lives in the happiness byte, which is what `GiveEgg` wrote and
+## what `HatchEggs` reads; [method apply_step_happiness] skips eggs for the same
+## reason.
+static func apply_egg_steps(save: Gen2SaveData, times: int = 1) -> int:
+	if save == null or times <= 0:
+		return -1
+	for _pass: int in times:
+		for index: int in save.party.size():
+			var mon: Gen2SaveMon = save.party[index] as Gen2SaveMon
+			if mon == null or not mon.is_egg:
+				continue
+			mon.happiness = (mon.happiness - 1) & 0xFF
+			if mon.happiness == 0:
+				return index
+	return -1
+
+
 ## Attempts to catch one wild battle mon and consumes the ball on either result.
 ## The battle screen owns the animation; this host owns the cartridge outcome and
 ## the save/world writeback. A caught mon enters the party when there is room and
@@ -579,11 +635,17 @@ static func capture_wild(
 	var candidate: Gen2SaveData = opened["candidate"]
 	var destination: Dictionary = {}
 	if bool(outcome.get("caught", false)):
-		var captured: Gen2SaveMon = _captured_mon(
-			world.data, save, wild, generator, caught_location
-		)
+		var captured: Gen2SaveMon = _captured_mon(world.data, save, wild, generator)
 		if captured == null:
 			return _failure(&"could_not_create_captured_pokemon", outcome)
+		## `SetCaughtData` runs on the caught Pokemon itself. [param
+		## caught_location] is the caller's override, for a catch whose landmark
+		## is not the map the player is standing on; every one that has none
+		## passes 0 and takes the map's.
+		set_caught_data(
+			captured, wild.level, world.object_time_of_day, world.player_female(),
+			caught_location if caught_location > 0 else world.landmark()
+		)
 		destination = candidate.add_party_or_box(captured)
 		if not bool(destination.get("ok", false)):
 			return _failure(StringName(destination.get("reason", &"storage_full")), {
@@ -644,6 +706,12 @@ static func _apply_party_request(
 		)
 		if mon == null:
 			return {"ok": false, "reason": &"could_not_create_pokemon"}
+		## `AddPartyMon`'s three caught-data branches. An egg's is overwritten by
+		## `SetEggMonCaughtData` when it hatches; a plain `givepoke` takes
+		## `SetCaughtData`, the map the player is standing on.
+		set_caught_data(
+			mon, level, world.object_time_of_day, world.player_female(), world.landmark()
+		)
 		if not is_egg:
 			var source: Dictionary = request.get("source", {})
 			var bank: int = int(source.get("bank", -1))
@@ -657,6 +725,10 @@ static func _apply_party_request(
 				mon.nickname = nickname
 			if not ot_name.is_empty():
 				mon.original_trainer = ot_name
+				## `SetGiftPartyMonCaughtData`: a `givepoke` that names an OT is
+				## somebody's present, so its level byte is zero and its
+				## landmark is LANDMARK_GIFT rather than this map.
+				set_caught_data(mon, 0, -1, world.player_female(), LANDMARK_GIFT)
 		return _append_mon(candidate, mon, 2 if is_egg else 1, {
 			"kind": &"egg" if is_egg else &"gift",
 			"species": species, "level": level, "item": held_item,
@@ -799,6 +871,10 @@ static func _new_mon(
 	if is_egg:
 		out.nickname = "EGG"
 		out.hp = 0
+		# `GiveEgg`'s `ld a, [wBaseEggSteps] / ld [hl], a`: an egg's happiness
+		# byte is its hatch counter, and `DoEggStep` spends one of it per 256
+		# steps. The debug branch above it writes 1 and is not reachable here.
+		out.happiness = int(data.species(species).get("hatch_cycles", 0))
 	return out
 
 
@@ -1162,8 +1238,7 @@ static func _captured_mon(
 	data: GameData,
 	save: Gen2SaveData,
 	wild: Gen2BattleMon,
-	random: RandomNumberGenerator,
-	caught_location: int
+	random: RandomNumberGenerator
 ) -> Gen2SaveMon:
 	var out: Gen2SaveMon = Gen2SaveBattleAdapter.from_battle_mon(wild)
 	if out == null:
@@ -1174,11 +1249,66 @@ static func _captured_mon(
 	out.original_trainer = save.player_name
 	out.ot_id = random.randi_range(0, 0xFFFF)
 	out.happiness = 70
-	out.caught_level = wild.level
-	out.caught_gender = 1 if wild.gender() == Gen2BattleMon.GENDER_FEMALE else 0
-	out.caught_location = clampi(caught_location, 0, 127)
 	out.is_egg = false
 	return out
+
+
+## `SetBoxmonOrEggmonCaughtData`, the three bytes every caught or hatched
+## Pokemon carries. All three are the trainer's rather than the Pokemon's: the
+## gender bit is `wPlayerGender` and not the caught mon's, which is what the
+## "caught by" line reads back, and the level is CAUGHT_EGG_LEVEL for a hatch.
+static func set_caught_data(
+	mon: Gen2SaveMon, level: int, time_of_day: int, player_female: bool, landmark: int
+) -> void:
+	if mon == null:
+		return
+	mon.caught_level = clampi(level, 0, 63)
+	# `ld a, [wTimeOfDay] / inc a`: the field holds MORN as 1, so the -1 a gift
+	# passes is the cartridge's own `xor a` over both halves of the byte.
+	mon.caught_time = clampi(time_of_day + 1, 0, 3)
+	mon.caught_gender = 1 if player_female else 0
+	mon.caught_location = clampi(landmark, 0, 127)
+
+
+## `HatchEggs` for one party slot: the egg becomes the Pokemon it was carrying.
+## Everything here is the source's own order, and every one of the seven writes
+## has a reader in this project, which is why none is left out.
+##
+## Answers the summary the screen shows, or an empty dictionary when the slot is
+## not an egg that is ready.
+static func hatch_egg(
+	world: Gen2WorldAPI, save: Gen2SaveData, index: int
+) -> Dictionary:
+	if world == null or world.data == null or save == null:
+		return {}
+	if index < 0 or index >= save.party.size():
+		return {}
+	var mon: Gen2SaveMon = save.party[index] as Gen2SaveMon
+	if mon == null or not mon.is_egg or mon.happiness != 0:
+		return {}
+	set_caught_data(
+		mon, CAUGHT_EGG_LEVEL, world.object_time_of_day,
+		world.player_female(), world.landmark()
+	)
+	mon.is_egg = false
+	# `ld [hl], $78`: the counter the walk drained becomes the hatchling's own
+	# base happiness, which is why the write happens before anything reads it.
+	mon.happiness = HATCHED_HAPPINESS
+	mon.status = Gen2Status.NONE
+	mon.hp = _max_hp(world.data, mon)
+	mon.ot_id = save.player_id
+	mon.original_trainer = save.player_name
+	mon.nickname = String(world.data.species(mon.species).get("name", ""))
+	## `SetSeenAndCaughtMon`, which `GiveEgg` was careful to undo when the egg
+	## arrived: the dex learns the species here and nowhere earlier.
+	if world.state != null:
+		world.state.set_species_caught(mon.species)
+		if mon.species == SPECIES_TOGEPI:
+			world.state.set_event_flag(EVENT_TOGEPI_HATCHED)
+	return {
+		"kind": &"hatch", "party_index": index, "species": mon.species,
+		"level": mon.level, "nickname": mon.nickname,
+	}
 
 
 static func _max_hp(data: GameData, mon: Gen2SaveMon) -> int:
@@ -1250,8 +1380,8 @@ static func _give_pokerus(
 ) -> Dictionary:
 	var count: int = save.party.size()
 	for index: int in count:
-		var mon: Gen2SaveMon = save.party[index]
-		if mon != null and (mon.pokerus & 0x0F) != 0:
+		var carrier: Gen2SaveMon = save.party[index]
+		if carrier != null and (carrier.pokerus & 0x0F) != 0:
 			return _try_spread_pokerus(save, index, random)
 	if not reached_goldenrod:
 		return {}

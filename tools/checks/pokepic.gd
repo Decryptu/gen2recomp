@@ -32,6 +32,7 @@ func run(r: RefCounted) -> void:
 
 
 func _check_game() -> void:
+	_check_egg_pic()
 	var map: Gen2WorldMap = _r.data.world_map(MAP_GROUP, MAP_NUMBER)
 	if not _r.check(map != null, "map %d/%d is missing." % [MAP_GROUP, MAP_NUMBER]):
 		return
@@ -59,6 +60,33 @@ func _check_game() -> void:
 	_r.note("pokepic %d of %d species, sizes %s" % [
 		drawn, LAST_SPECIES - FIRST_SPECIES + 1, sizes
 	])
+
+
+## `GetEggFrontpic`'s own picture, which no species record owns: Crystal reaches
+## it through `PokemonPicPointers`' EGG entry and Gold and Silver through
+## `_GetFrontpic`'s `ld hl, EggPic`, so the two are different pictures at
+## different addresses and both are checked here.
+func _check_egg_pic() -> void:
+	var pic: Dictionary = _r.data.egg_pic()
+	if not _r.check(not pic.is_empty(), "the cache carries no egg pic."):
+		return
+	var side: int = RomLayout.EGG_PIC_TILES * Gen2Font.TILE
+	_r.check(
+		int(pic["width"]) == side and int(pic["height"]) == side,
+		"the egg pic is %dx%d rather than %d square." % [
+			int(pic["width"]), int(pic["height"]), side,
+		]
+	)
+	var image: Image = Gen2PicImage.from_atlas(
+		_r.data.atlas_indices(String(pic["atlas"])), _r.data.atlas(String(pic["atlas"])),
+		pic, _r.data.egg_palette()
+	)
+	if not _r.check(image != null, "the egg pic does not decode."):
+		return
+	_r.check(
+		_ink(image, Rect2i(Vector2i.ZERO, image.get_size()), image.get_pixel(0, 0)),
+		"the egg pic decoded to a blank square."
+	)
 
 
 ## Where `PadFrontpic` says the pic is, and where it says it is not: the ink runs

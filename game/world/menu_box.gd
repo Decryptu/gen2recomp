@@ -36,6 +36,15 @@ var column_spacing: int = 0
 var row_step: int = ROW_STEP
 
 
+
+## `YesNoBox`'s own `lb bc, SCREEN_WIDTH - 6, 7`, which `_YesNoBox` turns into
+## the five-wide, four-tall box at (14, 7). Every YES/NO in the game is this one.
+static func yes_no() -> Gen2MenuBox:
+	return from_coords(
+		14, 7, 19, 11, STATICMENU_CURSOR | STATICMENU_NO_TOP_SPACING
+	)
+
+
 static func from_coords(x1: int, y1: int, x2: int, y2: int, menu_flags: int) -> Gen2MenuBox:
 	var box := Gen2MenuBox.new()
 	box.left = x1

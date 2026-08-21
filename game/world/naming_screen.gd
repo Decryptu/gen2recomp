@@ -46,6 +46,9 @@ const RESULT_FULL: StringName = &"full"
 const PLAYER_MAX_LENGTH: int = Gen2SaveData.MAX_PLAYER_NAME
 ## `BOX_NAME_LENGTH - 1`.
 const BOX_MAX_LENGTH: int = 8
+## `MON_NAME_LENGTH - 1`, which `.StoreMonIconParams` writes. A nickname uses
+## the player's keyboard and entry row and differs only in how long it may be.
+const MON_MAX_LENGTH: int = 10
 
 ## The cursor's own columns, which is every second byte of a row.
 const COLUMNS: int = RomLayout.NAME_INPUT_COLUMNS
@@ -82,6 +85,10 @@ static func for_player(data: GameData) -> Gen2NamingScreen:
 
 static func for_box(data: GameData) -> Gen2NamingScreen:
 	return _build(data, true, BOX_MAX_LENGTH)
+
+
+static func for_mon(data: GameData) -> Gen2NamingScreen:
+	return _build(data, false, MON_MAX_LENGTH)
 
 
 static func _build(data: GameData, box: bool, limit: int) -> Gen2NamingScreen:

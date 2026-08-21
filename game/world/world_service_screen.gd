@@ -615,7 +615,7 @@ func _render_mart() -> void:
 		if _mart_menu_page == null:
 			_mart_menu_page = Gen2MenuPage.from_data(_data)
 		if _mart_menu_page != null:
-			var box: Gen2MenuBox = _mart_yes_no_box()
+			var box: Gen2MenuBox = Gen2MenuBox.yes_no()
 			var menu: Image = _mart_menu_page.render(
 				box, ["YES", "NO"], _mart_confirm
 			)
@@ -624,15 +624,6 @@ func _render_mart() -> void:
 				box.border_position() * Gen2Font.TILE
 			)
 	_mart_view.texture = ImageTexture.create_from_image(image)
-
-
-## `YesNoBox`'s own `lb bc, SCREEN_WIDTH - 6, 7`, which `_YesNoBox` turns into
-## the five-wide, four-tall box at (14,7).
-func _mart_yes_no_box() -> Gen2MenuBox:
-	return Gen2MenuBox.from_coords(
-		14, 7, 19, 11,
-		Gen2MenuBox.STATICMENU_CURSOR | Gen2MenuBox.STATICMENU_NO_TOP_SPACING
-	)
 
 
 ## `UpdateItemDescription`, which prints nothing for the CANCEL row.

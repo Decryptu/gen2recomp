@@ -495,6 +495,23 @@ func test_count_step_owes_step_happiness_every_five_hundred_and_twelve_steps() -
 	assert_eq(state.take_pending_step_happiness(), 1)
 
 
+## `CountStep`'s `cp $80`: `DoEggStep` is owed every 256 steps, half a wrap away
+## from the `StepHappiness` pass at zero.
+func test_count_step_owes_an_egg_step_every_two_hundred_and_fifty_six_steps() -> void:
+	var state := Gen2WorldState.new()
+	for _step: int in Gen2WorldState.EGG_STEP_PHASE - 1:
+		state.count_step()
+	assert_eq(state.take_pending_egg_steps(), 0)
+	state.count_step()
+	assert_eq(state.step_count(), Gen2WorldState.EGG_STEP_PHASE)
+	assert_eq(state.take_pending_egg_steps(), 1)
+	assert_eq(state.take_pending_egg_steps(), 0, "draining forgets what it took")
+	assert_eq(state.take_pending_step_happiness(), 0, "the two passes never share a step")
+	for _step: int in 256:
+		state.count_step()
+	assert_eq(state.take_pending_egg_steps(), 1)
+
+
 ## The Repel countdown was the whole of this call before the counters joined it,
 ## and it still spends one step at a time and stops at zero.
 func test_count_step_spends_a_repel_step_and_stops_at_zero() -> void:

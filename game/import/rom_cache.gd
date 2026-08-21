@@ -33,6 +33,10 @@ const PICS_DIR: String = "pics"
 const TILES_DIR: String = "tiles"
 const WORLD_MAPS: String = "world_maps.json"
 const WORLD_SCRIPTS: String = "world_scripts.json"
+## [Gen2WorldCatalog]'s scan of those scripts. Derived rather than imported, so
+## it is a sidecar the cache heals rather than a section the format version
+## covers: an absent or unreadable one is rebuilt and written back.
+const WORLD_CATALOG: String = "world_catalog.json"
 const WORLD_STANDARD_SCRIPTS: String = "world_standard_scripts.json"
 const WORLD_TEXT: String = "world_text.json"
 const WORLD_MOVEMENTS: String = "world_movements.json"
@@ -76,7 +80,7 @@ const BYTES_KEY: String = "bytes"
 ## a dump the owner still has, so re-importing costs a few seconds and a
 ## migration would have to carry every past shape forever. Nothing but the cache
 ## is thrown away, since saves live under their own root.
-const FORMAT_VERSION: int = 73
+const FORMAT_VERSION: int = 74
 
 ## What [method state] answers. A stale cache is told from a missing one because
 ## they need different things said to whoever is looking at it: one is a
@@ -169,6 +173,10 @@ static func blob_path(json_path: String) -> String:
 
 static func world_scripts_path(directory: String) -> String:
 	return "%s/%s" % [directory, WORLD_SCRIPTS]
+
+
+static func world_catalog_path(directory: String) -> String:
+	return "%s/%s" % [directory, WORLD_CATALOG]
 
 
 static func world_standard_scripts_path(directory: String) -> String:

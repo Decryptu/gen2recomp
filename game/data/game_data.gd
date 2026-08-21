@@ -48,6 +48,8 @@ var _trainers: Array = []
 var _matchups: Dictionary = {}
 var _foresight_matchups: Dictionary = {}
 var _atlases: Dictionary = {}
+## `EggPic` and `PokemonPalettes` entry EGG, which no species record owns.
+var _egg_pic: Dictionary = {}
 var _tiles: Dictionary = {}
 var _bar_palettes: Dictionary = {}
 var _battle_grayscale_palette: Array = []
@@ -133,6 +135,7 @@ static func open_directory(path: String) -> GameData:
 	data.id = StringName(manifest.get("game_id", ""))
 	data.sha1 = String(manifest.get("sha1", ""))
 	data._atlases = manifest.get("atlases", {})
+	data._egg_pic = manifest.get("egg_pic", {})
 	data._tiles = manifest.get("tiles", {})
 	data._bar_palettes = manifest.get("bar_palettes", {})
 	data._battle_grayscale_palette = manifest.get("battle_grayscale_palette", [])
@@ -2128,6 +2131,29 @@ func species_pic(number: int, back: bool = false) -> Dictionary:
 	}
 
 
+## `GetEggFrontpic`'s picture, in [method species_pic]'s shape. Empty on a cache
+## written before eggs had one.
+func egg_pic() -> Dictionary:
+	if _egg_pic.is_empty() or atlas("egg_front").is_empty():
+		return {}
+	var name: String = "egg_front"
+	var side: int = int(_egg_pic.get("tiles", 0)) * Gen2Tiles.TILE_WIDTH
+	return {"atlas": name, "slot": 0, "width": side, "height": side}
+
+
+## `Hatch_LoadFrontpicPal`'s palette for the egg itself.
+func egg_palette(shiny: bool = false) -> PackedColorArray:
+	var stored: Variant = (_egg_pic.get("palette", {}) as Dictionary).get(
+		"shiny" if shiny else "normal", null
+	)
+	if not stored is Array or (stored as Array).size() < 2:
+		return Gen2Palette.pic_palette(PackedColorArray([Color.WHITE, Color.BLACK]))
+	return Gen2Palette.pic_palette(PackedColorArray([
+		Gen2Palette.from_packed(int((stored as Array)[0])),
+		Gen2Palette.from_packed(int((stored as Array)[1])),
+	]))
+
+
 ## A mod's own picture for a numbered row, in [method species_pic]'s shape but
 ## carrying the pixels instead of an atlas cell to crop.
 ##
@@ -2472,8 +2498,19 @@ func _overlaid(kind: StringName, number: int, base: Dictionary) -> Dictionary:
 ## walk is the whole script corpus and nothing about it changes while a cache is
 ## open. See [Gen2WorldCatalog].
 func catalog() -> Gen2WorldCatalog:
-	if _catalog == null:
-		_catalog = Gen2WorldCatalog.build(self)
+	if _catalog != null:
+		return _catalog
+	## The scan costs about thirteen seconds and its answer is a function of the
+	## cache alone, so it is read from the sidecar the import wrote. A cache from
+	## a build before the sidecar existed, or one whose sidecar is stale, pays
+	## the scan once and then has one.
+	_catalog = Gen2WorldCatalog.from_dict(
+		self, RomCache.read_json(RomCache.world_catalog_path(directory))
+	)
+	if _catalog != null:
+		return _catalog
+	_catalog = Gen2WorldCatalog.build(self)
+	RomCache.write_json(RomCache.world_catalog_path(directory), _catalog.to_dict())
 	return _catalog
 
 

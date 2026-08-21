@@ -38,16 +38,16 @@ const MAP_ROWS: int = RomLayout.INTRO_MAP_ROWS
 const SCREEN_HEIGHT_PX: int = 144
 
 ## The sound effects the movie asks for, as their `SFX_*` numbers.
-const SFX_INTRO_UNOWN_1: int = 0xB6
-const SFX_INTRO_UNOWN_2: int = 0xB8
-const SFX_INTRO_UNOWN_3: int = 0xB9
-const SFX_INTRO_SUICUNE_2: int = 0xB7
-const SFX_INTRO_SUICUNE_3: int = 0xBA
-const SFX_INTRO_SUICUNE_4: int = 0xBB
-const SFX_INTRO_WHOOSH: int = 0xBC
-const SFX_INTRO_PICHU: int = 0xBD
+const SFX_INTRO_UNOWN_1: int = 0xBE
+const SFX_INTRO_UNOWN_2: int = 0xBF
+const SFX_INTRO_UNOWN_3: int = 0xC0
+const SFX_INTRO_SUICUNE_2: int = 0xC5
+const SFX_INTRO_SUICUNE_3: int = 0xC6
+const SFX_INTRO_SUICUNE_4: int = 0xC8
+const SFX_INTRO_WHOOSH: int = 0xCB
+const SFX_INTRO_PICHU: int = 0xC4
 ## `MUSIC_CRYSTAL_OPENING`, started by `IntroScene13` rather than at the top.
-const MUSIC_CRYSTAL_OPENING: int = 0x25
+const MUSIC_CRYSTAL_OPENING: int = 0x62
 
 ## The six `SpriteAnimObjects` rows the movie spawns, as (frameset, function).
 const OBJ_INTRO_SUICUNE: StringName = &"suicune"

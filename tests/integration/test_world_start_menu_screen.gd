@@ -588,7 +588,7 @@ func test_a_field_stone_opens_the_evolution_screen_over_the_pack() -> void:
 	## cancel a stone's evolution.
 	assert_false(bool(screen.current_plan().get("can_cancel", true)))
 	assert_true(_lines_of(screen).contains("%s is evolving!" % nickname), "the first box")
-	_settle_evolution()
+	await _settle_evolution()
 
 
 ## `GetNickname` / `CopyName1` run before the species is replaced, and BOTH
@@ -613,7 +613,7 @@ func test_the_evolving_line_names_what_the_mon_was_not_what_it_became() -> void:
 	assert_false(opening.contains("What? %s" % after), opening)
 	## `UpdateSpeciesNameIfNotNicknamed` still runs, after both boxes.
 	assert_eq(save.party[0].nickname, after)
-	_settle_evolution()
+	await _settle_evolution()
 
 
 ## Runs the open evolution screen to its end, pressing A for every page it waits
@@ -621,12 +621,16 @@ func test_the_evolving_line_names_what_the_mon_was_not_what_it_became() -> void:
 func _settle_evolution() -> void:
 	for _frame: int in 4000:
 		if _world_screen.get("_evolution_host") == null:
+			## `queue_free` lands at the end of the frame, so the screen is only
+			## gone once one has passed; without this the run reports it orphaned.
+			await get_tree().process_frame
 			return
 		_world_screen.advance_frame()
 		var screen: Gen2EvolutionScreen = _world_screen.get("_evolution_host")
 		## The frame that closed it has already run whatever was waiting behind
 		## it, so a press here would answer that instead of the box.
 		if screen == null:
+			await get_tree().process_frame
 			return
 		if screen.awaiting_press():
 			_world_screen.press_button(Gen2Button.A)
@@ -650,7 +654,7 @@ func test_an_evolution_offers_its_new_move_and_a_full_moveset_opens_forget() -> 
 
 	## The animation runs to its end first: the offer is `LearnLevelMoves`, which
 	## the source reaches after `EvolutionAnimation` has returned.
-	_settle_evolution()
+	await _settle_evolution()
 	await get_tree().process_frame
 	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_FORGET_ASK)
 	assert_true(String(host.call("box_text")).contains("EMBER"), String(host.call("box_text")))

@@ -74,7 +74,40 @@ func run(r: RefCounted) -> void:
 		_verify_patching(catalog)
 		_verify_links(catalog)
 		_verify_progression(catalog)
+		_verify_sidecar(catalog)
 	)
+
+
+## The sidecar is what a player actually reads: the scan costs thirteen seconds
+## and runs at import, and every check above this one ran against whatever
+## [method GameData.catalog] handed back. So this asks the other question, that
+## a restored catalog and a freshly scanned one are the same catalog, every row,
+## every link and every kind's order.
+func _verify_sidecar(catalog: Gen2WorldCatalog) -> void:
+	var written: Variant = RomCache.read_json(
+		RomCache.world_catalog_path(_r.data.directory)
+	)
+	if not _r.check(written is Dictionary, "the import wrote no catalog sidecar."):
+		return
+	var restored: Gen2WorldCatalog = Gen2WorldCatalog.from_dict(_r.data, written)
+	if not _r.check(restored != null, "the catalog sidecar does not restore."):
+		return
+	var scanned: Gen2WorldCatalog = Gen2WorldCatalog.build(_r.data)
+	_r.check(
+		restored.to_dict() == scanned.to_dict(),
+		"the sidecar and a fresh scan disagree."
+	)
+	## And the one thing `to_dict` cannot say: that what the runtime asks for
+	## comes back the same, patches folded in and all.
+	for kind: StringName in Gen2WorldCatalog.KINDS:
+		_r.check(
+			restored.ids(kind) == scanned.ids(kind),
+			"%s ids differ between the sidecar and a fresh scan." % kind
+		)
+		for id: int in scanned.ids(kind):
+			if restored.check(id) != scanned.check(id):
+				_r.check(false, "row %d differs between the sidecar and a scan." % id)
+				return
 
 
 func _verify_census(catalog: Gen2WorldCatalog) -> void:

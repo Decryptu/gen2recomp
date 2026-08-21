@@ -964,3 +964,77 @@ func test_step_happiness_raises_every_member_but_an_egg_and_saturates() -> void:
 	assert_eq(_save.party[0].happiness, 103, "an owed run of passes is one add")
 	assert_true(Gen2WorldPartyHost.apply_step_happiness(null, 1).is_empty())
 	assert_true(Gen2WorldPartyHost.apply_step_happiness(_save, 0).is_empty())
+
+
+func _egg(species: int, cycles: int) -> Gen2SaveMon:
+	var egg: Gen2SaveMon = Gen2SaveBattleAdapter.from_battle_mon(
+		Gen2BattleMon.create(_data, species, 5)
+	)
+	egg.is_egg = true
+	egg.hp = 0
+	egg.happiness = cycles
+	egg.nickname = "EGG"
+	return egg
+
+
+## `DoEggStep` walks the party taking one cycle off every egg and stops on the
+## first that reaches zero, so an egg behind that one keeps the cycle.
+func test_an_egg_step_drains_every_egg_and_stops_on_the_first_ready_one() -> void:
+	_save.party = [_save.party[0], _egg(1, 1), _egg(1, 3)]
+	assert_eq(Gen2WorldPartyHost.apply_egg_steps(_save, 1), 1)
+	assert_eq(_save.party[1].happiness, 0)
+	assert_eq(_save.party[2].happiness, 3, "the walk stopped before the second egg")
+	assert_eq(_save.party[0].happiness, Gen2SaveStore.create_development_save(
+		_data, 0
+	).party[0].happiness, "a Pokemon is not an egg and loses nothing")
+
+
+func test_an_egg_step_answers_minus_one_until_a_counter_runs_out() -> void:
+	_save.party = [_egg(1, 3)]
+	assert_eq(Gen2WorldPartyHost.apply_egg_steps(_save, 2), -1)
+	assert_eq(_save.party[0].happiness, 1)
+	assert_eq(Gen2WorldPartyHost.apply_egg_steps(_save, 1), 0)
+	assert_eq(Gen2WorldPartyHost.apply_egg_steps(null, 1), -1)
+	assert_eq(Gen2WorldPartyHost.apply_egg_steps(_save, 0), -1)
+
+
+## `HatchEggs`: the row becomes the Pokemon it was carrying, at full health, on
+## `$78` happiness, with the player's own ID and name and CAUGHT_EGG_LEVEL.
+func test_hatching_writes_the_row_the_source_writes() -> void:
+	_save.player_id = 0x1234
+	_save.player_name = "KRIS"
+	_save.party = [_egg(1, 1)]
+	assert_true(Gen2WorldPartyHost.hatch_egg(_world, _save, 0).is_empty(),
+		"an egg with cycles left does not hatch")
+	assert_eq(Gen2WorldPartyHost.apply_egg_steps(_save, 1), 0)
+
+	var summary: Dictionary = Gen2WorldPartyHost.hatch_egg(_world, _save, 0)
+	assert_eq(int(summary.get("party_index", -1)), 0)
+	assert_eq(int(summary.get("species", 0)), 1)
+	var mon: Gen2SaveMon = _save.party[0]
+	assert_false(mon.is_egg)
+	assert_eq(mon.happiness, Gen2WorldPartyHost.HATCHED_HAPPINESS)
+	assert_eq(mon.status, Gen2Status.NONE)
+	assert_true(mon.hp > 0, "the hatchling stands at its own maximum")
+	assert_eq(mon.ot_id, 0x1234)
+	assert_eq(mon.original_trainer, "KRIS")
+	assert_eq(mon.caught_level, Gen2WorldPartyHost.CAUGHT_EGG_LEVEL)
+	assert_eq(mon.caught_location, _world.landmark())
+	assert_true(_world.state.has_caught_species(1), "SetSeenAndCaughtMon runs here")
+	assert_true(Gen2WorldPartyHost.hatch_egg(_world, _save, 0).is_empty(),
+		"a hatched row is not an egg any more")
+
+
+## `SetBoxmonOrEggmonCaughtData` writes the trainer's gender, not the caught
+## Pokemon's, and the time of day plus one.
+func test_caught_data_is_the_trainers_rather_than_the_pokemons() -> void:
+	var mon: Gen2SaveMon = _save.party[0]
+	Gen2WorldPartyHost.set_caught_data(mon, 12, Gen2WorldPalette.TIME_NIGHT, true, 9)
+	assert_eq(mon.caught_level, 12)
+	assert_eq(mon.caught_time, Gen2WorldPalette.TIME_NIGHT + 1)
+	assert_eq(mon.caught_gender, 1)
+	assert_eq(mon.caught_location, 9)
+	Gen2WorldPartyHost.set_caught_data(mon, 0, -1, false, Gen2WorldPartyHost.LANDMARK_GIFT)
+	assert_eq(mon.caught_time, 0, "a gift's whole level byte is zeroed")
+	assert_eq(mon.caught_gender, 0)
+	assert_eq(mon.caught_location, Gen2WorldPartyHost.LANDMARK_GIFT)

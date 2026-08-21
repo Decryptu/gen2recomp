@@ -16,6 +16,13 @@ extends RefCounted
 ## records. That is why there is no cache-format bump behind it and why a fresh
 ## cartridge needs no re-import.
 ##
+## The scan is not cheap: it decodes every command of every imported script,
+## about thirteen seconds for Crystal, and it answered 547 rows for that. So it
+## is written beside the cache as a sidecar and read back ([method to_dict]).
+## The sidecar is derived, not imported: an absent, stale or unreadable one is
+## rebuilt and written, so no cache format covers it and a cache from an older
+## build needs no re-import.
+##
 ## A patch changes a FIELD of a row. It never replaces a script, a completion
 ## flag, a dialogue, an inventory transaction or a battle flow: the site still
 ## runs the cartridge's own code, and only the number it hands over is the mod's.
@@ -68,6 +75,17 @@ const MAX_SCRIPT_COMMANDS: int = 4096
 ## past anything real and is what keeps this a second rather than eight.
 const MAX_ROUTINES: int = 16
 
+## The sidecar's own shape. Bumped when a row, a link or a kind changes meaning,
+## which rebuilds every cache's sidecar without touching the cache format.
+const FORMAT_VERSION: int = 1
+
+## The row and link fields whose value is a StringName rather than a String:
+## `kind` on every row, and `role` on a link. See [method _restore_value].
+const STRING_NAME_FIELDS: Array[String] = ["kind", "role"]
+## The one field whose value is a Vector2i, the map a site stands on. JSON has
+## no vector, so it goes out as a two-element array.
+const VECTOR_FIELDS: Array[String] = ["map"]
+
 var _data: GameData = null
 ## id to row.
 var _rows: Dictionary = {}
@@ -96,6 +114,110 @@ static func build(data: GameData) -> Gen2WorldCatalog:
 	out._scan_scripts()
 	out._scan_map_events()
 	out._attribute_maps()
+	return out
+
+
+## The scan's result, for the sidecar. Ids are dictionary keys, so they go out
+## as decimal strings and come back as ints; every one is well under the 2^53
+## a JSON number carries exactly.
+##
+## The lazy answers ([member _item_sources], [member _field_hms]) are not here:
+## both are derived from these rows in a millisecond and would only be a second
+## copy to keep in step.
+func to_dict() -> Dictionary:
+	var rows: Dictionary = {}
+	for id: int in _rows:
+		rows[str(id)] = _stored_value(_rows[id])
+	var links: Dictionary = {}
+	for at: int in _links:
+		links[str(at)] = _stored_value(_links[at])
+	var kinds: Dictionary = {}
+	for kind: StringName in _by_kind:
+		kinds[String(kind)] = (_by_kind[kind] as Array).duplicate()
+	return {"version": FORMAT_VERSION, "rows": rows, "links": links, "kinds": kinds}
+
+
+## The counterpart, bound to [param data] so [method check] can still fold a mod
+## patch in. Answers null for anything that is not this version's own shape, so
+## a stale or truncated sidecar is rebuilt rather than half read.
+static func from_dict(data: GameData, source: Variant) -> Gen2WorldCatalog:
+	if not source is Dictionary:
+		return null
+	var raw: Dictionary = source as Dictionary
+	if int(raw.get("version", -1)) != FORMAT_VERSION:
+		return null
+	for key: String in ["rows", "links", "kinds"]:
+		if not raw.get(key, null) is Dictionary:
+			return null
+	var out := Gen2WorldCatalog.new()
+	out._data = data
+	for id: String in raw["rows"] as Dictionary:
+		var row: Variant = (raw["rows"] as Dictionary)[id]
+		if not row is Dictionary:
+			return null
+		out._rows[id.to_int()] = _restore_value(row)
+	for at: String in raw["links"] as Dictionary:
+		var link: Variant = (raw["links"] as Dictionary)[at]
+		if not link is Dictionary:
+			return null
+		out._links[at.to_int()] = _restore_value(link)
+	for kind: String in raw["kinds"] as Dictionary:
+		var ids: Variant = (raw["kinds"] as Dictionary)[kind]
+		if not ids is Array:
+			return null
+		var packed: Array = []
+		for id: Variant in ids as Array:
+			packed.append(int(id))
+		out._by_kind[StringName(kind)] = packed
+	return out
+
+
+## JSON has one number type and no StringName, so a row that went out as ints
+## and a `kind` comes back as floats and a String. A reader compares these with
+## `==` against typed literals, so the shapes have to be restored rather than
+## coerced at every site.
+##
+## Whole floats become ints: every number a row carries is an id, a bank, an
+## address, an item, a quantity or a price, and none of them is fractional. The
+## two String fields that are StringNames name themselves.
+static func _stored_value(value: Variant) -> Variant:
+	if value is Array:
+		var list: Array = []
+		for entry: Variant in value as Array:
+			list.append(_stored_value(entry))
+		return list
+	if not value is Dictionary:
+		return value
+	var out: Dictionary = {}
+	for key: Variant in value as Dictionary:
+		var stored: Variant = (value as Dictionary)[key]
+		if String(key) in VECTOR_FIELDS and stored is Vector2i:
+			out[key] = [(stored as Vector2i).x, (stored as Vector2i).y]
+			continue
+		out[key] = _stored_value(stored)
+	return out
+
+
+static func _restore_value(value: Variant) -> Variant:
+	if value is float:
+		var number: float = value as float
+		return int(number) if is_equal_approx(number, floor(number)) else number
+	if value is Array:
+		var list: Array = []
+		for entry: Variant in value as Array:
+			list.append(_restore_value(entry))
+		return list
+	if not value is Dictionary:
+		return value
+	var out: Dictionary = {}
+	for key: Variant in value as Dictionary:
+		var restored: Variant = _restore_value((value as Dictionary)[key])
+		if String(key) in STRING_NAME_FIELDS and restored is String:
+			restored = StringName(restored as String)
+		elif String(key) in VECTOR_FIELDS and restored is Array \
+			and (restored as Array).size() == 2:
+			restored = Vector2i(int((restored as Array)[0]), int((restored as Array)[1]))
+		out[key] = restored
 	return out
 
 

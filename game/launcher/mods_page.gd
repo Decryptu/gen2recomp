@@ -600,8 +600,18 @@ func _icon_square(row: Dictionary) -> Control:
 	return square
 
 
+## `HTTPRequest.request` refuses, loudly, from a node that is not in the tree,
+## and [method create] builds the whole page before the launcher adds it: the
+## queue is left standing until the page is on screen, and every icon it holds
+## is asked for then. Nothing else here starts a request on its own.
+func _ready() -> void:
+	_fetch_next_icon()
+
+
 func _fetch_next_icon() -> void:
 	if _icon_busy or _icon_queue.is_empty() or _icons == null:
+		return
+	if not is_inside_tree():
 		return
 	var url: String = _icon_queue.pop_front()
 	_icon_busy = true
