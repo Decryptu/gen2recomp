@@ -34,9 +34,9 @@ const RED_GYARADOS: int = 130
 ## Per game: total rows, and the count under each kind in
 ## [constant Gen2WorldCatalog.KINDS]' own order.
 const EXPECTED_CENSUS: Dictionary = {
-	&"gold": [482, 3, 9, 15, 9, 9, 360, 18, 59],
-	&"silver": [482, 3, 9, 15, 9, 9, 360, 18, 59],
-	&"crystal": [547, 3, 11, 15, 13, 6, 427, 16, 56],
+	&"gold": [465, 3, 9, 15, 8, 9, 352, 16, 53],
+	&"silver": [465, 3, 9, 15, 8, 9, 352, 16, 53],
+	&"crystal": [532, 3, 11, 14, 9, 6, 419, 16, 54],
 }
 
 ## The legendaries and set pieces every profile has to place, and at what level.
@@ -46,9 +46,7 @@ const EXPECTED_STATICS: Dictionary = {
 	&"silver": {LUGIA: [70, 40], HO_OH: [40, 70], SNORLAX: [50], SUDOWOODO: [20]},
 	&"crystal": {
 		LUGIA: [60], HO_OH: [60], CELEBI: [30], SUICUNE: [40],
-		## Crystal reaches its Sudowoodo from two `loadwildmon` sites, one per
-		## branch of the Squirtbottle script; Gold and Silver from one.
-		SNORLAX: [50], SUDOWOODO: [20, 20], RED_GYARADOS: [30],
+		SNORLAX: [50], SUDOWOODO: [20], RED_GYARADOS: [30],
 	},
 }
 

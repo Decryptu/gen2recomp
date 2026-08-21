@@ -386,6 +386,8 @@ func _scan_one_script(
 	## The walk does NOT stop at the first `end` or `sjump`. A bounded blob holds
 	## a routine and the branch bodies behind it, and the Game Corner's three
 	## prizes are exactly that: one `.loop` and three labels after its jump.
+	## The bound counts `end`s, not every command that never returns: a `sjump`
+	## into a label below it is one routine, not two.
 	##
 	## It DOES stop at the first byte no command owns. Everything decoded before
 	## that came from a real entry point at a real offset; everything after would
@@ -554,8 +556,7 @@ static func _branch_bounds(commands: Array, at: int, crystal: bool) -> Array:
 	var end: int = 0x10000
 	for command: Dictionary in commands:
 		var offset: int = int(command["offset"])
-		if not Gen2WorldScript.is_terminal(int(command["opcode"]), crystal) \
-			and StringName(command["name"]) not in [&"sjump", &"farsjump", &"jumpstd"]:
+		if Gen2WorldScript.continues_after(int(command["opcode"]), crystal):
 			continue
 		if offset < at:
 			start = offset + int(command["width"])
@@ -795,8 +796,7 @@ func _requirements(commands: Array, at: int, crystal: bool) -> Array:
 		## last `end` or `sjump` guards one of the earlier ones. Reading the whole
 		## blob put thirteen conditions on a starter, two of them badges the
 		## cartridge plainly does not ask a starter for.
-		if Gen2WorldScript.is_terminal(int(command["opcode"]), crystal) \
-			or StringName(command["name"]) in [&"sjump", &"farsjump", &"jumpstd"]:
+		if not Gen2WorldScript.continues_after(int(command["opcode"]), crystal):
 			out.clear()
 			seen.clear()
 			continue

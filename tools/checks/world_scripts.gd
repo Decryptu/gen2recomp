@@ -44,7 +44,7 @@ func _validate(game_id: StringName) -> bool:
 	var crystal_commands: bool = game_id == &"crystal"
 	var script_count: int = 0
 	var command_count: int = 0
-	var terminal_count: int = 0
+	var walk_end_count: int = 0
 	var parse_failures: int = 0
 	var failure_reasons: Dictionary = {}
 	var failure_opcodes: Dictionary = {}
@@ -75,8 +75,8 @@ func _validate(game_id: StringName) -> bool:
 			command_count += 1
 			steps += 1
 			offset += int(command["width"])
-			if Gen2WorldScript.is_terminal(int(command["opcode"]), crystal_commands):
-				terminal_count += 1
+			if not Gen2WorldScript.continues_after(int(command["opcode"]), crystal_commands):
+				walk_end_count += 1
 				break
 
 	var invalid_text: int = 0
@@ -99,8 +99,8 @@ func _validate(game_id: StringName) -> bool:
 		number_markers += text.count(Gen2TextStream.NUMBER_MARKER)
 		_tally_raw_bytes(text, String(raw_key), raw_bytes)
 
-	print("%s: scripts=%d commands=%d terminal=%d parse_failures=%d texts=%d invalid_text=%d" % [
-		game_id, script_count, command_count, terminal_count, parse_failures,
+	print("%s: scripts=%d commands=%d walk_ends=%d parse_failures=%d texts=%d invalid_text=%d" % [
+		game_id, script_count, command_count, walk_end_count, parse_failures,
 		(text_value as Dictionary).size(), invalid_text,
 	])
 	print("  movements=%d" % (movement_value as Dictionary).size() \

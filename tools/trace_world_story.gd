@@ -98,7 +98,7 @@ func _trace_pointer(bank: int, address: int, label: String) -> void:
 		print("  @%d %s" % [offset, JSON.stringify(display)])
 		_print_text_pointer(bank, command)
 		offset += int(command["width"])
-		if Gen2WorldScript.is_terminal(int(command["opcode"]), _data.id == &"crystal"):
+		if not Gen2WorldScript.continues_after(int(command["opcode"]), _data.id == &"crystal"):
 			break
 		if offset >= raw.size():
 			break
