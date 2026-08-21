@@ -285,6 +285,10 @@ static func use_item(
 	)
 	if not bool(committed.get("ok", false)):
 		return _failure(StringName(committed["reason"]), committed.get("details", {}))
+	# `.proceed`'s dex writes, on the live state beside every other one: the
+	# caller has the snapshot a refused save rolls back to.
+	_register_caught(world, int(effect.get("register_caught", 0)))
+	_register_unown(world, int(effect.get("register_unown", 0)))
 	return {
 		"ok": true,
 		"item": item,
@@ -888,6 +892,12 @@ static func _apply_item_evolution(data: GameData, mon: Gen2SaveMon, item: int) -
 	var row: Dictionary = {}
 	match method:
 		0, RomLayout.EVOLVE_ITEM:
+			# `EvoStoneEffect`'s own `cp EVERSTONE / jr z, .NoEffect`, which is
+			# where the stone path refuses one and `.item` does not: the check is
+			# the item effect's rather than the predicate's, so a link or field
+			# caller reaching `item_evolution` another way is not bound by it.
+			if battle_mon.item == Gen2Evolution.EVERSTONE:
+				return {}
 			row = Gen2Evolution.item_evolution(
 				data, battle_mon, int(declared.get("parameter", item))
 			)
@@ -906,7 +916,11 @@ static func _apply_item_evolution(data: GameData, mon: Gen2SaveMon, item: int) -
 			continue
 		if not battle_mon.learn_move(move):
 			move_offers.append(move)
+	var evolved_from: int = mon.species
 	mon.species = battle_mon.species
+	mon.nickname = Gen2Evolution.nickname_after_evolution(
+		data, mon.nickname, evolved_from, mon.species
+	)
 	# `.trade`'s `xor a / ld [wTempMonItem], a`: a held requirement is spent by
 	# the evolution it caused.
 	if row.has("consumes_held_item"):
@@ -926,6 +940,12 @@ static func _apply_item_evolution(data: GameData, mon: Gen2SaveMon, item: int) -
 		"effect": &"evolution",
 		"old_species": int(result["old_species"]),
 		"new_species": int(result["new_species"]),
+		# `.proceed`'s `SetSeenAndCaughtMon`, and `UpdateUnownDex` behind it: the
+		# species a Pokemon became is caught, not only seen.
+		"register_caught": mon.species,
+		"register_unown": _unown_form(
+			mon.species, mon.dvs, {"destination": &"party"}
+		),
 		"move_offers": move_offers,
 	}
 

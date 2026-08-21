@@ -257,6 +257,37 @@ func test_a_defined_item_naming_no_method_evolves_nothing() -> void:
 	assert_eq(_save.party[0].species, 2)
 
 
+## `EvoStoneEffect` reads MON_ITEM and refuses before `EvolvePokemon`, so the
+## pack answers "It won't have any effect." even though `.item` itself would
+## have evolved it.
+## `.proceed` runs `SetSeenAndCaughtMon` on the new species, and
+## `UpdateSpeciesNameIfNotNicknamed` before `GetBaseData`: an un-nicknamed
+## Pokemon takes the new name, a nicknamed one keeps its own.
+func test_an_evolution_registers_the_new_species_and_renames_only_the_unnamed() -> void:
+	var source: Gen2BattleMon = Gen2BattleMon.create(_data, 1, 5)
+	_save.party[0] = Gen2SaveBattleAdapter.from_battle_mon(source)
+	_save.party[0].nickname = String(_data.species(1).get("name", ""))
+	assert_false(_world.state.has_caught_species(2))
+
+	assert_true(Gen2WorldPartyHost.use_item(_world, _save, 0x08, 0, false)["ok"])
+
+	assert_true(_world.state.has_caught_species(2), "SetSeenAndCaughtMon")
+	assert_eq(_save.party[0].nickname, String(_data.species(2).get("name", "")))
+
+
+func test_a_stone_will_not_evolve_an_everstone_holder_from_the_pack() -> void:
+	var source: Gen2BattleMon = Gen2BattleMon.create(_data, 1, 5)
+	source.item = Gen2Evolution.EVERSTONE
+	_save.party[0] = Gen2SaveBattleAdapter.from_battle_mon(source)
+
+	var result: Dictionary = Gen2WorldPartyHost.use_item(_world, _save, 0x08, 0, false)
+
+	assert_false(result["ok"])
+	assert_eq(StringName(result["reason"]), &"item_has_no_effect")
+	assert_eq(_save.party[0].species, 1)
+	assert_eq(_world.state.item_quantity(0x08), 1, "and the stone is not spent")
+
+
 func _add_party_evolution_metadata() -> void:
 	var species: Array = RomCache.read_json(RomCache.species_path(Fixture.directory()))
 	for raw: Dictionary in species:

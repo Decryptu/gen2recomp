@@ -24,7 +24,8 @@ static func level_evolution(data: GameData, mon: Gen2BattleMon, time_of_day: int
 
 
 ## `.item`, which is the one branch of `EvolveAfterBattle` that never calls
-## `IsMonHoldingEverstone`: a stone used on an EVERSTONE holder evolves it.
+## `IsMonHoldingEverstone`. The refusal is one level up, in `EvoStoneEffect`'s
+## own `cp EVERSTONE`, so it belongs to whoever uses the item rather than here.
 static func item_evolution(data: GameData, mon: Gen2BattleMon, item: int) -> Dictionary:
 	if data == null or mon == null:
 		return {}
@@ -65,6 +66,20 @@ static func evolving_text(mon_name: String) -> String:
 
 static func evolved_text(mon_name: String, new_species_name: String) -> String:
 	return "Congratulations! Your %s evolved into %s!" % [mon_name, new_species_name]
+
+
+## `UpdateSpeciesNameIfNotNicknamed`, which runs before `GetBaseData` reloads
+## the new species: the comparison is against the OLD species' name, since
+## `wBaseDexNo` still holds it. A Pokemon carrying its own species name is not
+## nicknamed, so it takes the new one; anything else keeps what it was called.
+static func nickname_after_evolution(
+	data: GameData, nickname: String, old_species: int, new_species: int
+) -> String:
+	if data == null or old_species == new_species:
+		return nickname
+	if nickname != String(data.species(old_species).get("name", "")):
+		return nickname
+	return String(data.species(new_species).get("name", nickname))
 
 
 static func _eligible(row: Dictionary, mon: Gen2BattleMon, time_of_day: int) -> bool:
