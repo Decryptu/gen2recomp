@@ -26,6 +26,10 @@ const FILENAME: String = "mod.json"
 ## [method Gen2WorldAPI.hidden_items].
 ## 8 added [method Gen2ModHost.register_stats_page], a page of a Pokémon's stats
 ## screen past the cartridge's own three.
+##
+## An optional `icon` or `thumbnail` is deliberately NOT a contract change: a
+## host that has never heard of either ignores the field, so a mod that ships
+## art still installs on an older launcher and simply has no face there.
 const API_VERSION: int = 9
 ## The oldest contract this host still answers. See [constant API_VERSION].
 const MIN_API_VERSION: int = 1
@@ -43,6 +47,12 @@ var entry: String = ""
 ## [member entry] is a path inside that root rather than inside the directory.
 var pack: String = ""
 var description: String = ""
+## An optional icon beside the manifest, for the launcher's list. Empty means
+## the conventional names are tried instead; see [Gen2ModArt].
+var icon: String = ""
+## An optional 16:9 thumbnail beside the manifest, for a listing site. Nothing
+## in the game draws one; see [Gen2ModArt].
+var thumbnail: String = ""
 ## Required mod ids to accepted semantic-version ranges.
 var dependencies: Dictionary = {}
 ## Which cartridges the mod is for, as [RomRegistry] ids. Empty means every game
@@ -87,6 +97,8 @@ static func from_dictionary(source: Dictionary, folder: String) -> Dictionary:
 	manifest.entry = String(source.get("entry", ""))
 	manifest.pack = String(source.get("pack", ""))
 	manifest.description = String(source.get("description", ""))
+	manifest.icon = String(source.get("icon", ""))
+	manifest.thumbnail = String(source.get("thumbnail", ""))
 	var raw_dependencies: Variant = source.get("dependencies", {})
 	if not raw_dependencies is Dictionary:
 		return _refuse(&"invalid_dependencies", String(manifest.id))
@@ -142,6 +154,13 @@ static func from_dictionary(source: Dictionary, folder: String) -> Dictionary:
 			return _refuse(&"pack_escapes_mod", manifest.pack)
 		if not (manifest.pack.ends_with(".pck") or manifest.pack.ends_with(".zip")):
 			return _refuse(&"pack_not_a_resource_pack", manifest.pack)
+	# Art is read from the mod directory rather than mounted or run, so the
+	# only rule is the entry's: a path that stays inside the mod's own folder.
+	for art: String in [manifest.icon, manifest.thumbnail]:
+		if art.is_empty():
+			continue
+		if art.begins_with("/") or art.contains("..") or art.contains(":"):
+			return _refuse(&"art_escapes_mod", art)
 	return {"ok": true, "manifest": manifest}
 
 
@@ -195,6 +214,8 @@ func summary() -> Dictionary:
 		"pack": pack,
 		"dependencies": dependencies.duplicate(),
 		"games": games.duplicate(),
+		"icon": Gen2ModArt.icon_path(self),
+		"thumbnail": Gen2ModArt.thumbnail_path(self),
 	}
 
 

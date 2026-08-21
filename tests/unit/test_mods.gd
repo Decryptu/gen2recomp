@@ -1603,3 +1603,117 @@ func test_a_chosen_view_survives_a_reload_and_falls_back_when_its_mod_is_gone() 
 		reloaded.selected_world_renderer(), &"voxel3d",
 		"and is picked up again when the mod loads"
 	)
+
+
+## A tiny square PNG on disk, which is what a mod's icon is.
+func _write_icon(path: String, side: int = Gen2ModArt.ICON_SIDE) -> void:
+	var image: Image = Image.create_empty(side, side, false, Image.FORMAT_RGBA8)
+	image.fill(Color.REBECCA_PURPLE)
+	image.save_png(path)
+
+
+func test_a_mod_gets_its_icon_and_thumbnail_by_dropping_them_beside_the_manifest() -> void:
+	_write_manifest(_valid_manifest())
+	_write_icon("%s/icon.png" % _directory)
+	_write_icon("%s/thumbnail.webp" % _directory)
+	var read: Dictionary = Gen2ModManifest.read(_directory)
+	assert_true(read["ok"], "a mod carrying art is an ordinary mod")
+	var manifest: Gen2ModManifest = read["manifest"]
+	assert_eq(Gen2ModArt.icon_path(manifest), "%s/icon.png" % _directory)
+	assert_eq(Gen2ModArt.thumbnail_path(manifest), "%s/thumbnail.webp" % _directory)
+	assert_not_null(Gen2ModArt.icon_texture(Gen2ModArt.icon_path(manifest)))
+
+
+func test_a_mod_with_no_art_answers_with_nothing_rather_than_a_missing_path() -> void:
+	_write_manifest(_valid_manifest())
+	var manifest: Gen2ModManifest = Gen2ModManifest.read(_directory)["manifest"]
+	assert_eq(Gen2ModArt.icon_path(manifest), "")
+	assert_eq(Gen2ModArt.thumbnail_path(manifest), "")
+	assert_null(Gen2ModArt.icon_texture(""))
+
+
+func test_a_declared_icon_wins_and_one_that_leaves_the_mod_directory_is_refused() -> void:
+	DirAccess.make_dir_recursive_absolute("%s/art" % _directory)
+	_write_icon("%s/art/face.png" % _directory)
+	# The conventional name is present too, so this proves the declaration is
+	# read rather than the discovery happening to find the same file.
+	_write_icon("%s/icon.png" % _directory)
+	var source: Dictionary = _valid_manifest()
+	source["icon"] = "art/face.png"
+	_write_manifest(source)
+	var manifest: Gen2ModManifest = Gen2ModManifest.read(_directory)["manifest"]
+	assert_eq(Gen2ModArt.icon_path(manifest), "%s/art/face.png" % _directory)
+
+	source["icon"] = "../../elsewhere/icon.png"
+	_write_manifest(source)
+	var escaped: Dictionary = Gen2ModManifest.read(_directory)
+	assert_false(escaped["ok"])
+	assert_eq(escaped["reason"], &"art_escapes_mod")
+
+
+func test_art_that_is_not_an_image_or_is_far_too_large_is_not_drawn() -> void:
+	_write("%s/icon.png" % _directory, "this is not a png")
+	assert_null(Gen2ModArt.icon_texture("%s/icon.png" % _directory), "rubbish decodes to nothing")
+	_write_icon("%s/big.png" % _directory, Gen2ModArt.MAX_ICON_SIDE + 8)
+	assert_null(
+		Gen2ModArt.icon_texture("%s/big.png" % _directory),
+		"an icon past the side cap is refused rather than decoded"
+	)
+
+
+func test_a_listing_keeps_only_art_it_could_actually_fetch() -> void:
+	var parsed: Dictionary = Gen2ModIndex.parse_feed(JSON.stringify({
+		"schema_version": Gen2ModIndex.SCHEMA_VERSION,
+		"mods": [{
+			"id": "voxel", "name": "Voxel", "version": "1.0.0",
+			"download": "https://example.test/voxel.zip",
+			"icon": "https://example.test/voxel/icon.png",
+			"thumbnail": "http://example.test/voxel/thumbnail.webp",
+		}],
+	}))
+	assert_true(parsed["ok"])
+	var entry: Dictionary = (parsed["entries"] as Array)[0]
+	assert_eq(entry["icon"], "https://example.test/voxel/icon.png")
+	assert_eq(entry["thumbnail"], "", "plain http is dropped, the way a download would be")
+
+
+func test_a_row_carries_the_installed_icon_and_the_listing_falls_back_to_its_url() -> void:
+	_write_manifest(_valid_manifest())
+	_write_icon("%s/icon.png" % _directory)
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	host.discover(ROOT)
+	var listing: Dictionary = {
+		"voxel": [{
+			"id": &"voxel", "name": "Voxel", "version": "1.0.0",
+			"download": "https://example.test/voxel.zip",
+			"icon": "https://example.test/voxel/icon.png",
+		}, {
+			"id": &"absent", "name": "Absent", "version": "1.0.0",
+			"download": "https://example.test/absent.zip",
+			"icon": "https://example.test/absent/icon.png",
+		}],
+	}
+	var groups: Array = Gen2ModCatalogue.groups(
+		host.manifests(), [{"feed": "voxel", "label": "Test source"}], listing
+	)
+	var rows: Dictionary = {}
+	for row: Dictionary in groups[0]["rows"] as Array:
+		rows[String(row["id"])] = row
+	assert_eq(rows["voxel"]["icon"], "%s/icon.png" % _directory, "installed art wins")
+	assert_eq(rows["absent"]["icon"], "", "a mod that is only listed has no file")
+	assert_eq(rows["absent"]["icon_url"], "https://example.test/absent/icon.png")
+
+
+func test_a_fetched_icon_is_cached_and_read_back_without_the_network() -> void:
+	var directory: String = "%s/icon_cache" % ROOT
+	var url: String = "https://example.test/voxel/icon.png"
+	assert_true(Gen2ModArt.wants_fetch(url, directory), "nothing cached yet")
+	assert_false(
+		Gen2ModArt.wants_fetch("http://example.test/icon.png", directory),
+		"plain http is never fetched"
+	)
+	_write_icon("%s/source.png" % _directory)
+	var bytes: PackedByteArray = FileAccess.get_file_as_bytes("%s/source.png" % _directory)
+	assert_true(Gen2ModArt.cache_icon(url, bytes, directory))
+	assert_false(Gen2ModArt.wants_fetch(url, directory), "and not fetched twice")
+	assert_not_null(Gen2ModArt.cached_icon(url, directory))

@@ -190,6 +190,38 @@ func test_mod_update_controls_stay_icon_sized_for_mobile() -> void:
 		action.free()
 
 
+func test_a_mod_icon_keeps_its_square_whether_or_not_the_mod_has_a_picture() -> void:
+	var image: Image = Image.create_empty(
+		Gen2ModArt.ICON_SIDE, Gen2ModArt.ICON_SIDE, false, Image.FORMAT_RGBA8
+	)
+	image.fill(Color.REBECCA_PURPLE)
+	var texture: ImageTexture = ImageTexture.create_from_image(image)
+
+	var blank: Control = Gen2LauncherUI.mod_icon(_light, null)
+	var drawn: Control = Gen2LauncherUI.mod_icon(_light, texture)
+	var side: float = Gen2LauncherUI.MOD_ICON_SIDE
+	for square: Control in [blank, drawn]:
+		assert_eq(
+			square.custom_minimum_size, Vector2(side, side),
+			"a name starts at the same place with or without an icon"
+		)
+	assert_eq(
+		(drawn as TextureRect).stretch_mode, TextureRect.STRETCH_KEEP_ASPECT_CENTERED,
+		"an icon that is not square for its box is never stretched to fit"
+	)
+	assert_eq(
+		(drawn as TextureRect).texture_filter, CanvasItem.TEXTURE_FILTER_NEAREST,
+		"32x32 cartridge art is not smoothed on the way up"
+	)
+	assert_true(Gen2LauncherUI.set_mod_icon(drawn, texture), "a drawn square takes a later picture")
+	assert_false(
+		Gen2LauncherUI.set_mod_icon(blank, texture),
+		"and the fallback glyph is replaced by its owner rather than filled"
+	)
+	blank.free()
+	drawn.free()
+
+
 func test_launcher_buttons_always_draw_a_coloured_focus_ring() -> void:
 	for variant: Gen2LauncherButton.Variant in Gen2LauncherButton.Variant.values():
 		var button: Gen2LauncherButton = Gen2LauncherButton.create(_light, "Focus", variant)
