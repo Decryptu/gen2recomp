@@ -117,6 +117,33 @@ static func resolve_runtime_request(
 	}
 
 
+## `_NameRater`'s own ten boxes, by the name each stub is pinned under. Empty on
+## a cache imported before format 76 carried them, which is a refusal rather than
+## a reason to invent his lines. Public because the screenshot driver opens the
+## routine with no script behind it and needs the same answer.
+static func name_rater_texts(data: GameData) -> Dictionary:
+	return _stub_run(data, RomLayout.NAME_RATER_TEXT_ORDER, "name_rater_text")
+
+
+## `MoveDeletion`'s own eight, read and refused the same way.
+static func move_deleter_texts(data: GameData) -> Dictionary:
+	return _stub_run(data, RomLayout.MOVE_DELETER_TEXT_ORDER, "move_deleter_text")
+
+
+## One whole run of `text_far` stubs off [GameData], or nothing: a run missing a
+## box is a cache too old for the routine that reads it, not a box to work round.
+static func _stub_run(data: GameData, order: Array[String], accessor: String) -> Dictionary:
+	if data == null:
+		return {}
+	var out: Dictionary = {}
+	for name: String in order:
+		var line: String = String(data.call(accessor, name))
+		if line.is_empty():
+			return {}
+		out[name] = line
+	return out
+
+
 static func choose_script_input(world: Gen2WorldAPI, choice: int) -> Array:
 	if world == null:
 		return [{"ok": false, "status": &"failed", "reason": &"missing_world"}]
@@ -146,6 +173,10 @@ static func _reason_for(kind: StringName) -> StringName:
 			return &"town_map_host_unavailable"
 		&"apricorn_selection_requested":
 			return &"apricorn_data_unavailable"
+		&"name_rater_requested":
+			return &"name_rater_data_unavailable"
+		&"move_deleter_requested":
+			return &"move_deleter_data_unavailable"
 		&"pc_requested":
 			return &"pc_host_unavailable"
 	return &"runtime_host_unavailable"
@@ -180,6 +211,16 @@ static func _resolve_data_request(world: Gen2WorldAPI, request: Dictionary) -> D
 				"ok": true,
 				"data": {"mart": mart, "mart_id": mart_id, "dialog": dialog_id},
 			}
+		&"name_rater_requested":
+			var lines: Dictionary = name_rater_texts(world.data)
+			if lines.is_empty():
+				return {"ok": false, "reason": &"name_rater_text_unavailable"}
+			return {"ok": true, "data": {"name_rater_text": lines}}
+		&"move_deleter_requested":
+			var boxes: Dictionary = move_deleter_texts(world.data)
+			if boxes.is_empty():
+				return {"ok": false, "reason": &"move_deleter_text_unavailable"}
+			return {"ok": true, "data": {"move_deleter_text": boxes}}
 		&"apricorn_selection_requested":
 			## `FindApricornsInBag` is the whole of the request's data: an empty
 			## bag is the source's own refusal, not a missing host.

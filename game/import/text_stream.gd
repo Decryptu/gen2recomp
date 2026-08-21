@@ -289,6 +289,19 @@ static func fill_marker(text: String, prefix: String, value: String) -> String:
 	return text.substr(0, at) + value + text.substr(end + 1)
 
 
+## Every marker of [param prefix], not just the first. `_NameRaterPerfectNameText`
+## names `wStringBuffer1` twice, and a text with one marker is unchanged by the
+## second pass.
+static func fill_all_markers(text: String, prefix: String, value: String) -> String:
+	var out: String = text
+	while out.find(prefix) >= 0:
+		var filled: String = fill_marker(out, prefix, value)
+		if filled == out:
+			break
+		out = filled
+	return out
+
+
 static func _ram_string(context: Dictionary, address: int) -> String:
 	var ram: Variant = context.get("ram", {})
 	if ram is Dictionary and (ram as Dictionary).has(address):

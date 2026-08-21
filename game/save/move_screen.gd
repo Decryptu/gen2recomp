@@ -15,6 +15,10 @@ signal closed
 ## `PlayClickSFX` on every press this screen answers, and `SFX_SWITCH_POKEMON`
 ## twice once two moves have traded places.
 signal sfx_requested(index: int, waited: bool)
+## `ChooseMoveToDelete`'s own answer, when the screen was opened as the move
+## deleter's list rather than as `ManagePokemonMoves`: the row A landed on, or
+## -1 for the carry `.b_button` sets.
+signal selection_made(move_index: int)
 
 ## `constants/sfx_constants.asm`.
 const SFX_READ_TEXT_2: int = 0x08
@@ -27,6 +31,10 @@ var _cursor: int = 0
 var _row: int = 0
 ## `wSwappingMove` less one: the row being moved, or -1 when nothing is held.
 var _held: int = -1
+## `ChooseMoveToDelete`'s own list. `DeleteMoveScreen2DMenuData` accepts
+## `PAD_UP | PAD_DOWN | PAD_A | PAD_B` and nothing else, so there is no cycling
+## between members and no move to hold: A answers the caller and B is its carry.
+var _deleting: bool = false
 
 
 static func create(data: GameData, party: Array, start_cursor: int = 0) -> Gen2MoveScreen:
@@ -47,11 +55,25 @@ func cursor() -> int:
 	return _cursor
 
 
+## `ChooseMoveToDelete`: the same screen with the swap and the cycle taken off
+## its accepted buttons.
+func open_deletion() -> void:
+	_deleting = true
+	_held = -1
+	_row = 0
+
+
 ## `MoveScreenLoop`'s joypad block, which `ScrollingMenuJoypad` has already
 ## narrowed to the control pad, A and B. Returns whether the button was used.
 func handle_button(button: int) -> bool:
 	match button:
 		Gen2Button.B:
+			## `.ChooseMoveToDelete`'s own `.a_button` and `.b_button` reach
+			## neither `PlayClickSFX` nor `WaitSFX`, where `MoveScreenLoop`'s
+			## both do, so the deleter's list answers silently.
+			if _deleting:
+				selection_made.emit(-1)
+				return true
 			sfx_requested.emit(SFX_READ_TEXT_2, false)
 			## `.b_button`: a held move is put back where it came from and the
 			## screen stays up; nothing held is the way out.
@@ -62,6 +84,9 @@ func handle_button(button: int) -> bool:
 			closed.emit()
 			return true
 		Gen2Button.A:
+			if _deleting:
+				selection_made.emit(_row)
+				return true
 			sfx_requested.emit(SFX_READ_TEXT_2, false)
 			if _held < 0:
 				_held = _row
@@ -94,7 +119,7 @@ func _move_row(delta: int) -> bool:
 ## egg both turn round, so the screen never lands on a member it cannot list.
 ## `.d_left` and `.d_right` refuse outright while a move is held.
 func _cycle(delta: int) -> bool:
-	if _held >= 0:
+	if _held >= 0 or _deleting:
 		return false
 	var found: int = _next_listable(delta)
 	if found < 0 or found == _cursor:
@@ -185,6 +210,9 @@ func snapshot() -> Dictionary:
 		"moves": moves,
 		"cursor": clampi(_row, 0, maxi(moves.size() - 1, 0)),
 		"held": _held,
-		"previous": has_neighbour(-1),
-		"next": has_neighbour(1),
+		## `PlaceMoveScreenArrows` is `MoveScreenLoop`'s own call and not
+		## `SetUpMoveScreenBG`'s, so the deleter's list carries neither arrow:
+		## `.ChooseMoveToDelete` never reaches it.
+		"previous": not _deleting and has_neighbour(-1),
+		"next": not _deleting and has_neighbour(1),
 	}

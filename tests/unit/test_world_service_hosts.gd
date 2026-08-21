@@ -326,6 +326,122 @@ func test_menu_input_can_be_cancelled_without_selecting_an_option() -> void:
 	) == false)
 
 
+## `special NameRater`, the same shape Kurt's own special is staged with.
+func _set_name_rater_script() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(Fixture.directory()))
+	scripts[Gen2WorldScript.pointer_key(Fixture.BANK, 0x6300)] = [
+		Gen2WorldScript.SPECIAL,
+		Gen2WorldScriptRunner.SPECIAL_NAME_RATER, 0x00,
+		Gen2WorldScript.END,
+	]
+	RomCache.write_json(RomCache.world_scripts_path(Fixture.directory()), scripts)
+	var maps: Array = RomCache.read_json(RomCache.world_maps_path(Fixture.directory()))
+	for raw: Dictionary in maps:
+		if int(raw.get("group", -1)) != Fixture.MAP_GROUP \
+		or int(raw.get("number", -1)) != Fixture.MAP_NUMBER:
+			continue
+		var events: Dictionary = raw.get("events", {})
+		events["coord_events"] = [{"x": 7, "y": 6, "script": 0x6300}]
+		raw["events"] = events
+	RomCache.write_json(RomCache.world_maps_path(Fixture.directory()), maps)
+	_data = GameData.open_directory(Fixture.directory())
+	_world = Gen2WorldAPI.open(
+		_data, Fixture.MAP_GROUP, Fixture.MAP_NUMBER, Vector2i(7, 6),
+		Gen2WorldState.new({}, {}, {})
+	)
+	_save = Gen2SaveStore.create_development_save(_data, 0)
+	_save.world = _world.snapshot()
+
+
+func test_name_rater_special_stages_a_request_carrying_all_ten_boxes() -> void:
+	_set_name_rater_script()
+	var waiting: Array = _world.dispatch_script_events(Vector2i(7, 6))
+	assert_eq(waiting[0]["status"], &"waiting", JSON.stringify(waiting))
+	assert_eq(_world.pending_runtime_request()["kind"], &"name_rater_requested")
+
+	var resolved: Dictionary = Gen2WorldHost.resolve_runtime_request(_world)
+	assert_true(resolved["ok"], JSON.stringify(resolved))
+	var lines: Dictionary = resolved["data"]["name_rater_text"]
+	assert_eq(lines.size(), RomLayout.NAME_RATER_TEXT_ORDER.size())
+	for name: String in RomLayout.NAME_RATER_TEXT_ORDER:
+		assert_false(String(lines[name]).is_empty(), name)
+
+
+## A cache imported before format 76 carries none of the boxes, and inventing
+## his lines would be worse than saying the host cannot run.
+func test_name_rater_refuses_a_cache_without_his_boxes() -> void:
+	var manifest: Dictionary = RomCache.read_manifest(Fixture.directory())
+	manifest.erase("name_rater_text")
+	RomCache.write_json(RomCache.manifest_path(Fixture.directory()), manifest)
+	_set_name_rater_script()
+	assert_eq(_world.dispatch_script_events(Vector2i(7, 6))[0]["status"], &"waiting")
+	var resolved: Dictionary = Gen2WorldHost.resolve_runtime_request(_world)
+	assert_false(resolved["ok"])
+	assert_eq(resolved["reason"], &"name_rater_text_unavailable")
+
+
+## `_NameRaterPerfectNameText` names `wStringBuffer1` twice, so filling the
+## first marker alone leaves the second on screen.
+func test_every_nickname_marker_in_a_box_is_filled() -> void:
+	var filled: String = Gen2TextStream.fill_all_markers(
+		_data.name_rater_text("perfect_name"), Gen2TextStream.RAM_MARKER, "SPARKY"
+	)
+	assert_false(filled.contains(Gen2TextStream.RAM_MARKER))
+	assert_eq(filled.count("SPARKY"), 2)
+
+
+## `special MoveDeletion`, staged the same way.
+func _set_move_deleter_script() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(Fixture.directory()))
+	scripts[Gen2WorldScript.pointer_key(Fixture.BANK, 0x6300)] = [
+		Gen2WorldScript.SPECIAL,
+		Gen2WorldScriptRunner.SPECIAL_MOVE_DELETION, 0x00,
+		Gen2WorldScript.END,
+	]
+	RomCache.write_json(RomCache.world_scripts_path(Fixture.directory()), scripts)
+	var maps: Array = RomCache.read_json(RomCache.world_maps_path(Fixture.directory()))
+	for raw: Dictionary in maps:
+		if int(raw.get("group", -1)) != Fixture.MAP_GROUP \
+		or int(raw.get("number", -1)) != Fixture.MAP_NUMBER:
+			continue
+		var events: Dictionary = raw.get("events", {})
+		events["coord_events"] = [{"x": 7, "y": 6, "script": 0x6300}]
+		raw["events"] = events
+	RomCache.write_json(RomCache.world_maps_path(Fixture.directory()), maps)
+	_data = GameData.open_directory(Fixture.directory())
+	_world = Gen2WorldAPI.open(
+		_data, Fixture.MAP_GROUP, Fixture.MAP_NUMBER, Vector2i(7, 6),
+		Gen2WorldState.new({}, {}, {})
+	)
+	_save = Gen2SaveStore.create_development_save(_data, 0)
+	_save.world = _world.snapshot()
+
+
+func test_move_deleter_special_stages_a_request_carrying_all_eight_boxes() -> void:
+	_set_move_deleter_script()
+	var waiting: Array = _world.dispatch_script_events(Vector2i(7, 6))
+	assert_eq(waiting[0]["status"], &"waiting", JSON.stringify(waiting))
+	assert_eq(_world.pending_runtime_request()["kind"], &"move_deleter_requested")
+
+	var resolved: Dictionary = Gen2WorldHost.resolve_runtime_request(_world)
+	assert_true(resolved["ok"], JSON.stringify(resolved))
+	var lines: Dictionary = resolved["data"]["move_deleter_text"]
+	assert_eq(lines.size(), RomLayout.MOVE_DELETER_TEXT_ORDER.size())
+	for name: String in RomLayout.MOVE_DELETER_TEXT_ORDER:
+		assert_false(String(lines[name]).is_empty(), name)
+
+
+func test_move_deleter_refuses_a_cache_without_his_boxes() -> void:
+	var manifest: Dictionary = RomCache.read_manifest(Fixture.directory())
+	manifest.erase("move_deleter_text")
+	RomCache.write_json(RomCache.manifest_path(Fixture.directory()), manifest)
+	_set_move_deleter_script()
+	assert_eq(_world.dispatch_script_events(Vector2i(7, 6))[0]["status"], &"waiting")
+	var resolved: Dictionary = Gen2WorldHost.resolve_runtime_request(_world)
+	assert_false(resolved["ok"])
+	assert_eq(resolved["reason"], &"move_deleter_text_unavailable")
+
+
 func _write_services() -> void:
 	_write_services_at(Fixture.directory())
 

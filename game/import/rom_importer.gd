@@ -354,6 +354,14 @@ static func verify_layout(rom: RomFile) -> Dictionary:
 	if not mart_text["ok"]:
 		return mart_text
 
+	var name_rater_text: Dictionary = verify_name_rater_text(rom, layout)
+	if not name_rater_text["ok"]:
+		return name_rater_text
+
+	var move_deleter_text: Dictionary = verify_move_deleter_text(rom, layout)
+	if not move_deleter_text["ok"]:
+		return move_deleter_text
+
 	var map_entry_sign: Dictionary = verify_map_entry_sign(rom, layout)
 	if not map_entry_sign["ok"]:
 		return map_entry_sign
@@ -1118,6 +1126,47 @@ static func verify_mart_text(rom: RomFile, layout: Dictionary) -> Dictionary:
 			"message": "The mart's welcome text is \"%s\", not the shop's own." % welcome,
 		}
 	return {"ok": true, "message": "The mart's texts verified."}
+
+
+## `engine/events/name_rater.asm`'s ten `text_far` stubs, identified by content
+## the way the mart's are: all ten have to decode and the routine's opening line
+## has to be the one he introduces himself with.
+static func verify_name_rater_text(rom: RomFile, layout: Dictionary) -> Dictionary:
+	for name: String in RomLayout.NAME_RATER_TEXT_ORDER:
+		if read_oak_text(rom, layout, RomLayout.name_rater_text_offset(layout, name)).is_empty():
+			return {
+				"ok": false, "message": "The Name Rater's %s text did not decode." % name,
+			}
+	var hello: String = read_oak_text(
+		rom, layout, RomLayout.name_rater_text_offset(layout, "hello")
+	)
+	if not hello.begins_with("Hello, hello!"):
+		return {
+			"ok": false,
+			"message": "The Name Rater's hello text is \"%s\", not his own." % hello,
+		}
+	return {"ok": true, "message": "The Name Rater's texts verified."}
+
+
+## `engine/events/move_deleter.asm`'s eight `text_far` stubs, identified by
+## content the same way.
+static func verify_move_deleter_text(rom: RomFile, layout: Dictionary) -> Dictionary:
+	for name: String in RomLayout.MOVE_DELETER_TEXT_ORDER:
+		if read_oak_text(
+			rom, layout, RomLayout.move_deleter_text_offset(layout, name)
+		).is_empty():
+			return {
+				"ok": false, "message": "The move deleter's %s text did not decode." % name,
+			}
+	var intro: String = read_oak_text(
+		rom, layout, RomLayout.move_deleter_text_offset(layout, "intro")
+	)
+	if not intro.contains("MOVE DELETER"):
+		return {
+			"ok": false,
+			"message": "The move deleter's intro is \"%s\", not his own." % intro,
+		}
+	return {"ok": true, "message": "The move deleter's texts verified."}
 
 
 ## `UnownWords`, twenty-six words in form order, A first. Empty on any failure,
@@ -3961,6 +4010,8 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		"gender_screen_palette": _import_gender_screen_palette(rom, layout),
 		"menu_text": _import_menu_text(rom, layout),
 		"mart_text": _import_mart_text(rom, layout),
+		"name_rater_text": _import_name_rater_text(rom, layout),
+		"move_deleter_text": _import_move_deleter_text(rom, layout),
 		"copyright_string": _import_copyright_string(rom, layout),
 		"copyright_palette": _import_copyright_palette(rom, layout),
 		"presents_palettes": _import_presents_palettes(rom, layout),
@@ -4737,6 +4788,28 @@ func _import_mart_text(rom: RomFile, layout: Dictionary) -> Dictionary:
 	var out: Dictionary = {}
 	for name: String in RomLayout.MART_TEXT_AT:
 		out[name] = read_oak_text(rom, layout, RomLayout.mart_text_offset(layout, name))
+	return out
+
+
+## The Name Rater's own boxes, by the name `RomLayout.NAME_RATER_TEXT_ORDER`
+## gives each stub.
+func _import_name_rater_text(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var out: Dictionary = {}
+	for name: String in RomLayout.NAME_RATER_TEXT_ORDER:
+		out[name] = read_oak_text(
+			rom, layout, RomLayout.name_rater_text_offset(layout, name)
+		)
+	return out
+
+
+## The move deleter's own boxes, by the name
+## `RomLayout.MOVE_DELETER_TEXT_ORDER` gives each stub.
+func _import_move_deleter_text(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var out: Dictionary = {}
+	for name: String in RomLayout.MOVE_DELETER_TEXT_ORDER:
+		out[name] = read_oak_text(
+			rom, layout, RomLayout.move_deleter_text_offset(layout, name)
+		)
 	return out
 
 

@@ -1270,6 +1270,26 @@ static func set_caught_data(
 	mon.caught_location = clampi(landmark, 0, 127)
 
 
+## `_NameRater`'s own `CopyBytes` into `wPartyMonNicknames`, which is the one
+## write the routine makes. Kept here rather than in the screen that asks for it:
+## every caller of `_NamingScreen` over a party row lands on this same copy.
+static func rename_party_mon(
+	save: Gen2SaveData, party_index: int, nickname: String
+) -> Dictionary:
+	if save == null:
+		return {"ok": false, "reason": &"missing_save"}
+	if party_index < 0 or party_index >= save.party.size():
+		return {"ok": false, "reason": &"invalid_party_index"}
+	var mon: Gen2SaveMon = save.party[party_index] as Gen2SaveMon
+	if mon == null:
+		return {"ok": false, "reason": &"invalid_party_index"}
+	var settled: String = nickname.substr(0, Gen2NameRater.NICKNAME_LENGTH)
+	if settled.is_empty():
+		return {"ok": false, "reason": &"empty_nickname"}
+	mon.nickname = settled
+	return {"ok": true, "party_index": party_index, "nickname": settled}
+
+
 ## `HatchEggs` for one party slot: the egg becomes the Pokemon it was carrying.
 ## Everything here is the source's own order, and every one of the seven writes
 ## has a reader in this project, which is why none is left out.

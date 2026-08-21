@@ -35,6 +35,99 @@ func after_each() -> void:
 	RomCache.clear(Fixture.directory())
 
 
+## `.onlyonemove` reads `wPartyMon1Moves + 1`, the second slot rather than a
+## count, so a hole in the list is read as one move whatever stands behind it.
+func test_move_deleter_reads_the_second_slot_not_a_move_count() -> void:
+	var mon: Gen2SaveMon = _save.party[0]
+	mon.is_egg = false
+	mon.moves = [1, 0, 5, 0]
+	assert_eq(Gen2MoveDeleter.ending_for(mon), Gen2MoveDeleter.ENDING_ONLY_ONE_MOVE)
+	mon.moves = [1, 2, 0, 0]
+	assert_eq(Gen2MoveDeleter.ending_for(mon), &"")
+	mon.is_egg = true
+	assert_eq(Gen2MoveDeleter.ending_for(mon), Gen2MoveDeleter.ENDING_EGG)
+
+
+## `.DeleteMove`: the slots above come down and the last is zeroed, moves and PP
+## in the same shape, so the two lists never fall out of step.
+func test_deleting_a_move_shifts_its_pp_with_it() -> void:
+	var mon: Gen2SaveMon = _save.party[0]
+	mon.is_egg = false
+	mon.moves = [10, 20, 30, 40]
+	mon.pp = [11, 22, 33, 44]
+	assert_true(Gen2MoveDeleter.delete_move(mon, 1))
+	assert_eq(mon.moves, [10, 30, 40, 0])
+	assert_eq(mon.pp, [11, 33, 44, 0])
+	assert_true(Gen2MoveDeleter.delete_move(mon, 2))
+	assert_eq(mon.moves, [10, 30, 0, 0])
+	assert_eq(mon.pp, [11, 33, 0, 0])
+	assert_false(Gen2MoveDeleter.delete_move(mon, 2), "an empty slot is not a move")
+
+
+## `CheckIfMonIsYourOT` compares both halves: a member carrying the player's own
+## name but a different ID is still a traded one, which is `.traded`.
+func test_name_rater_refuses_a_traded_member_on_either_half() -> void:
+	var mon: Gen2SaveMon = _save.party[0]
+	mon.is_egg = false
+	mon.original_trainer = "GOLD"
+	mon.ot_id = 1234
+	assert_true(Gen2NameRater.is_your_ot(mon, "GOLD", 1234))
+	assert_false(Gen2NameRater.is_your_ot(mon, "GOLD", 4321))
+	assert_false(Gen2NameRater.is_your_ot(mon, "KRIS", 1234))
+	assert_eq(Gen2NameRater.ending_for(mon, "KRIS", 1234), Gen2NameRater.ENDING_TRADED)
+	assert_eq(Gen2NameRater.ending_for(mon, "GOLD", 1234), &"")
+
+
+## `AnimateMon_CheckIfPokemon`'s own refusal one routine further on: the egg
+## check runs before `GetCurNickname`, so an egg never reaches the OT test.
+func test_name_rater_refuses_an_egg_before_the_ot_test() -> void:
+	var mon: Gen2SaveMon = _save.party[0]
+	mon.is_egg = true
+	mon.original_trainer = "SOMEONE"
+	mon.ot_id = 9
+	assert_eq(Gen2NameRater.ending_for(mon, "GOLD", 1234), Gen2NameRater.ENDING_EGG)
+
+
+## `IsNewNameEmpty` and `CompareNewToOld`, the two refusals that reach
+## `.samename` and leave the row's own nickname where it was.
+func test_name_rater_treats_an_empty_or_unchanged_entry_as_unchanged() -> void:
+	assert_true(Gen2NameRater.is_new_name_empty(""))
+	assert_true(Gen2NameRater.is_new_name_empty("     "))
+	assert_false(Gen2NameRater.is_new_name_empty(" A "))
+	for entered: String in ["", "   ", "SPARKY"]:
+		var settled: Dictionary = Gen2NameRater.ending_for_entry(entered, "SPARKY")
+		assert_eq(settled["ending"], Gen2NameRater.ENDING_SAME_NAME, entered)
+		assert_eq(settled["nickname"], "SPARKY", entered)
+	var renamed: Dictionary = Gen2NameRater.ending_for_entry("BOLT", "SPARKY")
+	assert_eq(renamed["ending"], Gen2NameRater.ENDING_FINISHED)
+	assert_eq(renamed["nickname"], "BOLT")
+
+
+## `GetNicknamenameLength` stops at MON_NAME_LENGTH - 1, so two entries that
+## differ only past ten characters are the same name on the cartridge, and the
+## `CopyBytes` that follows moves ten bytes.
+func test_name_rater_compares_and_writes_ten_characters() -> void:
+	var settled: Dictionary = Gen2NameRater.ending_for_entry(
+		"ABCDEFGHIJKL", "ABCDEFGHIJ"
+	)
+	assert_eq(settled["ending"], Gen2NameRater.ENDING_SAME_NAME)
+	var written: Dictionary = Gen2WorldPartyHost.rename_party_mon(
+		_save, 0, "ABCDEFGHIJKL"
+	)
+	assert_true(written["ok"])
+	assert_eq(_save.party[0].nickname, "ABCDEFGHIJ")
+
+
+func test_rename_refuses_a_slot_no_party_row_stands_in() -> void:
+	assert_false(Gen2WorldPartyHost.rename_party_mon(_save, -1, "BOLT")["ok"])
+	assert_false(
+		Gen2WorldPartyHost.rename_party_mon(_save, _save.party.size(), "BOLT")["ok"]
+	)
+	assert_eq(
+		Gen2WorldPartyHost.rename_party_mon(_save, 0, "")["reason"], &"empty_nickname"
+	)
+
+
 func test_givepoke_appends_a_real_save_mon_and_resumes_the_script() -> void:
 	_set_script(0x6200)
 	var waiting: Array = _world.dispatch_script_events(Vector2i(2, 2))

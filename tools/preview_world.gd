@@ -45,6 +45,10 @@ extends SceneTree
 ## New Bark Town into Route 29),
 ## `yes_no` (`Script_yesorno`'s box, over the map's first script run to the
 ## choice it ends on: `crystal 26 3 ... yes_no 31 6` is Cherrygrove's guide),
+## `name_rater` and `move_deleter` (`special NameRater` and `special
+## MoveDeletion`, which no fixture cell reaches: the first number is how many
+## presses into the routine to photograph, so 0 is the introduction, 2 its last
+## page with the YES/NO up, and 4 the party list),
 ## `visible_encounter` (a shiny of the map's own table standing on the eligible
 ## cell nearest the player, with the cartridge's sparkle over it: try
 ## `crystal 24 3 ... visible_encounter 4 9`), the name of any
@@ -65,6 +69,11 @@ var _window: Vector2i = WINDOW_SIZE
 ## Longer than a step onto a warp tile and the fade behind it, for the `warp`
 ## kind, which drives to a frame rather than spending a count.
 const WARP_FRAME_CAP: int = 120
+## How long one of the two routines' boxes may take to finish printing, which is
+## a text speed rather than a count this file knows.
+const MON_SPECIAL_FRAME_CAP: int = 600
+
+
 ## `UpdateJumpPosition`'s highest `.y_offsets` entry, which is where the `ledge`
 ## kind photographs the hop.
 const LEDGE_ARC_TOP: float = 12.0
@@ -194,7 +203,8 @@ func _build_live(data: GameData, group: int, number: int, cell: Vector2i) -> voi
 	if _kind_cell.x >= 0:
 		_screen.start_cell = _kind_cell
 	elif cell.x >= 0 and _kind not in [
-		&"battle_transition", &"level_evolution", &"egg_hatch",
+		&"battle_transition", &"level_evolution", &"egg_hatch", &"name_rater",
+		&"move_deleter",
 	]:
 		_screen.start_cell = cell
 	## Pinned so two captures of the same map are the same picture: the seed the
@@ -208,6 +218,20 @@ func _build_live(data: GameData, group: int, number: int, cell: Vector2i) -> voi
 	## time. It owns none of them here: the staged frames below are spent by
 	## hand.
 	_screen.set_process(false)
+
+
+## Spends whatever one of the two routines' boxes still owes, plus the frame
+## `advance_frame` reads it on: `PrintText` returning is what opens a `YesNoBox`.
+func _settle_mon_special(host_property: String) -> void:
+	for _frame: int in MON_SPECIAL_FRAME_CAP:
+		var routine: Control = _screen.get(host_property)
+		if routine == null:
+			return
+		var box: Gen2TextBox = routine.get("_text_box")
+		if box == null or not box.is_revealing():
+			break
+		_screen.advance_frame()
+	_screen.advance_frame()
 
 
 func _process(_delta: float) -> bool:
@@ -264,6 +288,25 @@ func _process(_delta: float) -> bool:
 					break
 				if hatching.awaiting_press():
 					_screen.press_button(Gen2Button.A)
+		elif _kind in [&"name_rater", &"move_deleter"]:
+			## `special NameRater` and `special MoveDeletion`, neither of which
+			## any fixture cell reaches. The first number is how many presses
+			## into the routine to photograph: 2 is the introduction's last page
+			## with its YES/NO up, 4 the party list, and so on. Presses are spent
+			## only once the box owes no frames, since nothing shortens a
+			## printing text.
+			if _kind == &"name_rater":
+				_screen.preview_name_rater()
+			else:
+				_screen.preview_move_deleter()
+			var host_property: String = "_name_rater_host" \
+				if _kind == &"name_rater" else "_move_deleter_host"
+			_settle_mon_special(host_property)
+			for _press: int in maxi(_cell.x, 0):
+				if _screen.get(host_property) == null:
+					break
+				_screen.press_button(Gen2Button.A)
+				_settle_mon_special(host_property)
 		elif _kind == &"yes_no":
 			## `Script_yesorno`'s own box: the NPC beside the player is talked
 			## to and each page answered until the choice the script ends on is
@@ -353,7 +396,8 @@ func _process(_delta: float) -> bool:
 			_screen.preview_effect_sprites(_kind)
 		if _kind not in [
 			&"warp", &"door", &"map_name_sign", &"ledge", &"heal_machine",
-			&"battle_transition", &"level_evolution", &"egg_hatch",
+			&"battle_transition", &"level_evolution", &"egg_hatch", &"name_rater",
+			&"move_deleter",
 		]:
 			## Those kinds drove themselves to the frame they want; every other
 			## kind stages a sprite and then spends the frames it needs.

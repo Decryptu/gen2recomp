@@ -28,6 +28,13 @@ signal sfx_requested(index: int, waited: bool)
 ## `PlayMonCry2`, which the stats screen this menu opens plays on every mon it
 ## loads. Emitted for the same reason [signal sfx_requested] is.
 signal cry_requested(species: int)
+## `PartyMenuSelect`'s own answer, when the list was opened as
+## `SelectMonFromParty` rather than as `StartMenu_Pokemon`: the chosen party
+## index, or -1 for the carry a CANCEL row or a B press returns. Every caller of
+## `SelectMonFromParty` (the Name Rater, the move deleter, the seer, the haircut
+## brothers) is one of these, so the selection is the list's answer rather than a
+## per-caller mode.
+signal selection_made(party_index: int)
 
 const HARDWARE_SCENE: PackedScene = preload("res://game/render/gen2_screen.tscn")
 
@@ -128,6 +135,11 @@ var _heal_move: int = 0
 ## `wSwitchMon` less one: which member SWITCH is holding, or -1 when the list is
 ## not `InitPartyMenuNoCancel`'s.
 var _switch_from: int = -1
+## `SelectMonFromParty`'s own list: A answers the caller rather than opening
+## `PokemonActionSubmenu`, and the prompt is whichever `PartyMenuStrings` row
+## the caller wrote into `wPartyMenuActionText`.
+var _selecting: bool = false
+var _select_prompt: String = PROMPT_CHOOSE
 
 ## The embedded view's own hardware screen and the two pages drawn into it.
 var _hardware: Gen2Screen = null
@@ -179,6 +191,27 @@ func set_context(data: GameData, save: Gen2SaveData, embedded: bool = false) -> 
 	_stats = null
 	_moves = null
 	if is_inside_tree() and _cards != null:
+		_refresh()
+
+
+## `SelectMonFromParty`: the same `InitPartyMenuWithCancel` list with
+## `wPartyMenuActionText` set by the caller, whose A opens no submenu and
+## answers [signal selection_made] instead. [param prompt] is the
+## `PartyMenuStrings` row that caller writes; the default is the
+## PARTYMENUACTION_CHOOSE_POKEMON `SelectMonFromParty` writes with its own
+## `xor a`.
+func open_selection(prompt: String = PROMPT_CHOOSE) -> void:
+	_selecting = true
+	_select_prompt = prompt
+	_member_cursor = 0
+	_submenu_open = false
+	_item_menu_open = false
+	_submenu_items = []
+	_switch_from = -1
+	_heal_user = -1
+	_heal_move = 0
+	_message = ""
+	if is_inside_tree():
 		_refresh()
 
 
@@ -298,7 +331,7 @@ func handle_button(button: int) -> bool:
 		return false
 	if _party_size() == 0:
 		if button == Gen2Button.B:
-			close_embedded()
+			_cancel()
 			return true
 		return false
 	match button:
@@ -349,6 +382,11 @@ func _confirm() -> void:
 	## the row and the button are one path.
 	if _on_cancel_row() and not _submenu_open:
 		_cancel()
+		return
+	## `SelectMonFromParty` returns the moment `PartyMenuSelect` does: there is
+	## no submenu behind this list.
+	if _selecting:
+		selection_made.emit(_member_cursor)
 		return
 	if _switch_from >= 0:
 		_finish_switch()
@@ -460,6 +498,10 @@ func _close_stats() -> void:
 
 
 func _cancel() -> void:
+	## `PartyMenuSelect`'s carry, which is the same answer the CANCEL row gives.
+	if _selecting:
+		selection_made.emit(-1)
+		return
 	## `SwitchPartyMons`' `bit B_PAD_B` reaches `.DontSwitch`, which is
 	## `CancelPokemonAction`: the move is given up and the plain list comes back.
 	if _switch_from >= 0:
@@ -703,6 +745,8 @@ func _rows() -> Array:
 func _prompt() -> String:
 	if not _message.is_empty():
 		return _message
+	if _selecting:
+		return _select_prompt
 	if _switch_from >= 0:
 		return PROMPT_MOVE_TO_WHERE
 	return PROMPT_USE_ON_WHICH if _heal_user >= 0 else PROMPT_CHOOSE
