@@ -1130,6 +1130,44 @@ const GS_INTRO_SHELLDER_LAPRAS_PALETTES: int = 3
 ## runs, which is after `BattleIntroSlidingPics`. Identical in all three dumps.
 ## `_CGB_MoveList`'s own background palette, which is why the move screen is
 ## the same warm gold as Goldenrod City rather than white.
+## `_UnownPuzzle`'s art (engine/games/unown_puzzle.asm), as (cache name, kind,
+## tiles). `raw` is an uncompressed strip, everything else an LZ one of that many
+## tiles. The order is the routine's own INCBIN order and is what the walk
+## depends on: `UnownPuzzleCursorGFX` pins the six behind it, each address the
+## previous entry's own consumed length, and all six reproduce pret's build byte
+## for byte on all three cartridges.
+##
+## `tile_borders` is pinned separately because it is not in that run:
+## `LoadUnownPuzzlePiecesGFX` and its pointer table sit between the borders and
+## the cursor, which is thirty-four bytes of code inside the data.
+##
+## A puzzle picture is six by six tiles and `ConvertLoadedPuzzlePieces` doubles
+## it to twelve by twelve, so the sixteen three-by-three pieces come out of one
+## 36-tile strip.
+const UNOWN_PUZZLE_SECTION: Array[Array] = [
+	["cursor", "raw", 4],
+	["start_cancel", "lz", 19],
+	["hooh", "lz", 36],
+	["aerodactyl", "lz", 36],
+	["kabuto", "lz", 36],
+	["omanyte", "lz", 36],
+]
+## `LoadUnownPuzzlePiecesGFX.LZPointers` in `UNOWNPUZZLE_*` order, which is what
+## the map's own `setval` in front of the special names. `maskbits
+## NUM_UNOWN_PUZZLES` is what bounds it, so the operand is taken modulo four.
+const UNOWN_PUZZLE_PICTURES: Array[String] = [
+	"kabuto", "omanyte", "aerodactyl", "hooh",
+]
+## A puzzle picture's side in tiles before `ConvertLoadedPuzzlePieces` doubles it.
+const UNOWN_PUZZLE_PICTURE_TILES: int = 6
+## `PuzzlePieceBorderData.TileBordersGFX`, the eight tiles
+## `UnownPuzzle_AddPuzzlePieceBorders` ORs onto every piece's outer eight.
+const UNOWN_PUZZLE_BORDER_TILES: int = 8
+## `PREDEFPAL_UNOWN_PUZZLE`, which `_CGB_UnownPuzzle` writes to all four
+## background palettes and to object palette 0.
+const PREDEFPAL_UNOWN_PUZZLE: int = 0x4C
+
+
 const PREDEFPAL_GOLDENROD: int = 0x10
 const PREDEFPAL_BLACKOUT: int = 0x1A
 const PREDEF_PALETTE_COLORS: int = 4
@@ -1975,6 +2013,9 @@ const GOLD_SILVER: Dictionary = {
 	},
 	# `CrystalIntro` is Crystal's; Gold and Silver run `GoldSilverIntro` below.
 	"intro_movie": {"section": -1, "fade": -1, "unown_pals": -1},
+	# `_UnownPuzzle`'s art, the same two pins as Crystal's at Gold and Silver's
+	# own addresses. Both cartridges carry it at the same offsets.
+	"unown_puzzle": {"tile_borders": 0xE1F30, "section": 0xE1FD2},
 	# `GoldSilverIntro`'s art section. `Intro_WaterGFX1` is the only pinned
 	# address in it: the section is contiguous and sixteen-byte aligned, so the
 	# walk in `GS_INTRO_SECTION` reaches the other ten, and all eleven reproduce
@@ -2437,6 +2478,10 @@ const CRYSTAL: Dictionary = {
 	# inside the code rather than in that section; both are unique byte runs, and
 	# `unown_1.pal` pins `unown_2.pal` directly behind it.
 	"intro_movie": {"section": 0xE555D, "fade": 0xE519C, "unown_pals": 0xE538D},
+	# `_UnownPuzzle`'s art. `PuzzlePieceBorderData.TileBordersGFX` and
+	# `UnownPuzzleCursorGFX` are the two pinned addresses; the walk in
+	# `UNOWN_PUZZLE_SECTION` reaches the five behind the cursor.
+	"unown_puzzle": {"tile_borders": 0xE1723, "section": 0xE17C5},
 	# Crystal ships no `GoldSilverIntro`. Nested the way trainer_card is, so the
 	# -1s stay out of the flat offset checks.
 	"gs_intro": {

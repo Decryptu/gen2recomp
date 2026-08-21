@@ -55,6 +55,11 @@ extends SceneTree
 ## `day_care` (the Day-Care's five specials, driven the same way: the first
 ## number is how many presses in and the second which routine, 0 the man,
 ## 1 the lady, 2 the man outside, 3 and 4 the two signs),
+## `unown_puzzle` (`special UnownPuzzle`'s board, which no fixture cell reaches:
+## the first number is how many frames in to photograph and the second which
+## picture, 0 Kabuto, 1 Omanyte, 2 Aerodactyl and 3 Ho-Oh, or 4 to 7 for the
+## same four solved; the empty cursor blinks off `hVBlankCounter`, so a frame
+## with bit 4 clear has none on it),
 ## `visible_encounter` (a shiny of the map's own table standing on the eligible
 ## cell nearest the player, with the cartridge's sparkle over it: try
 ## `crystal 24 3 ... visible_encounter 4 9`), the name of any
@@ -214,7 +219,7 @@ func _build_live(data: GameData, group: int, number: int, cell: Vector2i) -> voi
 		_screen.start_cell = _kind_cell
 	elif cell.x >= 0 and _kind not in [
 		&"battle_transition", &"level_evolution", &"egg_hatch", &"name_rater",
-		&"move_deleter", &"day_care",
+		&"move_deleter", &"day_care", &"unown_puzzle",
 	]:
 		_screen.start_cell = cell
 	## Pinned so two captures of the same map are the same picture: the seed the
@@ -307,6 +312,23 @@ func _process(_delta: float) -> bool:
 					break
 				if hatching.awaiting_press():
 					_screen.press_button(Gen2Button.A)
+		elif _kind == &"unown_puzzle":
+			## `special UnownPuzzle`, which no fixture cell reaches. The first
+			## number is how many frames into the board to photograph and the
+			## second which picture: 0 Kabuto, 1 Omanyte, 2 Aerodactyl, 3 Ho-Oh.
+			## The empty cursor blinks off `hVBlankCounter`, so a frame with bit
+			## 4 clear photographs a board with no cursor on it.
+			## 4 to 7 are the same four pictures with the board walked into
+			## `.SolvedPuzzleConfiguration` through the screen's own presses,
+			## which is the only way to photograph the assembled picture.
+			_screen.preview_unown_puzzle(
+				maxi(_cell.y, 0) % RomLayout.UNOWN_PUZZLE_PICTURES.size(),
+				maxi(_cell.y, 0) >= RomLayout.UNOWN_PUZZLE_PICTURES.size()
+			)
+			for _frame: int in maxi(_cell.x, 0):
+				if _screen.get("_unown_puzzle_host") == null:
+					break
+				_screen.advance_frame()
 		elif _kind == &"day_care":
 			## The Day-Care's five, driven the way the two above are. The first
 			## number is how many presses into the routine to photograph and the

@@ -22,8 +22,9 @@ const AUDIO_PLAYER_SCRIPT := preload("res://game/audio/gen2_audio_player.gd")
 const SFX_JUMP_OVER_LEDGE: int = 0x16
 ## constants/sfx_constants.asm's SFX_PLACE_PUZZLE_PIECE_DOWN, played by
 ## OWCutAnimation before its sprite animation. The animation itself is not
-## rendered here; the sound is.
-const SFX_CUT: int = 0x38
+## rendered here; the sound is. Not SFX_CUT, which is $38 and is the battle
+## move's own effect: the field animation shares the Unown puzzle's sound.
+const SFX_CUT: int = Gen2UnownPuzzle.SFX_PLACE_PIECE
 ## constants/sfx_constants.asm's SFX_SURF, which is what PlayWhirlpoolSound plays
 ## (engine/events/field_moves.asm); there is no whirlpool-specific effect.
 const SFX_WHIRLPOOL: int = 0x53
@@ -157,6 +158,7 @@ var _move_deleter_host: Gen2MoveDeleterScreen = null
 ## the world state directly, which is what `DepositBreedmon` and `RetrieveBreedmon`
 ## do, so the save it was handed is kept beside it only to write nothing else.
 var _day_care_host: Gen2DayCareScreen = null
+var _unown_puzzle_host: Gen2UnownPuzzleScreen = null
 ## What `DayCareManOutside` left in wScriptVar, held between the screen finishing
 ## and the request completing. -1 while no routine has written one.
 var _day_care_script_value: int = -1
@@ -684,6 +686,8 @@ func advance_frame() -> void:
 		_move_deleter_host.advance_frame()
 	if _day_care_host != null:
 		_day_care_host.advance_frame()
+	if _unown_puzzle_host != null:
+		_unown_puzzle_host.advance_frame()
 	_spending_frame = false
 
 
@@ -828,7 +832,7 @@ func _overlay_open() -> bool:
 		or _pokedex_host != null or _credits_host != null \
 		or _evolution_host != null or _hatch_host != null \
 		or _name_rater_host != null or _move_deleter_host != null \
-		or _day_care_host != null
+		or _day_care_host != null or _unown_puzzle_host != null
 
 
 ## Wandering objects keep to themselves while anything else owns the world. A
@@ -854,10 +858,14 @@ func _unhandled_input(event: InputEvent) -> void:
 		if press_button(button):
 			accept_event()
 		return
-	## The dex area's SELECT and the credits' A and B are held states rather than
-	## presses, and those two overlays are the only ones with anything to do with
-	## a release.
+	## The dex area's SELECT, the credits' A and B and the Unown puzzle's
+	## directions are held states rather than presses, and those three overlays
+	## are the only ones with anything to do with a release.
 	var released: int = Gen2Button.released_in(event)
+	if released != Gen2Button.NONE and _unown_puzzle_host != null:
+		_unown_puzzle_host.release_button(released)
+		accept_event()
+		return
 	if released != Gen2Button.NONE and _pokedex_host != null:
 		_pokedex_host.release_button(released)
 		accept_event()
@@ -940,6 +948,11 @@ func _handle_button(button: int) -> bool:
 	## The Day-Care's five, one screen with the same shape again.
 	if _day_care_host != null:
 		_day_care_host.handle_button(button)
+		return true
+	## `special UnownPuzzle`, which owns the whole screen until START or the
+	## last piece.
+	if _unown_puzzle_host != null:
+		_unown_puzzle_host.handle_button(button)
 		return true
 	## Before the PC and the party overlay because the Hall of Fame is the one
 	## overlay a script opens with nothing behind it: there is no map to go back
@@ -1377,6 +1390,46 @@ func _on_name_rater_closed() -> void:
 ## routine writes the party, the two slots and the money itself, so nothing is
 ## staged: the cartridge's own routines write WRAM straight and the save is only
 ## committed when the player saves.
+## `special UnownPuzzle`. `FadeToMenu` in front of it and `ExitAllMenus` behind
+## it are what the host's own overlay already is: the board covers the map and
+## the map is redrawn when it closes.
+func _open_unown_puzzle(request: Dictionary) -> bool:
+	if _unown_puzzle_host != null or _world == null or _data == null:
+		return false
+	var host := Gen2UnownPuzzleScreen.new()
+	## The board is scattered from the world's own generator, so the run's seed
+	## reproduces it the way it reproduces an encounter.
+	if not host.open(
+		_data, int((request.get("values", {}) as Dictionary).get("puzzle", 0)),
+		_encounter_random
+	):
+		host.free()
+		_script_prompt = "Unown puzzle unavailable: unown_puzzle_art_unavailable"
+		return false
+	host.set_audio_player(_audio_player)
+	host.closed.connect(_on_unown_puzzle_closed)
+	host.sfx_requested.connect(_play_sfx)
+	host.z_index = 30
+	_unown_puzzle_host = host
+	_screen.display(host)
+	_script_prompt = "Unown puzzle"
+	_refresh_labels()
+	return true
+
+
+## `ld a, [wSolvedUnownPuzzle] / ld [wScriptVar], a`, which the chamber's own
+## `iftrue` after the `closetext` branches on.
+func _on_unown_puzzle_closed(solved: bool) -> void:
+	var host: Gen2UnownPuzzleScreen = _unown_puzzle_host
+	_unown_puzzle_host = null
+	if host != null:
+		Gen2Screen.drop(host)
+	_script_prompt = ""
+	_show_script_results(_world.complete_runtime_request({
+		"ok": true, "script_value": 1 if solved else 0,
+	}))
+
+
 func _open_day_care(request: Dictionary) -> bool:
 	if _day_care_host != null or _world == null or _data == null:
 		return false
@@ -2374,6 +2427,87 @@ func preview_day_care(role: StringName) -> void:
 		)
 		state.set_day_care_egg(save.party[0] as Gen2SaveMon)
 	_open_day_care({"values": {"role": role}})
+
+
+## Public screenshot driver and scene-test entry for `special UnownPuzzle`,
+## which only the four Ruins of Alph chambers reach and no fixture cell does.
+## [param puzzle] is the `UNOWNPUZZLE_*` index the chamber's own `setval` names.
+## Long enough for any of the puzzle's own effects to finish under the driver.
+const PUZZLE_WAIT_FRAME_CAP: int = 240
+
+
+## [param solve] walks the board into `.SolvedPuzzleConfiguration` through the
+## screen's own presses, which is the only way to photograph the assembled
+## picture: nothing else puts a piece anywhere.
+func preview_unown_puzzle(puzzle: int, solve: bool = false) -> void:
+	if _world == null or _data == null or _unown_puzzle_host != null:
+		return
+	_open_unown_puzzle({"values": {"puzzle": puzzle}})
+	if not solve or _unown_puzzle_host == null:
+		return
+	var board: Gen2UnownPuzzle = _unown_puzzle_host.board()
+	for piece: int in range(1, Gen2UnownPuzzle.PIECES + 1):
+		_walk_puzzle_cursor(_puzzle_cell_of(board, piece))
+		_press_puzzle_a()
+		_walk_puzzle_cursor(_puzzle_cell_of(board, piece, true))
+		_press_puzzle_a()
+
+
+## `UnownPuzzle_A` ends on `WaitSFX` and the loop reads nothing until it
+## returns, so a driver spending no frames would have its next press swallowed.
+func _press_puzzle_a() -> void:
+	var host: Gen2UnownPuzzleScreen = _unown_puzzle_host
+	if host == null:
+		return
+	host.handle_button(Gen2Button.A)
+	host.release_button(Gen2Button.A)
+	## The wait is the driver's, and a screenshot spends no wall clock for it to
+	## finish in, so the effect is cut rather than waited out: `SFXChannelsOff`
+	## is what the cartridge itself does to a sound it will not wait for.
+	if _audio_player != null:
+		_audio_player.stop_effects()
+	var guard: int = PUZZLE_WAIT_FRAME_CAP
+	while guard > 0 and host.waiting_for_sfx():
+		host.advance_frame()
+		guard -= 1
+
+
+## Which cell holds [param piece], or where the solved board wants it.
+func _puzzle_cell_of(
+	board: Gen2UnownPuzzle, piece: int, solved: bool = false
+) -> int:
+	for cell: int in Gen2UnownPuzzle.CELLS:
+		var holds: int = Gen2UnownPuzzle.solved_piece_at(cell) if solved \
+			else board.piece_at(cell)
+		if holds == piece:
+			return cell
+	return 0
+
+
+## Up and left both refuse at the edge, so pressing each a row's worth parks the
+## cursor on cell 0, and the board is walked from there.
+func _walk_puzzle_cursor(cell: int) -> void:
+	var host: Gen2UnownPuzzleScreen = _unown_puzzle_host
+	if host == null:
+		return
+	## Each press is released before the next: `hJoyLast` carries every held
+	## button and `.Function` takes the first direction it finds, so a driver
+	## that never lets go would walk up for ever.
+	for _step: int in Gen2UnownPuzzle.ROWS:
+		_tap_puzzle(Gen2Button.LEFT)
+		_tap_puzzle(Gen2Button.UP)
+	for _step: int in cell / Gen2UnownPuzzle.COLUMNS:
+		_tap_puzzle(Gen2Button.DOWN)
+	for _step: int in cell % Gen2UnownPuzzle.COLUMNS:
+		_tap_puzzle(Gen2Button.RIGHT)
+
+
+func _tap_puzzle(button: int) -> void:
+	var host: Gen2UnownPuzzleScreen = _unown_puzzle_host
+	if host == null:
+		return
+	host.handle_button(button)
+	host.release_button(button)
 
 
 ## Public screenshot driver and scene-test entry for `OverworldHatchEgg`: it
@@ -4706,6 +4840,16 @@ func _show_script_results(results: Array) -> void:
 					if _open_day_care(request):
 						break
 					continue
+				if StringName(request.get("kind", &"")) == &"unown_puzzle_requested":
+					if _open_unown_puzzle(request):
+						break
+					## A cartridge whose cache has no puzzle art answers the
+					## script an unsolved board rather than stopping it, which is
+					## the `iftrue` the map takes either way.
+					_show_script_results(_world.complete_runtime_request({
+						"ok": true, "script_value": 0,
+					}))
+					return
 				if StringName(request.get("kind", &"")) == &"swarm_requested":
 					var values: Dictionary = request.get("values", {})
 					var swarm_results: Array = _world.complete_runtime_request({

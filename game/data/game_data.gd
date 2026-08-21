@@ -74,6 +74,7 @@ var _unown_words: PackedStringArray = PackedStringArray()
 var _unown_walls: PackedStringArray = PackedStringArray()
 var _credits: Dictionary = {}
 var _intro_movie: Dictionary = {}
+var _unown_puzzle: Dictionary = {}
 var _gs_intro: Dictionary = {}
 var _menu_text: Dictionary = {}
 var _mart_text: Dictionary = {}
@@ -184,6 +185,8 @@ static func open_directory(path: String) -> GameData:
 	data._credits = credits if credits is Dictionary else {}
 	var intro_movie: Variant = manifest.get("intro_movie", {})
 	data._intro_movie = intro_movie if intro_movie is Dictionary else {}
+	var unown_puzzle: Variant = manifest.get("unown_puzzle", {})
+	data._unown_puzzle = unown_puzzle if unown_puzzle is Dictionary else {}
 	var gs_intro: Variant = manifest.get("gs_intro", {})
 	data._gs_intro = gs_intro if gs_intro is Dictionary else {}
 	var raw_menu_text: Variant = manifest.get("menu_text", {})
@@ -1711,6 +1714,28 @@ func intro_palette(name: String) -> PackedColorArray:
 	if not stored is Array:
 		return colors
 	for packed: Variant in stored as Array:
+		colors.append(Gen2Palette.from_packed(int(packed)))
+	return colors
+
+
+## Whether the cache carries `_UnownPuzzle`'s art, which is the whole of what
+## the screen needs: a cartridge with no pin answers false and the special
+## refuses rather than opening an empty board.
+func has_unown_puzzle() -> bool:
+	return not (_unown_puzzle.get("palette", []) as Array).is_empty()
+
+
+## One of `_UnownPuzzle`'s tile strips, by the name
+## `RomLayout.UNOWN_PUZZLE_SECTION` gives it plus `tile_borders`.
+func unown_puzzle_indices(name: String) -> PackedByteArray:
+	return tile_indices("unown_puzzle_%s" % name)
+
+
+## PREDEFPAL_UNOWN_PUZZLE, the one palette `_CGB_UnownPuzzle` gives all four
+## background slots and object palette 0.
+func unown_puzzle_palette() -> PackedColorArray:
+	var colors := PackedColorArray()
+	for packed: Variant in _unown_puzzle.get("palette", []) as Array:
 		colors.append(Gen2Palette.from_packed(int(packed)))
 	return colors
 
