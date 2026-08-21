@@ -114,6 +114,12 @@ var _audio_player: Gen2AudioPlayer = null
 var _audio_waiting: bool = false
 var _script_prompt: String = ""
 var _story_picture: TextureRect = null
+## `engine/menus/menu_2.asm`'s balance window, up until `closetext` redraws the
+## map behind it.
+var _money_window: TextureRect = null
+## `SelectMonFromParty` opened by a special rather than by the start menu: which
+## request is waiting on the answer, empty when the list belongs to the menu.
+var _party_selection: Dictionary = {}
 var _battle_host: Gen2BattleScreen = null
 var _trainer_card_host: Gen2TrainerCardScreen = null
 var _pokedex_host: Gen2PokedexScreen = null
@@ -4407,6 +4413,12 @@ func _show_script_results(results: Array) -> void:
 				_show_story_picture(int(result_event.get("pokemon", 0)))
 			elif result_event.get("type", &"") == &"pokemon_picture_closed":
 				_hide_story_picture()
+			elif result_event.get("type", &"") == &"money_window_opened":
+				_show_money_window(result_event)
+			elif result_event.get("type", &"") == &"money_window_closed":
+				_hide_money_window()
+			elif result_event.get("type", &"") == &"party_happiness_changed":
+				_apply_party_happiness(result_event)
 			elif result_event.get("type", &"") == &"screen_shake_requested":
 				if _effects != null:
 					_effects.start_screen_shake(
@@ -4511,6 +4523,10 @@ func _show_script_results(results: Array) -> void:
 					_script_prompt = _bug_contest_placings_text(judged)
 					_show_script_results(judged_results)
 					return
+				if StringName(request.get("kind", &"")) == &"party_selection_requested":
+					if _open_party_selection():
+						break
+					continue
 				if StringName(request.get("kind", &"")) == &"name_rater_requested":
 					if _open_name_rater():
 						break
@@ -4564,6 +4580,9 @@ func _show_script_results(results: Array) -> void:
 		_sync_host_clock()
 	if _renderer != null:
 		if map_changed:
+			## A warp redraws the whole tilemap, so a balance window a script
+			## left standing goes with it the way `closetext`'s redraw takes it.
+			_hide_money_window()
 			_world.reload_current_map()
 			_animation.configure(_world, time_of_day)
 			_set_renderer_world()
@@ -4650,6 +4669,147 @@ func _prompted_field_move_name(slot: int) -> String:
 		return "#MON"
 	var member: Variant = save.party[slot]
 	return _mon_display_name(member as Gen2SaveMon) if member is Gen2SaveMon else "#MON"
+
+
+## `special DisplayCoinCaseBalance`, `..MoneyAndCoinBalance` and
+## `PlaceMoneyTopRight`. Each writes the tilemap and returns, so the window
+## stands over the map exactly as `Script_pokepic`'s box does and is taken away
+## by the same thing: the redraw behind `closetext`.
+func _show_money_window(event: Dictionary) -> void:
+	if _data == null:
+		return
+	var drawn: Dictionary = Gen2MartPage.balance_window(
+		_data, StringName(event.get("kind", &"money_top_right")),
+		int(event.get("money", 0)), int(event.get("coins", 0))
+	)
+	if drawn.is_empty():
+		return
+	_hide_money_window()
+	var image: Image = drawn["image"]
+	_money_window = TextureRect.new()
+	_money_window.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	_money_window.texture = ImageTexture.create_from_image(image)
+	_money_window.size = image.get_size()
+	_money_window.position = Vector2(
+		(drawn["at"] as Vector2i) * Gen2Font.TILE
+	)
+	_money_window.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_screen.display(_money_window)
+
+
+## Public screenshot drivers for the three, since no fixture cell reaches any of
+## them: `crystal 26 2 <png> live money_top_right`, `... coin_balance` and
+## `... money_and_coins`. Not `coin_case`, which is the pack's own field item.
+func preview_money_top_right() -> void:
+	_preview_balance_window(&"money_top_right")
+
+
+func preview_coin_balance() -> void:
+	_preview_balance_window(&"coin_case")
+
+
+func preview_money_and_coins() -> void:
+	_preview_balance_window(&"money_and_coins")
+
+
+func _preview_balance_window(kind: StringName) -> void:
+	if _world == null:
+		return
+	_show_money_window({
+		"kind": kind,
+		"money": _world.state.money() if _world.state != null else 0,
+		"coins": _world.state.coins() if _world.state != null else 0,
+	})
+	_refresh_labels()
+
+
+func _hide_money_window() -> void:
+	if _money_window == null:
+		return
+	Gen2Screen.drop(_money_window)
+	_money_window = null
+
+
+## Whether a balance window is up, for a screenshot tool or a test that would
+## otherwise have to read pixels back.
+func money_window_open() -> bool:
+	return _money_window != null
+
+
+## `HaircutOrGrooming`'s own `call ChangeHappiness`. The row is the runner's,
+## since the roll that picked it has to belong to the seeded generator; the byte
+## it changes belongs to the save this screen holds.
+func _apply_party_happiness(event: Dictionary) -> void:
+	var save: Gen2SaveData = _embedded_party_save()
+	var slot: int = int(event.get("slot", -1))
+	if save == null or slot < 0 or slot >= save.party.size():
+		return
+	var mon: Gen2SaveMon = save.party[slot] as Gen2SaveMon
+	if mon == null:
+		return
+	mon.happiness = Gen2WorldPartyHost.change_happiness(
+		_data, mon.happiness, int(event.get("happiness_kind", 0))
+	)
+
+
+## `SelectMonFromParty` opened by one of `engine/events/haircut.asm`'s four
+## routines. The same list the Name Rater and the move deleter open, and the
+## same `_party_host` the start menu uses, so an overlay is named in one place
+## and a press reaches it through one branch.
+func _open_party_selection() -> bool:
+	if _party_host != null or _world == null or _data == null:
+		return false
+	var save: Gen2SaveData = _embedded_party_save()
+	if save == null:
+		_script_prompt = "Party selection needs a validated save"
+		return false
+	var host: Gen2PartyScreen = PARTY_SCENE.instantiate() as Gen2PartyScreen
+	if host == null:
+		_script_prompt = "Party scene unavailable"
+		return false
+	host.set_context(_data, save, true)
+	host.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	host.z_index = 20
+	host.mouse_filter = Control.MOUSE_FILTER_STOP
+	host.selection_made.connect(_on_party_selection_made)
+	host.sfx_requested.connect(_play_sfx)
+	host.cry_requested.connect(_on_pokedex_cry_requested)
+	add_child(host)
+	host.open_selection()
+	_party_host = host
+	_party_selection = {"save": save}
+	_script_prompt = "Choose a #MON"
+	_refresh_labels()
+	return true
+
+
+## `PartyMenuSelect`'s answer: the row for a member and the carry for CANCEL or
+## B, which every one of the four routines turns into `xor a`.
+func _on_party_selection_made(party_index: int) -> void:
+	var host: Gen2PartyScreen = _party_host
+	_party_host = null
+	var save: Gen2SaveData = _party_selection.get("save", null) as Gen2SaveData
+	_party_selection = {}
+	if host != null:
+		Gen2Screen.drop(host)
+	if _world == null:
+		_refresh_labels()
+		return
+	var result: Dictionary = {"ok": true, "party_index": -1}
+	if save != null and party_index >= 0 and party_index < save.party.size():
+		var mon: Gen2SaveMon = save.party[party_index] as Gen2SaveMon
+		if mon != null:
+			result = {
+				"ok": true,
+				"party_index": party_index,
+				## `wPartySpecies` holds EGG for an egg slot, which is the byte
+				## `HaircutOrGrooming` compares against.
+				"species": Gen2WorldScriptRunner.SPECIES_EGG if mon.is_egg else mon.species,
+				"nickname": _mon_display_name(mon),
+				"species_name": String(_data.species(mon.species).get("name", "")),
+			}
+	_show_script_results(_world.complete_runtime_request(result))
+	_refresh_labels()
 
 
 ## `Script_pokepic`'s box over the map, which is what a starter's ball and every

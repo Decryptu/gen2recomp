@@ -1131,3 +1131,49 @@ func test_caught_data_is_the_trainers_rather_than_the_pokemons() -> void:
 	assert_eq(mon.caught_time, 0, "a gift's whole level byte is zeroed")
 	assert_eq(mon.caught_gender, 0)
 	assert_eq(mon.caught_location, Gen2WorldPartyHost.LANDMARK_GIFT)
+
+
+## `HaircutOrGrooming`'s `Random` walk: every one of the 256 rolls lands on a
+## row, the shares are the table's own `percent` bytes, and the order is the
+## table's rather than sorted, which is what a `sub`-and-borrow loop gives.
+func test_the_grooming_tables_partition_all_256_rolls() -> void:
+	var expected: Dictionary = {
+		&"older_haircut": {2: 76, 3: 128, 4: 52},
+		&"younger_haircut": {2: 154, 3: 76, 4: 26},
+		&"grooming": {2: 255},
+	}
+	for routine: Variant in expected:
+		var counts: Dictionary = {}
+		for roll: int in 256:
+			var outcome: Dictionary = Gen2WorldPartyHost.groom_outcome(
+				StringName(routine), roll, true
+			)
+			var value: int = int(outcome["script_value"])
+			counts[value] = int(counts.get(value, 0)) + 1
+		for value: Variant in expected[routine]:
+			assert_eq(
+				int(counts.get(value, 0)), int(expected[routine][value]),
+				"%s answers %d for that many rolls" % [routine, value]
+			)
+
+
+## `docs/bugs_and_glitches.md`: subtracting `$ff` from `$ff` sets no carry, so
+## one roll in 256 reads past `HappinessData_DaisysGrooming` into
+## `CopyPokemonName_Buffer1_Buffer3`'s `ld hl, wStringBuffer1` and takes that
+## address's two bytes as the row. The kind it lands on has no `HappinessChanges`
+## entry, so the grooming changes nothing.
+func test_daisys_grooming_overruns_its_table_on_a_roll_of_255() -> void:
+	var overrun: Dictionary = Gen2WorldPartyHost.groom_outcome(&"grooming", 255, true)
+	assert_eq(int(overrun["script_value"]), 0x73, "LOW(wStringBuffer1) on Crystal")
+	assert_eq(int(overrun["happiness_kind"]), 0xD0, "HIGH(wStringBuffer1) on Crystal")
+	var gold: Dictionary = Gen2WorldPartyHost.groom_outcome(&"grooming", 255, false)
+	assert_eq(int(gold["script_value"]), 0x6B, "LOW(wStringBuffer1) on Gold and Silver")
+	assert_eq(int(gold["happiness_kind"]), 0xCF)
+	assert_eq(
+		Gen2WorldPartyHost.change_happiness(_data, 120, int(overrun["happiness_kind"])),
+		120,
+		"a row past the table leaves the byte alone, which is the bug's own effect",
+	)
+	var groomed: Dictionary = Gen2WorldPartyHost.groom_outcome(&"grooming", 254, true)
+	assert_eq(int(groomed["script_value"]), 2)
+	assert_eq(int(groomed["happiness_kind"]), Gen2Battle.HAPPINESS_GROOMING)

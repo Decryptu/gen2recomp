@@ -55,6 +55,35 @@ const BITTER_ITEMS: Dictionary = {
 	ITEM_REVIVAL_HERB: Gen2Battle.HAPPINESS_REVIVALHERB,
 }
 
+## `data/events/happiness_probabilities.asm`, one row per outcome as
+## `[threshold, wScriptVar, HappinessChanges row]`. `percent` is `* $ff / 100`
+## with integer division, so `30 percent` is 76 and `50 percent + 1` is 128.
+const HAPPINESS_PROBABILITIES: Dictionary = {
+	&"older_haircut": [
+		[76, 2, Gen2Battle.HAPPINESS_OLDERCUT1],
+		[128, 3, Gen2Battle.HAPPINESS_OLDERCUT2],
+		[255, 4, Gen2Battle.HAPPINESS_OLDERCUT3],
+	],
+	&"younger_haircut": [
+		[154, 2, Gen2Battle.HAPPINESS_YOUNGCUT1],
+		[76, 3, Gen2Battle.HAPPINESS_YOUNGCUT2],
+		[255, 4, Gen2Battle.HAPPINESS_YOUNGCUT3],
+	],
+	&"grooming": [[255, 2, Gen2Battle.HAPPINESS_GROOMING]],
+}
+
+## The bytes `HaircutOrGrooming`'s `.loop` reads when it walks off the end of
+## `HappinessData_DaisysGrooming`, which is `docs/bugs_and_glitches.md`'s
+## "Daisy's grooming doesn't always increase happiness". `sub $ff` from `$ff`
+## sets no carry, so a roll of exactly 255 steps three bytes on into
+## `CopyPokemonName_Buffer1_Buffer3`'s own `ld hl, wStringBuffer1`: `$21`
+## borrows against the remaining zero, and the address's two bytes are then read
+## as the row. The address is the one part that is not shared, so the low byte
+## reaching wScriptVar and the high byte reaching `ChangeHappiness` are pinned
+## per profile out of rgblink's symbol table.
+const STRING_BUFFER_1: Dictionary = {true: 0xD073, false: 0xCF6B}
+const HAPPINESS_TABLE_OVERRUN_OPCODE: int = 0x21
+
 const ITEM_BERRY: int = 0xAD
 const ITEM_BERRY_JUICE: int = 0x8B
 const SHUCKLE: int = 0xD5
@@ -526,6 +555,27 @@ static func change_happiness(data: GameData, happiness: int, kind: int) -> int:
 	var row: int = 0 if happiness < HAPPINESS_THRESHOLD_1 \
 		else (1 if happiness < HAPPINESS_THRESHOLD_2 else 2)
 	return clampi(happiness + changes[row], 0, 255)
+
+
+## `HaircutOrGrooming`'s `Random` walk over one of the three tables: subtract
+## each threshold in turn and take the row that borrows. [param roll] is the
+## byte `Random` answered and [param crystal] picks the overrun's own address.
+##
+## Answers `{"script_value": int, "happiness_kind": int}`. A kind no
+## `HappinessChanges` row exists for leaves [method change_happiness]'s byte
+## alone, which is exactly what the cartridge's overrun does with it.
+static func groom_outcome(routine: StringName, roll: int, crystal: bool) -> Dictionary:
+	var rows: Array = HAPPINESS_PROBABILITIES.get(routine, [])
+	var buffer: int = int(STRING_BUFFER_1[crystal])
+	rows = rows + [[
+		HAPPINESS_TABLE_OVERRUN_OPCODE, buffer & 0xFF, (buffer >> 8) & 0xFF,
+	]]
+	var left: int = roll & 0xFF
+	for row: Array in rows:
+		if left < int(row[0]):
+			return {"script_value": int(row[1]), "happiness_kind": int(row[2])}
+		left -= int(row[0])
+	return {"script_value": 0, "happiness_kind": 0}
 
 
 ## `StepHappiness`, spent [param times] over: one flat point to every party
