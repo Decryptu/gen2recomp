@@ -321,6 +321,14 @@ func test_the_shipped_example_mod_registers_everything_it_documents() -> void:
 			Gen2ModManifest.API_VERSION,
 			id
 		)
+	# 9: its item names the evolution using it causes, as a field rather than a
+	# callback, so the host owns the transaction the evolution runs inside.
+	assert_eq(
+		int(overlay.resolve(
+			Gen2ContentOverlay.KIND_ITEM, Gen2ContentOverlay.FIRST_MOD_NUMBER, {}
+		)["evolution"]["method"]),
+		RomLayout.EVOLVE_TRADE
+	)
 	# 4: a type of its own, and a chart exception naming it.
 	assert_eq(
 		overlay.defined_numbers(Gen2ContentOverlay.KIND_TYPE),

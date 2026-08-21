@@ -491,6 +491,124 @@ const HM_ITEM: int = 0xF6
 const HM_MOVE: int = 0x46
 
 
+## MOON STONE at its real number, an EVOLVE_ITEM row on the party's first member
+## and a move the target learns at the level it is already at, which is what
+## makes `move_offers` non-empty when the four slots are full.
+const MOON_STONE: int = 0x08
+const EVOLVED_SPECIES: int = 156
+const OFFERED_MOVE: int = 0x52
+
+
+func _write_stone_item() -> void:
+	var items: Array = RomCache.read_json(RomCache.items_path(Fixture.directory()))
+	for raw: Dictionary in items:
+		if int(raw.get("number", 0)) != MOON_STONE:
+			continue
+		raw["name"] = "MOON STONE"
+		raw["pocket"] = Gen2WorldPack.TYPE_ITEM
+		raw["permissions"] = Gen2WorldPack.CANT_SELECT
+		raw["field_menu"] = Gen2WorldPack.ITEMMENU_PARTY
+		break
+	RomCache.write_json(RomCache.items_path(Fixture.directory()), items)
+
+	var moves: Array = RomCache.read_json(RomCache.moves_path(Fixture.directory()))
+	for raw: Dictionary in moves:
+		if int(raw.get("number", 0)) == OFFERED_MOVE:
+			raw["name"] = "EMBER"
+			raw["pp"] = 25
+	RomCache.write_json(RomCache.moves_path(Fixture.directory()), moves)
+
+	var species: Array = RomCache.read_json(RomCache.species_path(Fixture.directory()))
+	for raw: Dictionary in species:
+		match int(raw.get("number", 0)):
+			155:
+				raw["evolutions"] = [{
+					"method": RomLayout.EVOLVE_ITEM, "parameter": MOON_STONE,
+					"condition": 0, "target": EVOLVED_SPECIES,
+				}]
+			EVOLVED_SPECIES:
+				raw["learnset"] = [{"level": 5, "move": OFFERED_MOVE}]
+	RomCache.write_json(RomCache.species_path(Fixture.directory()), species)
+	## Reopened the way before_each does: the rows above are read on open.
+	_data = GameData.open_directory(Fixture.directory())
+
+
+## The pocket list with the stone under the cursor, and one in the bag.
+func _open_stone_pack() -> Gen2StartMenuScreen:
+	_world_screen._world.state.apply_changes({}, {}, {"items": {MOON_STONE: 1}})
+	_world_screen._open_start_menu()
+	await get_tree().process_frame
+	var host: Gen2StartMenuScreen = _world_screen._start_menu_host
+	_select(host, Gen2WorldStartMenu.ITEM_PACK)
+	host.handle_button(Gen2Button.A)
+	await get_tree().process_frame
+	var pockets: Array = host.get("_pack_pockets")
+	for index: int in pockets.size():
+		if int((pockets[index] as Dictionary)["pocket"]) == Gen2WorldPack.TYPE_ITEM:
+			host.set("_pack_pocket_index", index)
+			break
+	var rows: Array = host.call("_current_pocket_items")
+	for index: int in rows.size():
+		if int((rows[index] as Dictionary).get("item", 0)) == MOON_STONE:
+			host.set("_pack_cursor", index)
+			break
+	return host
+
+
+## USE, then the party list, then the first member.
+func _use_stone_on_first_member(host: Gen2StartMenuScreen) -> void:
+	host.handle_button(Gen2Button.A)
+	await get_tree().process_frame
+	host.handle_button(Gen2Button.A)
+	await get_tree().process_frame
+	host.handle_button(Gen2Button.A)
+	await get_tree().process_frame
+
+
+## `EvolvingText` and `CongratulationsYourPokemonText`, which the field stone had
+## none of: it ended at "MOON STONE was used." and never said what happened.
+func test_a_field_stone_says_the_mon_is_evolving_and_what_it_became() -> void:
+	_write_stone_item()
+	await _open_world()
+	var host: Gen2StartMenuScreen = await _open_stone_pack()
+	var save: Gen2SaveData = _world_screen._injected_save
+	var nickname: String = save.party[0].nickname
+	await _use_stone_on_first_member(host)
+
+	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_RESULT)
+	assert_eq(save.party[0].species, EVOLVED_SPECIES)
+	var result: String = String(host.get("_pack_result"))
+	assert_true(result.contains("%s is evolving!" % nickname), result)
+	assert_true(result.contains("evolved into"), result)
+
+
+## `EvolveAfterBattle` calls `LearnMove` over the new learnset, so a move the new
+## species knows at this level opens `ForgetMove` rather than being dropped.
+func test_an_evolution_offers_its_new_move_and_a_full_moveset_opens_forget() -> void:
+	_write_stone_item()
+	await _open_world()
+	_fill_moveset(false)
+	var host: Gen2StartMenuScreen = await _open_stone_pack()
+	await _use_stone_on_first_member(host)
+
+	## The evolution's own box is pressed past first, page by page, the way
+	## PrintText waits; the offer follows its last page instead of the pack.
+	while host.get("_mode") == Gen2StartMenuScreen.Mode.PACK_RESULT:
+		host.handle_button(Gen2Button.A)
+		await get_tree().process_frame
+	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_FORGET_ASK)
+	assert_true(String(host.call("box_text")).contains("EMBER"), String(host.call("box_text")))
+
+	host.handle_button(Gen2Button.A)
+	await get_tree().process_frame
+	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_FORGET)
+	host.handle_button(Gen2Button.A)
+	await get_tree().process_frame
+	assert_eq(host.get("_mode"), Gen2StartMenuScreen.Mode.PACK_RESULT)
+	assert_true(String(host.get("_pack_result")).contains("EMBER"), String(host.get("_pack_result")))
+	assert_eq(_world_screen._injected_save.party[0].moves[0], OFFERED_MOVE)
+
+
 func _write_tmhm_item(learnable: bool = true) -> void:
 	var table: Array = []
 	for index: int in RomLayout.TMHM_TM_COUNT + RomLayout.TMHM_HM_COUNT:

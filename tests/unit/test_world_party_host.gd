@@ -13,6 +13,7 @@ var _random := RandomNumberGenerator.new()
 
 
 func before_each() -> void:
+	Gen2ModHost.reset()
 	_data = Fixture.build()
 	_add_party_item_metadata()
 	_add_capture_metadata()
@@ -30,6 +31,7 @@ func before_each() -> void:
 
 
 func after_each() -> void:
+	Gen2ModHost.reset()
 	RomCache.clear(Fixture.directory())
 
 
@@ -209,6 +211,52 @@ func test_moon_stone_evolves_a_party_member_and_consumes_the_item() -> void:
 	assert_eq(_save.party[0].hp, before_hp + evolved.max_hp() - before_max_hp)
 
 
+## A mod item naming its evolution method, which is the whole of the seam: no
+## callback, and everything past the predicate is the stone path's own.
+const CORD_ITEM: int = Gen2ContentOverlay.FIRST_MOD_NUMBER
+const CORD_HELD_ITEM: int = 0x12
+
+
+func test_a_defined_item_may_name_a_trade_evolution_and_spends_the_held_item() -> void:
+	Gen2ModHost.instance().register_content(
+		Gen2ContentOverlay.KIND_ITEM, &"linkingcordtest", CORD_ITEM, {
+			"name": "LINKING CORD",
+			"field_menu": Gen2WorldPack.ITEMMENU_PARTY,
+			"evolution": {"method": RomLayout.EVOLVE_TRADE},
+		}
+	)
+	_world.state.apply_changes({}, {}, {"items": {CORD_ITEM: 1}})
+	var source: Gen2BattleMon = Gen2BattleMon.create(_data, 2, 5)
+	source.item = CORD_HELD_ITEM
+	_save.party[0] = Gen2SaveBattleAdapter.from_battle_mon(source)
+
+	var result: Dictionary = Gen2WorldPartyHost.use_item(_world, _save, CORD_ITEM, 0, false)
+
+	assert_true(result["ok"], JSON.stringify(result))
+	assert_eq(result["effect"], &"evolution")
+	assert_eq(result["new_species"], 3)
+	assert_eq(_save.party[0].species, 3)
+	assert_eq(_save.party[0].item, 0, "`.trade` zeroes wTempMonItem")
+	assert_eq(_world.state.item_quantity(CORD_ITEM), 0)
+
+
+## Without the method named, the same item is inert: no cartridge item changes
+## behaviour by a byte.
+func test_a_defined_item_naming_no_method_evolves_nothing() -> void:
+	Gen2ModHost.instance().register_content(
+		Gen2ContentOverlay.KIND_ITEM, &"linkingcordtest", CORD_ITEM, {"name": "STRING"}
+	)
+	_world.state.apply_changes({}, {}, {"items": {CORD_ITEM: 1}})
+	var source: Gen2BattleMon = Gen2BattleMon.create(_data, 2, 5)
+	source.item = CORD_HELD_ITEM
+	_save.party[0] = Gen2SaveBattleAdapter.from_battle_mon(source)
+
+	var result: Dictionary = Gen2WorldPartyHost.use_item(_world, _save, CORD_ITEM, 0, false)
+
+	assert_false(result["ok"])
+	assert_eq(_save.party[0].species, 2)
+
+
 func _add_party_evolution_metadata() -> void:
 	var species: Array = RomCache.read_json(RomCache.species_path(Fixture.directory()))
 	for raw: Dictionary in species:
@@ -217,6 +265,14 @@ func _add_party_evolution_metadata() -> void:
 		(raw["evolutions"] as Array).append({
 			"method": RomLayout.EVOLVE_ITEM, "parameter": 0x08,
 			"condition": 0, "target": 2,
+		})
+		break
+	for raw: Dictionary in species:
+		if int(raw["number"]) != 2:
+			continue
+		(raw["evolutions"] as Array).append({
+			"method": RomLayout.EVOLVE_TRADE, "parameter": CORD_HELD_ITEM,
+			"condition": 0, "target": 3,
 		})
 		break
 	RomCache.write_json(RomCache.species_path(Fixture.directory()), species)

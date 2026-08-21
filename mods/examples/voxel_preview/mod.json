@@ -2,7 +2,7 @@
 	"id": "voxel_preview",
 	"name": "Voxel Preview",
 	"version": "1.0.0",
-	"api_version": 8,
+	"api_version": 9,
 	"entry": "mod.gd",
 	"games": ["gold", "silver", "crystal"],
 	"description": "Draws the same map as extruded geometry at the window's own resolution. Press V in the overworld to switch between this and the Game Boy Color view."

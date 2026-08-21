@@ -132,6 +132,11 @@ func test_is_tm_hm_and_is_hm_follow_the_source_thresholds() -> void:
 	assert_false(Gen2WorldTMHM.is_hm(0xF2))
 	assert_true(Gen2WorldTMHM.is_hm(0xF3))
 	assert_true(Gen2WorldTMHM.is_hm(0xF9))
+	# The run ends where the byte does: a defined item past it is neither, where
+	# the unbounded `cp TM01` made every one of them both.
+	assert_true(Gen2WorldTMHM.is_tm_hm(RomLayout.ITEM_BYTE_MAX))
+	assert_false(Gen2WorldTMHM.is_tm_hm(Gen2ContentOverlay.FIRST_MOD_NUMBER))
+	assert_false(Gen2WorldTMHM.is_hm(Gen2ContentOverlay.FIRST_MOD_NUMBER))
 
 
 func test_move_for_item_resolves_through_the_imported_table() -> void:

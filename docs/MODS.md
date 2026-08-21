@@ -36,7 +36,7 @@ user://mods/<id>/
 | `id` | Lowercase `[a-z0-9][a-z0-9_-]*`; addresses the directory and registry keys |
 | `name` | Shown to the player |
 | `version` | The mod's own version, not the host's |
-| `api_version` | Between `Gen2ModManifest.MIN_API_VERSION` and `API_VERSION`. Declare the oldest host you need: 8 for a stats-screen page, 7 for an actor's `interact`, `emote` and outbox and for hidden-item requests, 6 for `occupied` in the visible-encounter context, 5 for the run's rules, 4 for types, matchups, mod art and event mutators, 3 for mart rows and named axes, 2 for visible encounters, 1 for everything else |
+| `api_version` | Between `Gen2ModManifest.MIN_API_VERSION` and `API_VERSION`. Declare the oldest host you need: 9 for an item that names an evolution method, 8 for a stats-screen page, 7 for an actor's `interact`, `emote` and outbox and for hidden-item requests, 6 for `occupied` in the visible-encounter context, 5 for the run's rules, 4 for types, matchups, mod art and event mutators, 3 for mart rows and named axes, 2 for visible encounters, 1 for everything else |
 | `entry` | A `.gd` path inside the mod directory, or inside the pack when there is one |
 | `pack` | Optional `.pck` or `.zip` beside `mod.json`, holding the mod's files |
 | `description` | Optional |
@@ -202,10 +202,10 @@ belongs to the first one followed, so it is on screen once.
 ## Adding content
 
 `mods/examples/new_content/` is every non-renderer surface of the contract in one
-file, `api_version` 8: it registers a type and two chart exceptions, a species
-with its own decoded art, a move and its effect, an item with a pack pocket and a
-mart shelf, a named control axis, a world actor that walks behind the player, a
-fourth page on the stats screen and a visible-encounter population that reads the
+file, `api_version` 9: it registers a type and two chart exceptions, a species
+with its own decoded art, a move and its effect, an item with a pack pocket, a
+mart shelf and an evolution it causes, a named control axis, a world actor that
+walks behind the player, a fourth page on the stats screen and a visible-encounter population that reads the
 run's rules and refuses a cell something is standing on, patches two cartridge
 rows, watches both event channels and rewrites the world channel's presentation.
 Copy it and read it beside this section.
@@ -240,6 +240,25 @@ Everything a species carries is a field on the one row, so a learnset, an
 evolution, its egg moves and TM compatibility are part of the definition rather
 than four more registrations. The engine then reads them the way it reads Pikachu's, because
 every content read in the game goes through one place, `GameData._content()`.
+
+An item may name the evolution using it causes (`api_version` 9), which is the
+one effect a definition can give a field item:
+
+```gdscript
+host.register_content(Gen2ContentOverlay.KIND_ITEM, manifest.id, 256, {
+	"name": "LINKING CORD",
+	"field_menu": Gen2WorldPack.ITEMMENU_PARTY,
+	"evolution": {"method": RomLayout.EVOLVE_TRADE},
+})
+```
+
+A fact rather than a callback: the host runs that method's own predicate over the
+chosen Pokemon and then the whole of `EvolveAfterBattle`'s tail, so the adapter,
+the HP delta, a consumed held item and the moves the new species offers stay in
+one place instead of a copy per mod. `EVOLVE_TRADE` and `EVOLVE_ITEM` are the two
+methods a field item can name; an optional `"parameter"` beside the method is the
+stone `EVOLVE_ITEM` looks for, defaulting to the item's own number. An item that
+names no `evolution` behaves exactly as it did, cartridge stones included.
 
 ### Art
 

@@ -1577,6 +1577,12 @@ const NAME_INPUT_COMMAND_UPPER: Array[int] = [
 ## GetTMHMNumber skips them rather than subtracting.
 const ITEM_TM01: int = 0xBF
 const ITEM_HM01: int = 0xF3
+## The largest number a cartridge item can carry. Every `cp` the source makes on
+## an item is a byte comparison, which is why routines like GetTMHMNumber need no
+## upper bound there and do need one here: a number past this is mod-defined
+## content (see [constant Gen2ContentOverlay.FIRST_MOD_NUMBER]), not an item the
+## cartridge has a row for.
+const ITEM_BYTE_MAX: int = 0xFF
 const ITEM_DUMMY_TM04_05: int = 0xC3
 const ITEM_DUMMY_TM28_29: int = 0xDC
 

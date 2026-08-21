@@ -109,6 +109,7 @@ const DEFAULTS: Dictionary = {
 	},
 	KIND_MOVE: {
 		"name": "?",
+		"description": "",
 		"effect": 0,
 		"power": 0,
 		"type": 0,
@@ -120,6 +121,9 @@ const DEFAULTS: Dictionary = {
 	},
 	KIND_ITEM: {
 		"name": "?",
+		# The pack's own description box, which reads this directly for anything
+		# that is not a TM or HM.
+		"description": "",
 		"price": 0,
 		"effect": 0,
 		"parameter": -1,
@@ -127,6 +131,10 @@ const DEFAULTS: Dictionary = {
 		"pocket": 1,
 		"field_menu": 0,
 		"battle_menu": 0,
+		# What using the item on a party member evolves it by, as a fact the host
+		# acts on rather than a callback: `{"method": RomLayout.EVOLVE_*}`, with
+		# an optional `"parameter"`. Empty is every cartridge item.
+		"evolution": {},
 	},
 	KIND_TRAINER: {
 		"name": "?",
@@ -363,6 +371,14 @@ func _validate_fields(kind: StringName, fields: Dictionary) -> Dictionary:
 					return _invalid(&"invalid_content_icon", "custom icon")
 			else:
 				return _invalid(&"invalid_content_icon", "species icon")
+	elif kind == KIND_ITEM and fields.has("evolution"):
+		var evolution: Variant = fields["evolution"]
+		if not evolution is Dictionary:
+			return _invalid(&"invalid_content_evolution", "evolution is not a dictionary")
+		if not (evolution as Dictionary).is_empty():
+			var method: int = int((evolution as Dictionary).get("method", 0))
+			if method not in [RomLayout.EVOLVE_ITEM, RomLayout.EVOLVE_TRADE]:
+				return _invalid(&"invalid_content_evolution", "method %d" % method)
 	elif kind == KIND_TRAINER and fields.has("pic"):
 		var valid_trainer_pic: Dictionary = _validate_pic(fields["pic"], 7)
 		if not bool(valid_trainer_pic.get("ok", false)):

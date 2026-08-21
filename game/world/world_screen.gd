@@ -1815,6 +1815,57 @@ func preview_pack_use() -> void:
 	_start_menu_host.handle_button(Gen2Button.A)
 
 
+## Public screenshot driver for a field evolution, which is the pack's USE on a
+## stone. Driven twice, like the other `*_use` names: the first call opens the
+## pack on the stone and the second uses it on the party's first member, so the
+## picture is `EvolvingText` and `CongratulationsYourPokemonText` in the pack's
+## own box rather than a staged string.
+func preview_item_evolution_use() -> void:
+	if _world == null or _data == null:
+		return
+	if _start_menu_host != null:
+		# USE, then the party list, then the first member.
+		for _press: int in 3:
+			_start_menu_host.handle_button(Gen2Button.A)
+		return
+	var save: Gen2SaveData = _embedded_party_save()
+	if save == null or save.party.is_empty():
+		_script_prompt = "Evolution preview needs a party"
+		_refresh_labels()
+		return
+	var stone: Dictionary = _first_stone_evolution()
+	if stone.is_empty():
+		_script_prompt = "Evolution preview: this cache has no stone evolution"
+		_refresh_labels()
+		return
+	var mon: Gen2SaveMon = save.party[0]
+	mon.species = int(stone["species"])
+	mon.nickname = String(_data.species(mon.species).get("name", ""))
+	_injected_save = save
+	_world.state.apply_changes({}, {}, {"items": {int(stone["item"]): 1}})
+	_open_start_menu()
+	if _start_menu_host == null:
+		return
+	if not _walk_start_menu_to(Gen2WorldStartMenu.ITEM_PACK):
+		return
+	_start_menu_host.handle_button(Gen2Button.A)
+	var rows: Array = _start_menu_host.call("_current_pocket_items")
+	for index: int in rows.size():
+		if int((rows[index] as Dictionary).get("item", 0)) == int(stone["item"]):
+			_start_menu_host.set("_pack_cursor", index)
+			break
+
+
+## The first `EVOLVE_ITEM` row this cache carries, as `{species, item}`. Walked
+## rather than named, so the driver works on all three without a table.
+func _first_stone_evolution() -> Dictionary:
+	for species: int in range(1, _data.species_count() + 1):
+		for row: Dictionary in _data.evolutions(species):
+			if int(row.get("method", 0)) == RomLayout.EVOLVE_ITEM:
+				return {"species": species, "item": int(row.get("parameter", 0))}
+	return {}
+
+
 ## Public screenshot driver for the start menu itself: opens it, and then walks
 ## the cursor one entry per call, which is what photographs MENU ACCOUNT's own
 ## description line under the list.
