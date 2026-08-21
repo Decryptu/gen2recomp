@@ -94,6 +94,7 @@ static func build(game_id: StringName = GAME_ID) -> GameData:
 	_write_menu_text(manifest)
 	_write_name_rater_text(manifest)
 	_write_move_deleter_text(manifest)
+	_write_day_care_text(manifest)
 	_write_pokecenter_pc(manifest)
 	_write_unown_words(manifest)
 	_write_credits(directory, manifest, crystal_commands)
@@ -414,6 +415,80 @@ static func _write_move_deleter_text(manifest: Dictionary) -> void:
 		"intro": "Um… I'm the MOVE\nDELETER.",
 		"which_mon": "Which POKéMON?",
 	}
+
+
+## The Day-Care's thirty-three, shortened to the two things the routines read:
+## which of them waits for a press, and the markers `_IllRaiseYourMonText`,
+## `_YourMonHasGrownText` and `_GotBackMonText` carry.
+static func _write_day_care_text(manifest: Dictionary) -> void:
+	var texts: Dictionary = {
+		"man_intro": "I'm the DAY-CARE
+MAN.",
+		"man_intro_egg": "Do you know about
+EGGS?",
+		"lady_intro": "I'm the DAY-CARE
+LADY.",
+		"lady_intro_egg": "Do you know about
+EGGS?",
+		"which_one": "What should I
+raise for you?",
+		"only_one_mon": "But you have just
+one POKéMON.",
+		"cant_accept_egg": "I can't accept an
+EGG.",
+		"remove_mail": "Remove MAIL before
+you come see me.",
+		"last_healthy_mon": "What will you
+battle with?",
+		"ill_raise": "OK. I'll raise
+your <RAM_D073>.",
+		"come_back_later": "Come back for it
+later.",
+		"are_we_geniuses": "Want to see your
+<RAM_D073>?",
+		"has_grown": "Grown by <NUM_D074>.
+It costs ¥<NUM_D075>.",
+		"perfect_heres_your_mon": "Perfect! Here's
+your POKéMON.",
+		"got_back": "<PLAYER> got back
+<RAM_D073>.",
+		"back_already": "Back already? It
+needs more time.",
+		"have_no_room": "You have no room
+for it.",
+		"not_enough_money": "You don't have
+enough money.",
+		"oh_fine_then": "Oh, fine then.",
+		"come_again": "Come again.",
+		"not_yet": "Not yet…",
+		"found_an_egg": "Your POKéMON had
+an EGG! You want it?",
+		"received_egg": "<PLAYER> received
+the EGG!",
+		"take_good_care": "Take good care of
+it.",
+		"ill_keep_it": "Well then, I'll
+keep it. Thanks!",
+		"no_room_for_egg": "You have no room
+in your party.",
+		"left_with_lady": "It's <RAM_DEF6> that
+was left with the
+DAY-CARE LADY.",
+		"left_with_man": "It's <RAM_DEF6> that
+was left with the
+DAY-CARE MAN.",
+		"brimming_with_energy": "It's brimming with
+energy.",
+		"no_interest": "It has no interest
+in <RAM_D073>.",
+		"appears_to_care": "It appears to care
+for <RAM_D073>.",
+		"friendly": "It's friendly with
+<RAM_D073>.",
+		"shows_interest": "It shows interest
+in <RAM_D073>.",
+	}
+	manifest["day_care_text"] = texts
 
 
 ## The start menu's nine descriptions and the pack's five texts, as the cartridge

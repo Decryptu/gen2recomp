@@ -153,6 +153,13 @@ var _name_rater_save: Gen2SaveData = null
 ## `special MoveDeletion`'s screen. It needs no save of its own beside it: the
 ## moves and their PP belong to the save it was handed and it writes them itself.
 var _move_deleter_host: Gen2MoveDeleterScreen = null
+## The Day-Care's five routines, all one screen. It edits the save's party and
+## the world state directly, which is what `DepositBreedmon` and `RetrieveBreedmon`
+## do, so the save it was handed is kept beside it only to write nothing else.
+var _day_care_host: Gen2DayCareScreen = null
+## What `DayCareManOutside` left in wScriptVar, held between the screen finishing
+## and the request completing. -1 while no routine has written one.
+var _day_care_script_value: int = -1
 ## Whether a field-move message is on screen waiting for its acknowledge. The
 ## world is idle while it is, the same way a script text pause holds it.
 var _field_move_text: bool = false
@@ -193,6 +200,8 @@ var _encounter_random := RandomNumberGenerator.new()
 ## NPC movement rolls from its own generator, so a seeded route keeps the same
 ## encounters and script results however long the player stands watching.
 var _object_random := RandomNumberGenerator.new()
+## The Day-Care's rolls, from a stream of their own for the same reason.
+var _breed_random := RandomNumberGenerator.new()
 var _selected_rod: StringName = Gen2WorldEncounter.METHOD_OLD_ROD
 ## Real time banked toward the next hardware frame. The overworld's one clock:
 ## see [method _process].
@@ -315,11 +324,13 @@ func _build_world() -> void:
 	## One seed, two streams: the second is offset so the object generator is not
 	## a replay of the encounter one.
 	_object_random.seed = run_seed + 1
+	_breed_random.seed = run_seed + 2
 	_world.random_seed = run_seed
 
 	_world.schedule_random = _encounter_random
 	_world.script_random = _encounter_random
 	_world.object_random = _object_random
+	_world.breed_random = _breed_random
 	_clock = Gen2WorldClock.new(initial_hour, initial_minute, initial_day)
 	time_of_day = _clock.time_of_day()
 	_animation = Gen2WorldAnimation.new()
@@ -667,6 +678,8 @@ func advance_frame() -> void:
 		_name_rater_host.advance_frame()
 	if _move_deleter_host != null:
 		_move_deleter_host.advance_frame()
+	if _day_care_host != null:
+		_day_care_host.advance_frame()
 	_spending_frame = false
 
 
@@ -810,7 +823,8 @@ func _overlay_open() -> bool:
 		or _hall_of_fame_host != null or _trainer_card_host != null \
 		or _pokedex_host != null or _credits_host != null \
 		or _evolution_host != null or _hatch_host != null \
-		or _name_rater_host != null or _move_deleter_host != null
+		or _name_rater_host != null or _move_deleter_host != null \
+		or _day_care_host != null
 
 
 ## Wandering objects keep to themselves while anything else owns the world. A
@@ -918,6 +932,10 @@ func _handle_button(button: int) -> bool:
 	## `special MoveDeletion` is the same shape one house further on.
 	if _move_deleter_host != null:
 		_move_deleter_host.handle_button(button)
+		return true
+	## The Day-Care's five, one screen with the same shape again.
+	if _day_care_host != null:
+		_day_care_host.handle_button(button)
 		return true
 	## Before the PC and the party overlay because the Hall of Fame is the one
 	## overlay a script opens with nothing behind it: there is no map to go back
@@ -1175,6 +1193,7 @@ func _complete_player_step(movement: Dictionary) -> bool:
 	## check `CheckWarpTile` refuses for a carpet.
 	_spend_step_happiness()
 	_spend_egg_steps()
+	_spend_day_care_steps()
 	var kind: StringName = StringName(movement.get("kind", &""))
 	if kind == &"edge_warp" or (kind in [
 		&"move", &"ledge_hop", &"water_move", &"exit_water", &"forced_move",
@@ -1232,6 +1251,23 @@ func _spend_egg_steps() -> void:
 	if hatches.is_empty():
 		return
 	_open_hatch(hatches, save)
+
+
+## `DayCareStep`, which `CountStep` reaches on every step that did not hatch an
+## egg: `jr nz, .hatch` jumps over the `farcall`, and the hatch screen standing
+## is what says this step was one of those.
+##
+## The two slots live in the world state rather than on the save, so nothing here
+## is a save transaction; what it can produce is `DAYCAREMAN_HAS_EGG_F`, which
+## the man outside the Day-Care reads.
+func _spend_day_care_steps() -> void:
+	if _world == null or _world.state == null or _data == null:
+		return
+	var owed: int = _world.state.take_pending_day_care_steps()
+	if owed <= 0 or _hatch_host != null:
+		return
+	for _pass: int in owed:
+		Gen2WorldDayCare.step(_world.state, _data, _breed_random)
 
 
 ## `OverworldHatchEgg`. The rows are already written; the screen owns the
@@ -1330,6 +1366,66 @@ func _on_name_rater_closed() -> void:
 		_renderer.refresh()
 	if _world != null:
 		_show_script_results(_world.complete_runtime_request({"ok": true}))
+	_refresh_labels()
+
+
+## The Day-Care's five specials, hosted exactly as `special NameRater` is. The
+## routine writes the party, the two slots and the money itself, so nothing is
+## staged: the cartridge's own routines write WRAM straight and the save is only
+## committed when the player saves.
+func _open_day_care(request: Dictionary) -> bool:
+	if _day_care_host != null or _world == null or _data == null:
+		return false
+	var texts: Dictionary = Gen2WorldHost.day_care_texts(_data)
+	if texts.is_empty():
+		_script_prompt = "Day-Care unavailable: day_care_text_unavailable"
+		return false
+	var save: Gen2SaveData = _embedded_party_save()
+	if save == null:
+		_script_prompt = "The Day-Care needs a validated save"
+		return false
+	var host := Gen2DayCareScreen.new()
+	host.set_context(
+		_data, save, _world.state,
+		StringName((request.get("values", {}) as Dictionary).get("role", &"man")),
+		texts, _world.player_name(), _world.player_id(), _breed_random
+	)
+	host.finished.connect(_on_day_care_finished)
+	host.closed.connect(_on_day_care_closed)
+	host.cry_requested.connect(_play_species_cry)
+	host.sfx_requested.connect(_play_sfx)
+	host.z_index = 30
+	_day_care_host = host
+	_screen.display(host)
+	_script_prompt = "Day-Care"
+	_refresh_labels()
+	return true
+
+
+## `DayCareManOutside`'s own wScriptVar, and the box the map script's
+## `waitbutton` presses. -1 is the four routines that write no variable.
+func _on_day_care_finished(script_value: int, ending_text: String) -> void:
+	_day_care_script_value = script_value
+	if not ending_text.is_empty() and _text_box != null and _text_box.font != null:
+		_apply_text_box_options()
+		_text_awaits_press = false
+		_text_box.show_text(ending_text, false)
+		_text_box.visible = true
+
+
+func _on_day_care_closed() -> void:
+	var host: Gen2DayCareScreen = _day_care_host
+	_day_care_host = null
+	if host != null:
+		Gen2Screen.drop(host)
+	if _renderer != null:
+		_renderer.refresh()
+	if _world != null:
+		var completion: Dictionary = {"ok": true}
+		if _day_care_script_value >= 0:
+			completion["script_value"] = _day_care_script_value
+		_day_care_script_value = -1
+		_show_script_results(_world.complete_runtime_request(completion))
 	_refresh_labels()
 
 
@@ -2245,6 +2341,35 @@ func preview_name_rater() -> void:
 	_injected_save = save
 	_world.set_player_id(save.player_id)
 	_open_name_rater()
+
+
+## Public screenshot driver for the Day-Care's five specials, which no cell of
+## the fixture maps reaches either. [param role] picks the routine; the two signs
+## and the man outside need state behind them, so a slot is filled and the egg
+## flag set before the screen opens.
+func preview_day_care(role: StringName) -> void:
+	if _world == null or _data == null or _day_care_host != null:
+		return
+	var save: Gen2SaveData = _embedded_party_save()
+	if save == null or save.party.size() < 2:
+		_script_prompt = "The Day-Care preview needs two party members"
+		_refresh_labels()
+		return
+	_injected_save = save
+	_world.set_player_id(save.player_id)
+	var state: Gen2WorldState = _world.state
+	if role in [&"mon1", &"mon2"]:
+		for slot: int in [
+			Gen2WorldDayCare.SLOT_MAN, Gen2WorldDayCare.SLOT_LADY
+		]:
+			state.set_day_care_mon(slot, save.party[slot] as Gen2SaveMon)
+			state.set_day_care_has_mon(slot, true)
+	elif role == &"outside":
+		state.set_day_care_man_flags(
+			state.day_care_man_flags() | Gen2WorldDayCare.MAN_HAS_EGG
+		)
+		state.set_day_care_egg(save.party[0] as Gen2SaveMon)
+	_open_day_care({"values": {"role": role}})
 
 
 ## Public screenshot driver and scene-test entry for `OverworldHatchEgg`: it
@@ -4571,6 +4696,10 @@ func _show_script_results(results: Array) -> void:
 					continue
 				if StringName(request.get("kind", &"")) == &"move_deleter_requested":
 					if _open_move_deleter():
+						break
+					continue
+				if StringName(request.get("kind", &"")) == &"day_care_requested":
+					if _open_day_care(request):
 						break
 					continue
 				if StringName(request.get("kind", &"")) == &"swarm_requested":

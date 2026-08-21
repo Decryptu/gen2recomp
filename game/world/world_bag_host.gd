@@ -60,8 +60,9 @@ static func toss(
 ## a Pokemon already holding something is refused with nothing written, which is
 ## where the source stops to ask.
 ##
-## `ItemIsMail` has no counterpart here, so `.please_remove_mail` and
-## `ComposeMailMessage` are unreachable and no item is refused for being mail.
+## `ItemIsMail` is [method Gen2HeldItem.is_mail], but nothing here composes a
+## message, so `.please_remove_mail` and `ComposeMailMessage` are unreachable and
+## no item is refused for being mail.
 static func give_to_party(
 	world: Gen2WorldAPI,
 	save: Gen2SaveData,

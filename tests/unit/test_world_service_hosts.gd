@@ -328,10 +328,16 @@ func test_menu_input_can_be_cancelled_without_selecting_an_option() -> void:
 
 ## `special NameRater`, the same shape Kurt's own special is staged with.
 func _set_name_rater_script() -> void:
+	_set_special_script(Gen2WorldScriptRunner.SPECIAL_NAME_RATER)
+
+
+## One `special` on the cell the world opens standing on, and a world rebuilt
+## around it.
+func _set_special_script(special: int) -> void:
 	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(Fixture.directory()))
 	scripts[Gen2WorldScript.pointer_key(Fixture.BANK, 0x6300)] = [
 		Gen2WorldScript.SPECIAL,
-		Gen2WorldScriptRunner.SPECIAL_NAME_RATER, 0x00,
+		special, 0x00,
 		Gen2WorldScript.END,
 	]
 	RomCache.write_json(RomCache.world_scripts_path(Fixture.directory()), scripts)
@@ -351,6 +357,42 @@ func _set_name_rater_script() -> void:
 	)
 	_save = Gen2SaveStore.create_development_save(_data, 0)
 	_save.world = _world.snapshot()
+
+
+## The five Day-Care specials, staged the same way and answered from the same
+## run of stubs. The role is what tells the one screen which routine it is.
+func test_the_five_day_care_specials_each_stage_their_own_role() -> void:
+	var roles: Dictionary = {
+		Gen2WorldScriptRunner.SPECIAL_DAY_CARE_MAN: &"man",
+		Gen2WorldScriptRunner.SPECIAL_DAY_CARE_LADY: &"lady",
+		Gen2WorldScriptRunner.SPECIAL_DAY_CARE_MAN_OUTSIDE: &"outside",
+		Gen2WorldScriptRunner.SPECIAL_DAY_CARE_MON_1: &"mon1",
+		Gen2WorldScriptRunner.SPECIAL_DAY_CARE_MON_2: &"mon2",
+	}
+	for special: int in roles:
+		_set_special_script(special)
+		var waiting: Array = _world.dispatch_script_events(Vector2i(7, 6))
+		assert_eq(waiting[0]["status"], &"waiting", JSON.stringify(waiting))
+		var request: Dictionary = _world.pending_runtime_request()
+		assert_eq(request["kind"], &"day_care_requested")
+		assert_eq(StringName(request["values"]["role"]), StringName(roles[special]))
+
+		var resolved: Dictionary = Gen2WorldHost.resolve_runtime_request(_world)
+		assert_true(resolved["ok"], JSON.stringify(resolved))
+		assert_eq(
+			(resolved["data"]["day_care_text"] as Dictionary).size(),
+			Gen2WorldHost.day_care_texts(_data).size()
+		)
+
+
+## Four of the five write no wScriptVar at all, so a completion with no value in
+## it must leave whatever the script had put there.
+func test_a_day_care_completion_without_a_value_leaves_the_script_variable() -> void:
+	_set_special_script(Gen2WorldScriptRunner.SPECIAL_DAY_CARE_MON_1)
+	_world.dispatch_script_events(Vector2i(7, 6))
+	var results: Array = _world.complete_runtime_request({"ok": true})
+	assert_false(results.is_empty())
+	assert_true(bool(results[0].get("ok", false)), JSON.stringify(results))
 
 
 func test_name_rater_special_stages_a_request_carrying_all_ten_boxes() -> void:

@@ -198,6 +198,16 @@ func show_text(text: String, blink_cursor: bool = true) -> void:
 	_start_page()
 
 
+## `WaitPressAorB_BlinkCursor` reached with a box already standing, which is what
+## `DayCareMonCursor` and `PromptButton` are: the arrow appears on a text that
+## ended in `done` because the caller waited rather than because the text did.
+func set_blink_cursor(blink: bool) -> void:
+	if _blink_cursor == blink:
+		return
+	_blink_cursor = blink
+	_redraw()
+
+
 ## How many hardware frames the box still owes before it reaches its
 ## `PromptButton`: the rest of the page, or the rest of a `TextScroll`. Zero
 ## while it is waiting on a press, which is what it is waiting on there.

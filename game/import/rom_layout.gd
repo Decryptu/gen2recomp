@@ -160,10 +160,9 @@ const ICON_POINTER_SIZE: int = 2
 const ICON_EGG: int = 28
 
 ## `HeldItemIcons` is `gfx/stats/mail.2bpp` and `gfx/stats/item.2bpp`, the two
-## tiles `GetIconGFX` loads behind every icon's eight. The mail one is drawn by
-## no party menu here: nothing imports `data/items/mail_items.asm`, so
-## `ItemIsMail` is never true and `SPRITE_ANIM_FRAMESET_PARTY_MON_WITH_MAIL` is
-## unreachable.
+## tiles `GetIconGFX` loads behind every icon's eight. `ItemIsMail` is
+## [method Gen2HeldItem.is_mail]; the mail icon is still drawn by no party menu
+## here, and `SPRITE_ANIM_FRAMESET_PARTY_MON_WITH_MAIL` is unreachable.
 const HELD_ITEM_ICON_TILES: int = 2
 const HELD_ITEM_ICON_MAIL: int = 0
 const HELD_ITEM_ICON_ITEM: int = 1
@@ -1286,6 +1285,40 @@ const MOVE_DELETER_TEXT_ORDER: Array[String] = [
 	"intro", "which_mon",
 ]
 
+## The Day-Care's four stub runs. `PrintDayCareText.TextTable` is a pointer
+## table, but its twenty stubs are laid out in the file's own order behind it, so
+## one pin walks them the way the two runs above are walked; the order below is
+## that file order and not the table's. `.NotYetText` sits alone inside
+## `DayCareManOutside` and needs a pin of its own. All four runs are byte
+## identical on all three cartridges.
+const DAY_CARE_TEXT_ORDER: Array[String] = [
+	"man_intro", "man_intro_egg", "lady_intro", "lady_intro_egg", "which_one",
+	"only_one_mon", "cant_accept_egg", "remove_mail", "last_healthy_mon",
+	"ill_raise", "come_back_later", "are_we_geniuses", "has_grown",
+	"perfect_heres_your_mon", "got_back", "back_already", "have_no_room",
+	"not_enough_money", "oh_fine_then", "come_again",
+]
+## `DayCareManOutside`'s own five, after `.AskGiveEgg`.
+const DAY_CARE_EGG_TEXT_ORDER: Array[String] = [
+	"found_an_egg", "received_egg", "take_good_care", "ill_keep_it",
+	"no_room_for_egg",
+]
+## `engine/pokemon/breeding.asm`'s two, the lady's ahead of the man's.
+const DAY_CARE_LEFT_WITH_TEXT_ORDER: Array[String] = ["left_with_lady", "left_with_man"]
+## `DayCareMonCompatibilityText`'s five, in the order the routine tests them.
+const DAY_CARE_COMPATIBILITY_TEXT_ORDER: Array[String] = [
+	"brimming_with_energy", "no_interest", "appears_to_care", "friendly",
+	"shows_interest",
+]
+## Which pin each name is walked from, and at what index into it.
+const DAY_CARE_TEXT_RUNS: Array = [
+	["day_care_text", DAY_CARE_TEXT_ORDER],
+	["day_care_not_yet_text", ["not_yet"]],
+	["day_care_egg_text", DAY_CARE_EGG_TEXT_ORDER],
+	["day_care_left_with_text", DAY_CARE_LEFT_WITH_TEXT_ORDER],
+	["day_care_compatibility_text", DAY_CARE_COMPATIBILITY_TEXT_ORDER],
+]
+
 ## `Landmarks` (data/maps/landmarks.asm): `db x + 8, y + 16` then a name pointer,
 ## so the stored bytes are already shadow-OAM coordinates and the raw x,y are
 ## screen pixels. Gold and Silver ship no `BATTLE TOWER`, so every landmark from
@@ -2073,6 +2106,15 @@ const GOLD_SILVER: Dictionary = {
 	"default_mart": 0x16469,
 	"bargain_mart": 0x15EDA,
 	"mart_text": 0x16063,
+	## The Day-Care's four stub runs, each located by the text its first stub
+	## points at rather than by a symbol: `PrintDayCareText.TextTable`'s twenty
+	## behind `_DayCareManIntroText`, `.NotYetText` alone, `DayCareManOutside`'s
+	## five and `engine/pokemon/breeding.asm`'s two plus five.
+	"day_care_text": 0x16B28,
+	"day_care_not_yet_text": 0x16B9A,
+	"day_care_egg_text": 0x16BE9,
+	"day_care_left_with_text": 0x177E6,
+	"day_care_compatibility_text": 0x17820,
 	## `NameRaterHelloText`, bank $3e:$7919 in both dumps.
 	"name_rater_text": 0xFB919,
 	## `MoveDeletion.MoveKnowsOneText`, bank $0b:$43dc in both dumps.
@@ -2509,6 +2551,13 @@ const CRYSTAL: Dictionary = {
 	"default_mart": 0x16214,
 	"bargain_mart": 0x15C51,
 	"mart_text": 0x15E0E,
+	## The Day-Care's four stub runs; see the Gold and Silver block for how each
+	## is located.
+	"day_care_text": 0x168D2,
+	"day_care_not_yet_text": 0x16944,
+	"day_care_egg_text": 0x16993,
+	"day_care_left_with_text": 0x17462,
+	"day_care_compatibility_text": 0x1749C,
 	## `NameRaterHelloText`, bank $3e:$780f.
 	"name_rater_text": 0xFB80F,
 	## `MoveDeletion.MoveKnowsOneText`, bank $0b:$45d1.
@@ -3071,6 +3120,18 @@ static func name_rater_text_offset(layout: Dictionary, name: String) -> int:
 	if at < 0 or index < 0:
 		return -1
 	return at + index * TEXT_FAR_STUB_BYTES
+
+
+## Where the Day-Care's `text_far` stub [param name] names sits, whichever of
+## its four runs holds it.
+static func day_care_text_offset(layout: Dictionary, name: String) -> int:
+	for run: Array in DAY_CARE_TEXT_RUNS:
+		var index: int = (run[1] as Array).find(name)
+		if index < 0:
+			continue
+		var at: int = int(layout.get(run[0], -1))
+		return -1 if at < 0 else at + index * TEXT_FAR_STUB_BYTES
+	return -1
 
 
 ## Where the mart's `text_far` stub [param name] names sits.

@@ -268,6 +268,10 @@ var object_random: RandomNumberGenerator = null
 ## reason they are apart from each other: reading the radio must not move a
 ## wild encounter or an NPC.
 var radio_random: RandomNumberGenerator = null
+## Supplies `DayCareStep`'s two rolls and `DayCare_InitBreeding`'s counter. Apart
+## from the other four for the same reason: a step spent breeding must not move
+## the wild encounter that step could also have rolled.
+var breed_random: RandomNumberGenerator = null
 ## The programme the open radio card is reading, built by tune_radio() and
 ## dropped when the card closes or the dial finds dead air.
 var _radio_show: Gen2RadioShow = null

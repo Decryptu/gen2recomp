@@ -147,6 +147,18 @@ var _pending_step_happiness: int = 0
 ## is `$80`, so an egg loses one hatch cycle every 256 steps offset 128 from the
 ## happiness pass.
 var _pending_egg_steps: int = 0
+## `wDayCareMan` and `wDayCareLady`, their two boxmon slots, `wStepsToEgg` and
+## the `wEggMon` the pair built. The slots are [Gen2SaveMon] rather than party
+## members: a deposited Pokemon leaves the party whole and comes back recomputed,
+## which is what `DepositBreedmon` and `RetrieveBreedmon` do.
+var _day_care_man: int = 0
+var _day_care_lady: int = 0
+var _day_care_mons: Array = [null, null]
+var _steps_to_egg: int = 0
+var _day_care_egg: Gen2SaveMon = null
+## `DayCareStep` runs on every step, not on a phase of the counter, so this is
+## the whole step rather than a 256-step remainder.
+var _pending_day_care_steps: int = 0
 ## `wStatusFlags`' `STATUSFLAGS_NO_WILD_ENCOUNTERS_F`, which `wildoff` sets and
 ## `wildon` clears around a scripted sequence.
 var _wild_encounters_off: bool = false
@@ -322,6 +334,11 @@ func to_dict() -> Dictionary:
 		"kurt_apricorn_quantity": _kurt_apricorn_quantity,
 		"picked_fruit_trees": _picked_fruit_trees.duplicate(),
 		"registered_item": _registered_item,
+		"day_care_man": _day_care_man,
+		"day_care_lady": _day_care_lady,
+		"day_care_mons": _day_care_mons_dict(),
+		"steps_to_egg": _steps_to_egg,
+		"day_care_egg": {} if _day_care_egg == null else _day_care_egg.to_dict(),
 	}
 
 
@@ -400,6 +417,17 @@ static func from_dict(raw: Variant) -> Gen2WorldState:
 	restored.set_contest_second_party_species(
 		int(source.get("contest_second_party_species", 0))
 	)
+	## Absent in a state written before the Day-Care existed, which restores as
+	## two empty slots: nothing is deposited, so no flag, counter or egg has
+	## anything to be wrong about.
+	restored._day_care_man = int(source.get("day_care_man", 0)) & 0xFF
+	restored._day_care_lady = int(source.get("day_care_lady", 0)) & 0xFF
+	restored._steps_to_egg = int(source.get("steps_to_egg", 0)) & 0xFF
+	var stored_mons: Variant = source.get("day_care_mons", [])
+	if stored_mons is Array:
+		for slot: int in mini((stored_mons as Array).size(), 2):
+			restored._day_care_mons[slot] = _mon_from_value((stored_mons as Array)[slot])
+	restored._day_care_egg = _mon_from_value(source.get("day_care_egg", {}))
 	return restored
 
 
@@ -449,6 +477,12 @@ func restore_from_dict(raw: Variant) -> void:
 	_kurt_apricorn_quantity = restored._kurt_apricorn_quantity
 	_picked_fruit_trees = restored._picked_fruit_trees.duplicate()
 	_registered_item = restored._registered_item
+	_day_care_man = restored._day_care_man
+	_day_care_lady = restored._day_care_lady
+	_day_care_mons = restored._day_care_mons.duplicate()
+	_steps_to_egg = restored._steps_to_egg
+	_day_care_egg = restored._day_care_egg
+	_pending_day_care_steps = 0
 	changed.emit()
 
 
@@ -1066,6 +1100,10 @@ func count_step() -> void:
 			_pending_step_happiness += 1
 	if _step_count == EGG_STEP_PHASE:
 		_pending_egg_steps += 1
+	## `farcall DayCareStep` sits after the egg branch and runs on every other
+	## step; a step that hatches jumps over it, which the spender settles because
+	## only it knows whether an egg came out.
+	_pending_day_care_steps += 1
 	if _repel_steps > 0:
 		_repel_steps -= 1
 	changed.emit()
@@ -1092,6 +1130,117 @@ func take_pending_egg_steps() -> int:
 	var owed: int = _pending_egg_steps
 	_pending_egg_steps = 0
 	return owed
+
+
+## The same for the owed `DayCareStep` passes. `CountStep` reaches it on every
+## step and skips it on the one a `DoEggStep` hatch takes, which is
+## `jr nz, .hatch` jumping over the `farcall`.
+func take_pending_day_care_steps() -> int:
+	var owed: int = _pending_day_care_steps
+	_pending_day_care_steps = 0
+	return owed
+
+
+func day_care_man_flags() -> int:
+	return _day_care_man
+
+
+func set_day_care_man_flags(flags: int) -> void:
+	var next_flags: int = flags & 0xFF
+	if _day_care_man == next_flags:
+		return
+	_day_care_man = next_flags
+	changed.emit()
+
+
+func day_care_lady_flags() -> int:
+	return _day_care_lady
+
+
+func set_day_care_lady_flags(flags: int) -> void:
+	var next_flags: int = flags & 0xFF
+	if _day_care_lady == next_flags:
+		return
+	_day_care_lady = next_flags
+	changed.emit()
+
+
+## Whether the slot holds a Pokemon. The bit is on the man's byte for slot 0 and
+## the lady's for slot 1, and both are bit 0.
+func day_care_has_mon(slot: int) -> bool:
+	if slot == Gen2WorldDayCare.SLOT_MAN:
+		return _day_care_man & Gen2WorldDayCare.MAN_HAS_MON != 0
+	return _day_care_lady & Gen2WorldDayCare.LADY_HAS_MON != 0
+
+
+func set_day_care_has_mon(slot: int, held: bool) -> void:
+	if slot == Gen2WorldDayCare.SLOT_MAN:
+		set_day_care_man_flags(
+			(_day_care_man | Gen2WorldDayCare.MAN_HAS_MON) if held
+			else (_day_care_man & ~Gen2WorldDayCare.MAN_HAS_MON)
+		)
+		return
+	set_day_care_lady_flags(
+		(_day_care_lady | Gen2WorldDayCare.LADY_HAS_MON) if held
+		else (_day_care_lady & ~Gen2WorldDayCare.LADY_HAS_MON)
+	)
+
+
+## A copy of the slot's own record, so a caller that raises its experience has to
+## put it back through [method set_day_care_mon] and cannot edit the state by
+## reference.
+func day_care_mon(slot: int) -> Gen2SaveMon:
+	if slot < 0 or slot >= _day_care_mons.size():
+		return null
+	return _copy_mon(_day_care_mons[slot])
+
+
+func set_day_care_mon(slot: int, mon: Gen2SaveMon) -> void:
+	if slot < 0 or slot >= _day_care_mons.size():
+		return
+	_day_care_mons[slot] = _copy_mon(mon)
+	changed.emit()
+
+
+func steps_to_egg() -> int:
+	return _steps_to_egg
+
+
+func set_steps_to_egg(steps: int) -> void:
+	var next_steps: int = steps & 0xFF
+	if _steps_to_egg == next_steps:
+		return
+	_steps_to_egg = next_steps
+	changed.emit()
+
+
+## `wEggMon`, built when the counter starts and handed over when it runs out.
+func day_care_egg() -> Gen2SaveMon:
+	return _copy_mon(_day_care_egg)
+
+
+func set_day_care_egg(mon: Gen2SaveMon) -> void:
+	_day_care_egg = _copy_mon(mon)
+	changed.emit()
+
+
+func _day_care_mons_dict() -> Array:
+	var out: Array = []
+	for mon: Variant in _day_care_mons:
+		out.append({} if mon == null else (mon as Gen2SaveMon).to_dict())
+	return out
+
+
+static func _copy_mon(mon: Gen2SaveMon) -> Gen2SaveMon:
+	return null if mon == null else Gen2SaveMon.from_dict(mon.to_dict())
+
+
+static func _mon_from_value(raw: Variant) -> Gen2SaveMon:
+	if not raw is Dictionary or (raw as Dictionary).is_empty():
+		return null
+	if int((raw as Dictionary).get("species", 0)) <= 0:
+		return null
+	return Gen2SaveMon.from_dict(raw)
 
 
 func swarm_map() -> Vector2i:

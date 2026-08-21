@@ -52,6 +52,9 @@ extends SceneTree
 ## MoveDeletion`, which no fixture cell reaches: the first number is how many
 ## presses into the routine to photograph, so 0 is the introduction, 2 its last
 ## page with the YES/NO up, and 4 the party list),
+## `day_care` (the Day-Care's five specials, driven the same way: the first
+## number is how many presses in and the second which routine, 0 the man,
+## 1 the lady, 2 the man outside, 3 and 4 the two signs),
 ## `visible_encounter` (a shiny of the map's own table standing on the eligible
 ## cell nearest the player, with the cartridge's sparkle over it: try
 ## `crystal 24 3 ... visible_encounter 4 9`), the name of any
@@ -75,6 +78,10 @@ const WARP_FRAME_CAP: int = 120
 ## How long one of the two routines' boxes may take to finish printing, which is
 ## a text speed rather than a count this file knows.
 const MON_SPECIAL_FRAME_CAP: int = 600
+## The Day-Care's five routines, in the order the second number picks them.
+const DAY_CARE_ROLES: Array[StringName] = [
+	&"man", &"lady", &"outside", &"mon1", &"mon2",
+]
 
 
 ## `UpdateJumpPosition`'s highest `.y_offsets` entry, which is where the `ledge`
@@ -207,7 +214,7 @@ func _build_live(data: GameData, group: int, number: int, cell: Vector2i) -> voi
 		_screen.start_cell = _kind_cell
 	elif cell.x >= 0 and _kind not in [
 		&"battle_transition", &"level_evolution", &"egg_hatch", &"name_rater",
-		&"move_deleter",
+		&"move_deleter", &"day_care",
 	]:
 		_screen.start_cell = cell
 	## Pinned so two captures of the same map are the same picture: the seed the
@@ -300,6 +307,20 @@ func _process(_delta: float) -> bool:
 					break
 				if hatching.awaiting_press():
 					_screen.press_button(Gen2Button.A)
+		elif _kind == &"day_care":
+			## The Day-Care's five, driven the way the two above are. The first
+			## number is how many presses into the routine to photograph and the
+			## second is which routine: 0 the man, 1 the lady, 2 the man outside,
+			## 3 and 4 the two signs.
+			_screen.preview_day_care(DAY_CARE_ROLES[clampi(
+				_cell.y, 0, DAY_CARE_ROLES.size() - 1
+			)])
+			_settle_mon_special("_day_care_host")
+			for _press: int in maxi(_cell.x, 0):
+				if _screen.get("_day_care_host") == null:
+					break
+				_screen.press_button(Gen2Button.A)
+				_settle_mon_special("_day_care_host")
 		elif _kind in [&"name_rater", &"move_deleter"]:
 			## `special NameRater` and `special MoveDeletion`, neither of which
 			## any fixture cell reaches. The first number is how many presses
@@ -411,7 +432,7 @@ func _process(_delta: float) -> bool:
 		if _kind not in [
 			&"warp", &"door", &"map_name_sign", &"ledge", &"heal_machine",
 			&"battle_transition", &"level_evolution", &"egg_hatch", &"name_rater",
-			&"move_deleter",
+			&"move_deleter", &"day_care",
 		]:
 			## Those kinds drove themselves to the frame they want; every other
 			## kind stages a sprite and then spends the frames it needs.

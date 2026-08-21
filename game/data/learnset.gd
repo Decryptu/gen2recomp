@@ -33,19 +33,42 @@ const MOVE_SLOTS: int = 4
 ## slots pushes the oldest out, so the answer is the last four learnable moves.
 static func moves_at_level(learnset: Array, level: int) -> Array:
 	var out: Array = []
-
-	for entry: Dictionary in learnset:
-		if int(entry["level"]) > level:
-			break
-
-		var move: int = int(entry["move"])
-		if out.has(move):
-			continue
-		if out.size() == MOVE_SLOTS:
-			out.remove_at(0)
-		out.append(move)
-
+	fill_moves(learnset, out, level)
 	return out
+
+
+## `FillMoves` itself, which is what [method moves_at_level] is one call of.
+##
+## [param known] is filled in place and may already hold moves: a slot is taken
+## when one is empty, and the four are shifted down when none is. [param above]
+## is `wPrevPartyLevel`, and passing anything above zero is the
+## `wSkipMovesBeforeLevelUp` branch, which offers only the levels *between* the
+## two. `known` grows to at most [constant MOVE_SLOTS] entries and is padded with
+## zeroes only if it arrived that way, so a party row's four-slot array stays
+## four slots.
+static func fill_moves(
+	learnset: Array, known: Array, level: int, above: int = 0
+) -> void:
+	var padded: bool = known.size() == MOVE_SLOTS
+	for entry: Dictionary in learnset:
+		var at: int = int(entry["level"])
+		if at > level:
+			break
+		if above > 0 and at <= above:
+			continue
+		var move: int = int(entry["move"])
+		if known.has(move):
+			continue
+		var slot: int = known.find(0) if padded else -1
+		if slot >= 0:
+			known[slot] = move
+			continue
+		if known.size() == MOVE_SLOTS:
+			for index: int in MOVE_SLOTS - 1:
+				known[index] = known[index + 1]
+			known[MOVE_SLOTS - 1] = move
+			continue
+		known.append(move)
 
 
 ## The moves offered on reaching exactly [param level], in the order the list

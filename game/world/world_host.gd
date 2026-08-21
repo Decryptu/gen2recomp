@@ -129,6 +129,16 @@ static func name_rater_texts(data: GameData) -> Dictionary:
 static func move_deleter_texts(data: GameData) -> Dictionary:
 	return _stub_run(data, RomLayout.MOVE_DELETER_TEXT_ORDER, "move_deleter_text")
 
+## The Day-Care's own thirty-two, across its four runs, read and refused the same
+## way. Public for the same reason: the screenshot driver opens the routine with
+## no script behind it.
+static func day_care_texts(data: GameData) -> Dictionary:
+	var order: Array[String] = []
+	for run: Array in RomLayout.DAY_CARE_TEXT_RUNS:
+		for name: Variant in run[1] as Array:
+			order.append(String(name))
+	return _stub_run(data, order, "day_care_text")
+
 
 ## One whole run of `text_far` stubs off [GameData], or nothing: a run missing a
 ## box is a cache too old for the routine that reads it, not a box to work round.
@@ -177,6 +187,8 @@ static func _reason_for(kind: StringName) -> StringName:
 			return &"name_rater_data_unavailable"
 		&"move_deleter_requested":
 			return &"move_deleter_data_unavailable"
+		&"day_care_requested":
+			return &"day_care_data_unavailable"
 		&"pc_requested":
 			return &"pc_host_unavailable"
 	return &"runtime_host_unavailable"
@@ -221,6 +233,11 @@ static func _resolve_data_request(world: Gen2WorldAPI, request: Dictionary) -> D
 			if boxes.is_empty():
 				return {"ok": false, "reason": &"move_deleter_text_unavailable"}
 			return {"ok": true, "data": {"move_deleter_text": boxes}}
+		&"day_care_requested":
+			var day_care: Dictionary = day_care_texts(world.data)
+			if day_care.is_empty():
+				return {"ok": false, "reason": &"day_care_text_unavailable"}
+			return {"ok": true, "data": {"day_care_text": day_care}}
 		&"apricorn_selection_requested":
 			## `FindApricornsInBag` is the whole of the request's data: an empty
 			## bag is the source's own refusal, not a missing host.
