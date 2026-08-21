@@ -102,9 +102,12 @@ var _battle_transition: Gen2BattleTransition = null
 var _battle_transition_request: Dictionary = {}
 ## `wLandmarkSignTimer` and the window the sign is drawn in. The map load decides
 ## whether there is a sign (`Gen2WorldAPI.map_name_sign_pending`); the sixty
-## frames it stands for are spent here, like every other overworld countdown.
+## passes it stands for are spent here, like every other overworld countdown.
 var _map_name_sign: TextureRect = null
-var _map_name_sign_frames: int = 0
+var _map_name_sign_passes: int = 0
+## `wOverworldDelay`, counted down a hardware frame at a time so `HandleMap`
+## runs once per [member Gen2WorldAPI.FRAMES_PER_OVERWORLD_PASS] of them.
+var _overworld_delay: int = 0
 var _text_box: Gen2TextBox = null
 var _text_box_rect: Rect2i = Rect2i()
 var _text_box_rect_pushed: bool = false
@@ -514,8 +517,22 @@ func advance_frames(count: int) -> void:
 ##
 ## Every countdown below is spent exactly once here, so each is a function of
 ## [member Gen2WorldAPI.frame_number] and not of banked real time.
+##
+## Half of what follows is `HandleMap`'s own pass and runs once per two frames:
+## see [member Gen2WorldAPI.FRAMES_PER_OVERWORLD_PASS] and `map_pass` below. The
+## other half is what the source spends its own `DelayFrames` on from inside a
+## command, which the pass does not gate: a text box, either fade, the battle
+## transition, `GameTimer` and `AnimateTileset` are all VBlank's or a routine's
+## own and are spent on every frame.
 func advance_frame() -> void:
 	_spending_frame = true
+	## `ResetOverworldDelay` and `NextOverworldFrame`: the pass reloads the delay
+	## and then spends it, so the first frame of a world is a pass and every
+	## FRAMES_PER_OVERWORLD_PASS-th frame after it is the next one.
+	_overworld_delay -= 1
+	var map_pass: bool = _overworld_delay <= 0
+	if map_pass:
+		_overworld_delay = Gen2WorldAPI.FRAMES_PER_OVERWORLD_PASS
 	if _text_box != null:
 		_text_box.accelerated = Gen2Button.text_accelerating()
 		_text_box.advance_frame()
@@ -534,23 +551,33 @@ func advance_frame() -> void:
 	## `RefreshMapSprites` runs inside the setup script and `PlaceMapNameSign`
 	## with the rest of the map's background, so a sign raised by the load this
 	## frame carried is spent from the next one.
-	_advance_map_name_sign()
+	if map_pass:
+		_advance_map_name_sign_pass()
 	_raise_map_name_sign()
 	if _effects != null:
-		if _effects.advance_frame() and _renderer != null:
+		var effects_moved: bool = _effects.advance_frame()
+		if map_pass:
+			effects_moved = _effects.advance_pass() or effects_moved
+		if effects_moved and _renderer != null:
 			_renderer.refresh()
 		_apply_world_effect_offset()
+	## `AnimateTileset` is VBlank's, not the pass's, so the water and the flowers
+	## animate on every frame while the objects standing on them move on passes.
 	if _animation != null and _animation.advance_frame() and _renderer != null:
 		_renderer.refresh_animation()
-	if _world != null and _world.advance_player_step_frame() and _renderer != null:
+	if map_pass and _world != null and _world.advance_player_step_pass() \
+		and _renderer != null:
 		_renderer.refresh()
 	## `_HandlePlayerStep` runs before `PlayerEvents` in `HandleMap`, so the step
 	## that finishes on this frame is the one whose events this frame runs.
-	if not _pending_step_events.is_empty() and _world != null \
+	if map_pass and not _pending_step_events.is_empty() and _world != null \
 		and not _world.player_step_in_progress():
 		var landed: Dictionary = _pending_step_events
 		_pending_step_events = {}
 		_complete_player_step(landed)
+	## Not the pass's: an emote's own countdown stands in for the `pause` between
+	## `ShowEmoteScript`'s two movements, and a script's `DelayFrames` is spent
+	## from inside the command rather than by `NextOverworldFrame`.
 	if _world != null and _world.advance_emotes_frame() and _renderer != null:
 		_renderer.refresh()
 	## After the player's own step, so an actor reading
@@ -565,18 +592,24 @@ func advance_frame() -> void:
 		_renderer.refresh()
 	_spend_actor_requests()
 	_spend_hidden_item_requests()
-	_advance_forced_movement()
-	_advance_held_direction()
-	if _objects_may_move() and _world.advance_object_steps_frame(_object_random) \
+	## `GetJoypad` and `PlayerEvents` are both inside the pass, so a held
+	## direction starts a step on a pass and never between two.
+	if map_pass:
+		_advance_forced_movement()
+		_advance_held_direction()
+	if map_pass and _objects_may_move() \
+		and _world.advance_object_steps_pass(_object_random) \
 		and _renderer != null:
 		_renderer.refresh()
 	# Not gated on _objects_may_move(): an applymovement is drawn while the
 	# script that ran it is still going, which is when a script runs one.
-	if _world != null and _world.advance_scripted_steps_frame() and _renderer != null:
+	if map_pass and _world != null and _world.advance_scripted_steps_pass() \
+		and _renderer != null:
 		_renderer.refresh()
 	# After both trails: `ShakeGrass` is called where the step starts, so a
 	# rustle taken now belongs to a step begun on this frame.
-	_spawn_grass_rustles()
+	if map_pass:
+		_spawn_grass_rustles()
 	if not _pending_headbutt_finish.is_empty() and (_effects == null or not _effects.sprites_active()):
 		var headbutt: Dictionary = _pending_headbutt_finish
 		_pending_headbutt_finish = {}
@@ -592,7 +625,7 @@ func advance_frame() -> void:
 	## it lands on may be the text's last, which is where the script runs on.
 	_continue_if_text_settled()
 	if not _trainer_approach.is_empty():
-		_advance_trainer_approach()
+		_advance_trainer_approach(map_pass)
 	if _world != null and _world.phone_ring_active():
 		var ring_results: Array = _world.advance_phone_ring_frame()
 		if not ring_results.is_empty():
@@ -1069,7 +1102,7 @@ func move_player(direction: Vector2i) -> bool:
 				## starts the slide, and the dust tracks the boulder from there.
 				_effects.start_boulder_dust(
 					int(pushed["index"]), pushed["to_cell"], pushed["direction"],
-					Gen2WorldAPI.STEP_FRAMES_BOULDER_PUSH,
+					Gen2WorldAPI.STEP_PASSES_BOULDER_PUSH,
 				)
 			if _renderer != null:
 				_renderer.refresh()
@@ -1104,7 +1137,7 @@ func _after_player_move(movement: Dictionary) -> bool:
 			## the player over both cells of it.
 			_effects.start_jump_shadow(
 				-1, _world.player_cell, _world.facing_direction(),
-				Gen2WorldAPI.STEP_FRAMES_HOP,
+				Gen2WorldAPI.STEP_PASSES_HOP,
 			)
 	## .ExitWater calls PlayMapMusic before the step, which is what drops the
 	## surfing track once the player is walking again.
@@ -1797,7 +1830,7 @@ func preview_effect_sprites(kind: StringName = &"effects") -> void:
 			_effects.start_cut(_world.facing_cell(), 1, _world.facing_direction(), _world.player_cell)
 			_effects.start_jump_shadow(
 				-1, _world.player_cell, _world.facing_direction(),
-				Gen2WorldAPI.STEP_FRAMES_HOP,
+				Gen2WorldAPI.STEP_PASSES_HOP,
 			)
 		_script_prompt = "Debug cut animation preview"
 		_renderer.refresh()
@@ -1820,10 +1853,10 @@ func preview_effect_sprites(kind: StringName = &"effects") -> void:
 	if _effects != null:
 		_effects.start_headbutt_tree(_world.player_cell + Vector2i(1, 0))
 		_effects.start_boulder_dust(
-			-1, _world.player_cell, Vector2i.DOWN, Gen2WorldAPI.STEP_FRAMES_BOULDER_PUSH
+			-1, _world.player_cell, Vector2i.DOWN, Gen2WorldAPI.STEP_PASSES_BOULDER_PUSH
 		)
 		_effects.start_grass_rustle(
-			-1, _world.player_cell, Gen2WorldAPI.STEP_FRAMES_WALK - 1
+			-1, _world.player_cell, Gen2WorldAPI.STEP_PASSES_WALK - 1
 		)
 	## The nearest object rather than the first, so the emote lands inside the
 	## view a capture photographs.
@@ -3261,10 +3294,13 @@ func _start_trainer_approach(request: Dictionary) -> void:
 
 ## One hardware frame of `SeenByTrainerScript`'s presentation: the shock emote's
 ## own count, the movement delay, then one planned cell at a time. The object's
-## step_frames_remaining (set by
+## step_passes_remaining (set by
 ## [method Gen2WorldAPI.advance_trainer_approach_step]) is spent by the same
 ## frame, while step_offset() still gives the renderer 16-frame interpolation.
-func _advance_trainer_approach() -> void:
+## [param map_pass] is whether this hardware frame runs `HandleMap`'s own pass.
+## The two countdowns in front of the walk are the script's `DelayFrames` and are
+## spent on every frame; the walk itself is `HandleObjectStep`'s and is not.
+func _advance_trainer_approach(map_pass: bool) -> void:
 	if _world == null:
 		_trainer_approach = {}
 		return
@@ -3277,6 +3313,8 @@ func _advance_trainer_approach() -> void:
 	var movement_delay: int = int(_trainer_approach.get("movement_delay", 0))
 	if movement_delay > 0:
 		_trainer_approach["movement_delay"] = movement_delay - 1
+		return
+	if not map_pass:
 		return
 	var object_index: int = int(_trainer_approach.get("object_index", -1))
 	var stepping_object: Gen2WorldObject = _world.objects[object_index] \
@@ -4837,8 +4875,8 @@ func _show_story_picture(species: int) -> void:
 
 ## How many of `wLandmarkSignTimer`'s sixty frames the sign has left, and zero
 ## when there is none up. What a test or a screenshot tool waits on.
-func map_name_sign_frames() -> int:
-	return _map_name_sign_frames
+func map_name_sign_passes() -> int:
+	return _map_name_sign_passes
 
 
 ## `InitMapNameSign`'s own decision, raised where the map load leaves it: the
@@ -4858,7 +4896,7 @@ func _raise_map_name_sign() -> void:
 	## The timer is the setup script's, not the sheet's: a cache with no
 	## `MapEntryFrameGFX` spends the same sixty frames with nothing drawn in
 	## them rather than skipping them.
-	_map_name_sign_frames = Gen2WorldAPI.MAP_NAME_SIGN_FRAMES
+	_map_name_sign_passes = Gen2WorldAPI.MAP_NAME_SIGN_PASSES
 	var image: Image = Gen2MapNameSignPage.render(
 		_data,
 		_data.landmark_name(landmark),
@@ -4882,11 +4920,11 @@ func _raise_map_name_sign() -> void:
 
 ## `PlaceMapNameSign`, which counts `wLandmarkSignTimer` down a frame at a time
 ## and takes the window away on the frame it runs out.
-func _advance_map_name_sign() -> void:
-	if _map_name_sign_frames <= 0:
+func _advance_map_name_sign_pass() -> void:
+	if _map_name_sign_passes <= 0:
 		return
-	_map_name_sign_frames -= 1
-	if _map_name_sign_frames <= 0:
+	_map_name_sign_passes -= 1
+	if _map_name_sign_passes <= 0:
 		_hide_map_name_sign()
 		return
 	if _map_name_sign != null:
@@ -4921,7 +4959,7 @@ func _zero_map_name_sign_for(results: Array) -> void:
 
 
 func _hide_map_name_sign() -> void:
-	_map_name_sign_frames = 0
+	_map_name_sign_passes = 0
 	if _map_name_sign == null:
 		return
 	Gen2Screen.drop(_map_name_sign)

@@ -85,8 +85,8 @@ var emote_remaining: int = 0
 ## Sub-cell presentation offset toward a cell already committed to: the logical
 ## cell changes at the start of a step, and this only draws the approach.
 var step_direction: Vector2i = Vector2i.ZERO
-var step_frames_total: int = 0
-var step_frames_remaining: int = 0
+var step_passes_total: int = 0
+var step_passes_remaining: int = 0
 ## Whether the in-flight step is a `jump_step`, which is the only kind drawn
 ## above its own cell. See height_offset_pixels().
 var step_jumping: bool = false
@@ -103,13 +103,13 @@ var weird_tree: bool = false
 var queued_steps: Array = []
 ## True while the trail above belongs to a script rather than to the movement
 ## templates, which is what tells the two drivers apart:
-## Gen2WorldAPI.advance_object_steps_frame() decides movement and is refused while a
-## script runs, advance_scripted_steps_frame() only draws and is not.
+## Gen2WorldAPI.advance_object_steps_pass() decides movement and is refused while a
+## script runs, advance_scripted_steps_pass() only draws and is not.
 var scripted_steps: bool = false
 ## Frames this object waits before its movement template decides again. The
 ## source keeps this in OBJECT_STEP_DURATION while the object sits in
 ## STEP_TYPE_SLEEP (engine/overworld/map_objects.asm, StepFunction_Sleep).
-var idle_frames_remaining: int = 0
+var idle_passes_remaining: int = 0
 
 
 static func from_event(
@@ -153,14 +153,14 @@ func carry_presentation_from(previous: Gen2WorldObject) -> void:
 	emote_visible = previous.emote_visible
 	emote_remaining = previous.emote_remaining
 	step_direction = previous.step_direction
-	step_frames_total = previous.step_frames_total
-	step_frames_remaining = previous.step_frames_remaining
+	step_passes_total = previous.step_passes_total
+	step_passes_remaining = previous.step_passes_remaining
 	step_jumping = previous.step_jumping
 	queued_steps = previous.queued_steps.duplicate(true)
 	scripted_steps = previous.scripted_steps
 	step_frame = previous.step_frame
 	frame = previous.frame
-	idle_frames_remaining = previous.idle_frames_remaining
+	idle_passes_remaining = previous.idle_passes_remaining
 	deleted = previous.deleted
 
 
@@ -354,7 +354,7 @@ func queue_step(
 	direction: Vector2i, frames: int, jumping: bool = false,
 	new_facing: Vector2i = Vector2i.ZERO
 ) -> void:
-	if step_frames_remaining > 0 or not queued_steps.is_empty():
+	if step_passes_remaining > 0 or not queued_steps.is_empty():
 		scripted_steps = true
 		queued_steps.append({
 			"direction": direction, "frames": maxi(0, frames), "jumping": jumping,
@@ -397,8 +397,8 @@ func _begin_step(direction: Vector2i, frames: int, jumping: bool = false) -> voi
 	# and every step begun after it replaces the type, so the arc ends here.
 	step_jumping = jumping
 	step_direction = direction
-	step_frames_total = maxi(0, frames)
-	step_frames_remaining = step_frames_total
+	step_passes_total = maxi(0, frames)
+	step_passes_remaining = step_passes_total
 	# `NormalStep` calls `ShakeGrass` where it starts the step, and a queued
 	# stream starts its later steps here, so the flag is raised here and read
 	# once by Gen2WorldAPI.take_grass_rustles().
@@ -408,12 +408,12 @@ func _begin_step(direction: Vector2i, frames: int, jumping: bool = false) -> voi
 ## One frame of an in-flight step; false once it has finished, so a caller pacing
 ## by call count can tell "still stepping" from "done".
 func tick_step() -> bool:
-	if step_frames_remaining <= 0:
+	if step_passes_remaining <= 0:
 		return false
 	if step_direction != Vector2i.ZERO or weird_tree:
 		advance_walk_frame()
-	step_frames_remaining -= 1
-	if step_frames_remaining <= 0:
+	step_passes_remaining -= 1
+	if step_passes_remaining <= 0:
 		if weird_tree:
 			# The 24 frames are not a multiple of the four-frame cycle, so
 			# unlike a step this one has to be stood back up by hand.
@@ -440,7 +440,7 @@ func _start_next_queued_step() -> void:
 
 
 func is_stepping() -> bool:
-	return step_frames_remaining > 0
+	return step_passes_remaining > 0
 
 
 ## One hardware frame of `SetFacingStepAction`. The counter is never cleared
@@ -459,24 +459,24 @@ func walk_frame() -> int:
 ## rolls this duration itself; the caller supplies the rolled value so this
 ## class stays free of the generator.
 func start_idle(frames: int) -> void:
-	idle_frames_remaining = maxi(0, frames)
+	idle_passes_remaining = maxi(0, frames)
 
 
 ## Consumes one frame of that wait. Returns true when a frame was consumed,
 ## matching tick_step() so one caller can pace both.
 func tick_idle() -> bool:
-	if idle_frames_remaining <= 0:
+	if idle_passes_remaining <= 0:
 		return false
-	idle_frames_remaining -= 1
+	idle_passes_remaining -= 1
 	return true
 
 
 func is_idle() -> bool:
-	return idle_frames_remaining > 0
+	return idle_passes_remaining > 0
 
 
 ## Pixel offset from the committed cell back toward where the step began,
-## shrinking to zero as step_frames_remaining reaches zero.
+## shrinking to zero as step_passes_remaining reaches zero.
 func step_offset(cell_pixels: int) -> Vector2i:
 	var offset: Vector2 = step_offset_cells() * float(cell_pixels)
 	return Vector2i(int(round(offset.x)), int(round(offset.y)))
@@ -487,10 +487,10 @@ func step_offset(cell_pixels: int) -> Vector2i:
 ## `jump_step` is in flight; presentation only, the cell having committed to the
 ## landing cell when the jump started.
 func height_offset_pixels() -> float:
-	if not step_jumping or step_frames_total <= 0:
+	if not step_jumping or step_passes_total <= 0:
 		return 0.0
 	return float(-Gen2WorldAPI.jump_offset_at(
-		step_frames_total - step_frames_remaining, step_frames_total
+		step_passes_total - step_passes_remaining, step_passes_total
 	))
 
 
@@ -502,7 +502,7 @@ func step_offset_cells() -> Vector2:
 	var behind := Vector2.ZERO
 	for entry: Dictionary in queued_steps:
 		behind -= Vector2(entry["direction"] as Vector2i)
-	if step_frames_remaining > 0 and step_frames_total > 0:
+	if step_passes_remaining > 0 and step_passes_total > 0:
 		behind -= Vector2(step_direction) \
-			* (float(step_frames_remaining) / float(step_frames_total))
+			* (float(step_passes_remaining) / float(step_passes_total))
 	return behind

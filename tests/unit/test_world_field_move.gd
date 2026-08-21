@@ -1557,7 +1557,7 @@ func test_a_step_on_the_bike_spends_half_the_frames() -> void:
 func _drain_player_step(world: Gen2WorldAPI) -> int:
 	var frames: int = 0
 	while world.player_step_in_progress():
-		world.advance_player_step_frame()
+		world.advance_player_step_pass()
 		frames += 1
 	return frames
 

@@ -392,9 +392,9 @@ func _verify_swimmer_approach(data: GameData, game_id: StringName, swimmer: Arra
 		):
 			return
 		_r.check(
-			swimmer_object.step_frames_total == Gen2WorldAPI.STEP_FRAMES_WALK,
+			swimmer_object.step_passes_total == Gen2WorldAPI.STEP_PASSES_WALK,
 			"%s: swimmer %d steps over %d frames, not %d." % [
-				game_id, index, swimmer_object.step_frames_total, Gen2WorldAPI.STEP_FRAMES_WALK,
+				game_id, index, swimmer_object.step_passes_total, Gen2WorldAPI.STEP_PASSES_WALK,
 			]
 		)
 	_r.check(

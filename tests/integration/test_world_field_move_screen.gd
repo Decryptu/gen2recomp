@@ -328,7 +328,7 @@ func test_choosing_cut_shows_the_message_and_defers_the_block_change() -> void:
 	## the one faced, so the walk is the press after it.
 	_world_screen.move_player(Vector2i.DOWN)
 	while world.player_step_in_progress():
-		world.advance_player_step_frame()
+		world.advance_player_step_pass()
 	if world.player_cell != TREE_CELL:
 		assert_true(_world_screen.move_player(Vector2i.DOWN))
 	assert_eq(world.player_cell, TREE_CELL)
@@ -411,12 +411,12 @@ func test_stepping_back_onto_land_stops_surfing_through_the_screen() -> void:
 	# The entry step is a slow_step, so the presentation offset has to run out
 	# before the screen accepts input again.
 	while world.player_step_in_progress():
-		world.advance_player_step_frame()
+		world.advance_player_step_pass()
 	## `.CheckTurning` turns on the spot first when the pressed direction is not
 	## the one faced, so the walk is the press after it.
 	_world_screen.move_player(Vector2i.UP)
 	while world.player_step_in_progress():
-		world.advance_player_step_frame()
+		world.advance_player_step_pass()
 	if world.player_cell != SHORE_CELL:
 		assert_true(_world_screen.move_player(Vector2i.UP))
 	assert_eq(world.player_cell, SHORE_CELL)

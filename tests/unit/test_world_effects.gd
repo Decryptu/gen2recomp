@@ -10,11 +10,11 @@ func test_source_packed_screen_shake_uses_duration_and_amplitude_bits() -> void:
 	assert_eq(started["offset"], Vector2(-2, 0))
 
 	for _frame: int in 19:
-		assert_true(effects.advance_frame())
+		assert_true(effects.advance_pass())
 	assert_true(effects.active())
-	assert_true(effects.advance_frame())
+	assert_true(effects.advance_pass())
 	assert_false(effects.active())
-	assert_false(effects.advance_frame(), "a spent effect costs no more frames")
+	assert_false(effects.advance_pass(), "a spent effect costs no more frames")
 	assert_eq(effects.offset(), Vector2.ZERO)
 
 
@@ -55,13 +55,13 @@ func test_a_grass_rustle_swaps_its_two_facings_every_four_frames() -> void:
 	assert_eq((first[0] as Dictionary)["offset"], Vector2i(0, 8))
 	assert_true(bool((first[1] as Dictionary)["flip_x"]), "FacingGrass1 mirrors its right tile")
 	for _frame: int in 4:
-		effects.advance_frame()
+		effects.advance_pass()
 	assert_eq(
 		((effects.sprites()[0] as Dictionary)["tiles"][0] as Dictionary)["offset"],
 		Vector2i(-1, 9),
 	)
 	for _frame: int in 3:
-		effects.advance_frame()
+		effects.advance_pass()
 	assert_false(effects.sprites_active(), "a rustle is one frame shorter than its step")
 
 
@@ -73,15 +73,15 @@ func test_boulder_dust_takes_its_offset_from_the_push_direction() -> void:
 	assert_eq((sprite["tiles"][0] as Dictionary)["offset"], Vector2i(6, 2))
 	assert_eq(sprite["tiles"].size(), 4, "one tile drawn four times in a 16x16 square")
 	## `SetFacingBoulderDust` swaps the two tiles on bit 1 of the frame counter.
-	effects.advance_frame()
+	effects.advance_pass()
 	assert_eq(int((effects.sprites()[0] as Dictionary)["tiles"][0]["tile"]), 0)
-	effects.advance_frame()
+	effects.advance_pass()
 	assert_eq(int((effects.sprites()[0] as Dictionary)["tiles"][0]["tile"]), 1)
 	## (step duration + 1) * 2 frames, so the dust outlives the push.
 	for _frame: int in 31:
-		effects.advance_frame()
+		effects.advance_pass()
 	assert_true(effects.sprites_active())
-	effects.advance_frame()
+	effects.advance_pass()
 	assert_false(effects.sprites_active())
 
 
@@ -137,16 +137,16 @@ func test_cut_leaves_spawn_four_deep_and_spiral() -> void:
 ## for twice the half-hop it was spawned in.
 func test_a_jump_shadow_is_two_mirrored_tiles_under_the_jumper() -> void:
 	var effects := Gen2WorldEffects.new()
-	effects.start_jump_shadow(-1, Vector2i(4, 4), Vector2i.DOWN, Gen2WorldAPI.STEP_FRAMES_HOP)
+	effects.start_jump_shadow(-1, Vector2i(4, 4), Vector2i.DOWN, Gen2WorldAPI.STEP_PASSES_HOP)
 	var sprite: Dictionary = effects.sprites()[0]
 	assert_eq(sprite["kind"], Gen2WorldEffects.SPRITE_SHADOW)
 	assert_eq(sprite["tiles"].size(), 2)
 	assert_eq((sprite["tiles"][0] as Dictionary)["offset"], Vector2i(0, 14))
 	assert_true(bool((sprite["tiles"][1] as Dictionary)["flip_x"]))
 	for _frame: int in 17:
-		effects.advance_frame()
+		effects.advance_pass()
 	assert_true(effects.sprites_active(), "(8 + 1) * 2 frames, so it outlasts the hop")
-	effects.advance_frame()
+	effects.advance_pass()
 	assert_false(effects.sprites_active())
 
 

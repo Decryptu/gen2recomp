@@ -422,10 +422,13 @@ func _drive(screen: Gen2WorldScreen, frames: int) -> int:
 		else:
 			in_battle = false
 			## Two cells, alternating, so every step lands on grass and the roll
-			## keeps being offered. A step is STEP_FRAMES_WALK long, and a
-			## direction held across it is one step.
+			## keeps being offered. A step is STEP_PASSES_WALK passes long and
+			## this loop spends hardware frames, so the direction is held for
+			## `passes_in_frames` of them: half that flips it mid-step and the
+			## player turns back before landing on anything.
 			@warning_ignore("integer_division")
-			var step: int = screen._world.frame_number / Gen2WorldAPI.STEP_FRAMES_WALK
+			var step: int = screen._world.frame_number \
+				/ Gen2WorldAPI.passes_in_frames(Gen2WorldAPI.STEP_PASSES_WALK)
 			screen.press_button(
 				Gen2Button.DOWN if step % 2 == 0 else Gen2Button.UP
 			)
@@ -457,6 +460,12 @@ func _program(seed_value: int, frames: int, errand: bool = false) -> Array:
 	return log
 
 
+## One walk step in the hardware frames this tool spends, which is the pass
+## duration doubled (Gen2WorldAPI.FRAMES_PER_OVERWORLD_PASS).
+func _walk_frames() -> int:
+	return Gen2WorldAPI.passes_in_frames(Gen2WorldAPI.STEP_PASSES_WALK)
+
+
 ## The scripted errand: walk the door column up to the counter, turn into the
 ## clerk, and then press A on a cadence for the rest of the run. That one button
 ## carries the whole leg, because every step of it answers a press: the clerk's
@@ -468,19 +477,19 @@ func _program(seed_value: int, frames: int, errand: bool = false) -> Array:
 ## move on.
 func _errand_program(frames: int) -> Array:
 	var log: Array = []
-	var walk: int = mini(frames, (MART_DOOR.y - MART_COUNTER.y) * Gen2WorldAPI.STEP_FRAMES_WALK)
+	var walk: int = mini(frames, (MART_DOOR.y - MART_COUNTER.y) * _walk_frames())
 	for frame: int in range(1, walk + 1):
 		log.append({"frame": frame, "kind": "hold", "button": Gen2Button.UP})
 	## Clear of the walk rather than up against it: `move_player` refuses a press
 	## while the last step is still in flight, and a turn that is refused leaves
 	## the player facing the wall behind the counter instead of the clerk.
-	if walk + Gen2WorldAPI.STEP_FRAMES_WALK * 3 <= frames:
+	if walk + _walk_frames() * 3 <= frames:
 		log.append({
-			"frame": walk + Gen2WorldAPI.STEP_FRAMES_WALK * 3,
+			"frame": walk + _walk_frames() * 3,
 			"kind": "press",
 			"button": Gen2Button.LEFT,
 		})
-	var frame: int = walk + Gen2WorldAPI.STEP_FRAMES_WALK * 5
+	var frame: int = walk + _walk_frames() * 5
 	while frame <= frames:
 		log.append({"frame": frame, "kind": "press", "button": Gen2Button.A})
 		frame += 8

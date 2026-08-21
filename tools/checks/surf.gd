@@ -327,7 +327,7 @@ func _verify_swimming_objects(game_id: StringName, data: GameData, crystal: bool
 	random.seed = 17
 	var visited: Dictionary = {lapras.cell: true}
 	for _frame: int in LAPRAS_STEP_FRAME_BUDGET:
-		world.advance_object_steps_frame(random)
+		world.advance_object_steps_pass(random)
 		visited[lapras.cell] = true
 	var reached: Array = visited.keys()
 	var expected: Array = allowed.keys()

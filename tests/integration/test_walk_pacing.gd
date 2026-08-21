@@ -1,10 +1,18 @@
 extends GutTest
 
 ## `StepVectors`' normal row (`engine/overworld/map_objects.asm`): two pixels a
-## frame for eight frames, which is one cell.
+## pass for eight passes, which is one cell.
+##
+## A pass is not a frame. `HandleMap` ends every iteration in
+## `NextOverworldFrame`, whose `MaxOverworldDelay` is 2, so the whole overworld
+## runs once per two hardware frames and an ordinary walk step takes sixteen.
+## Measured on a real cartridge, `.claude/oracle/overworld/trace_walk.py` on
+## Route 29: `wPlayerStepDuration` counts 7 down to 0 over frames 19 to 34 while
+## `wPlayerSpriteX` walks 208 to 224 two pixels at a time, and a hook on
+## `HandleMapObjects` fires on every other frame and no other.
 ##
 ## The constant on its own is not the question; the pacing around it is. A step
-## that costs nine frames because the frame the last one ended on is spent
+## that costs nine passes because the pass the last one ended on is spent
 ## starting the next reads as sluggish, and no constant would be wrong. In the
 ## source it costs eight: `HandleObjectStep`'s `.one` calls
 ## `StepFunction_FromMovement`, and when that starts a step the step type is no
@@ -39,55 +47,106 @@ func after_each() -> void:
 
 
 func _walk_frames() -> int:
-	return Gen2WorldAPI.STEP_FRAMES_WALK
+	return Gen2WorldAPI.STEP_PASSES_WALK
+
+
+## The screen's own frames for a count of overworld passes. `HandleMap` runs one
+## pass per `NextOverworldFrame`, and `MaxOverworldDelay` is 2, so a duration
+## read off `InitStep` or off `wLandmarkSignTimer` costs twice its number of
+## frames. Measured on a real cartridge with
+## `.claude/oracle/overworld/trace_walk.py`.
+func _screen_frames(passes: int) -> int:
+	return passes * Gen2WorldAPI.FRAMES_PER_OVERWORLD_PASS
+
+
+func _walk_screen_frames() -> int:
+	return _screen_frames(Gen2WorldAPI.STEP_PASSES_WALK)
+
+
+func _turn_screen_frames() -> int:
+	return _screen_frames(Gen2WorldAPI.STEP_PASSES_TURN)
+
+
+## `MaxOverworldDelay`, which is what makes every row below a pass rather than a
+## frame.
+func test_the_overworld_runs_one_pass_per_two_hardware_frames() -> void:
+	assert_eq(Gen2WorldAPI.FRAMES_PER_OVERWORLD_PASS, 2)
+
+
+## The cartridge's own sixteen, measured between two landings so the count does
+## not depend on which frame the press arrived on: a direction held through the
+## pump walks a cell every FRAMES_PER_OVERWORLD_PASS * STEP_PASSES_WALK frames.
+## This is the case the pinned trace is for, and the one that fails on a port
+## that spends a pass per frame.
+func test_a_held_walk_covers_a_cell_every_sixteen_hardware_frames() -> void:
+	## Three cells clear of any warp or wall, walked west across the fixture.
+	_screen = await _screen_at(Fixture.WARP_CELL + Vector2i.DOWN)
+	var landings: Array[int] = []
+	var cell: Vector2i = _screen._world.player_cell
+	for frame: int in _walk_screen_frames() * 4:
+		## `move_player` refuses while a step is in flight, so pressing every
+		## frame is the held direction `_advance_held_direction` polls.
+		_screen.move_left()
+		_screen.advance_frame()
+		if _screen._world.player_cell != cell:
+			cell = _screen._world.player_cell
+			landings.append(frame)
+		if landings.size() >= 3:
+			break
+	assert_eq(landings.size(), 3, "three cells walked")
+	assert_eq(
+		landings[1] - landings[0], _walk_screen_frames(),
+		"one cell per sixteen hardware frames"
+	)
+	assert_eq(landings[2] - landings[1], _walk_screen_frames())
 
 
 ## `StepVectors`' own three rows, which is where every duration in
 ## [Gen2WorldAPI] comes from.
 func test_the_step_durations_are_the_source_rows() -> void:
-	assert_eq(Gen2WorldAPI.STEP_FRAMES_NPC_WALK, 16, "the slow row")
-	assert_eq(Gen2WorldAPI.STEP_FRAMES_WALK, 8, "the normal row")
-	assert_eq(Gen2WorldAPI.STEP_FRAMES_FAST, 4, "the fast row")
+	assert_eq(Gen2WorldAPI.STEP_PASSES_NPC_WALK, 16, "the slow row")
+	assert_eq(Gen2WorldAPI.STEP_PASSES_WALK, 8, "the normal row")
+	assert_eq(Gen2WorldAPI.STEP_PASSES_FAST, 4, "the fast row")
 	# `StepFunction_Turn` is two frames standing and two on the new facing.
-	assert_eq(Gen2WorldAPI.STEP_FRAMES_TURN, 4)
+	assert_eq(Gen2WorldAPI.STEP_PASSES_TURN, 4)
 
 
-## Eight frames, no more: the eighth is the one that ends it.
-func test_a_walk_step_costs_exactly_eight_frames() -> void:
+## Eight passes, no more: the eighth is the one that ends it.
+func test_a_walk_step_costs_exactly_eight_passes() -> void:
 	_world._start_player_step(Vector2i(1, 0), _walk_frames())
 	for _frame: int in _walk_frames() - 1:
-		_world.advance_player_step_frame()
+		_world.advance_player_step_pass()
 		assert_true(_world.player_step_in_progress(), "still walking")
-	_world.advance_player_step_frame()
-	assert_false(_world.player_step_in_progress(), "the eighth frame ends it")
+	_world.advance_player_step_pass()
+	assert_false(_world.player_step_in_progress(), "the eighth pass ends it")
 
 
-## A step queued behind the one running takes over on the frame the first ends,
-## so a walk of several cells is eight frames a cell rather than nine.
+## A step queued behind the one running takes over on the pass the first ends,
+## so a walk of several cells is eight passes a cell rather than nine.
 func test_a_queued_step_starts_on_the_frame_the_last_one_ends() -> void:
 	_world._start_player_step(Vector2i(1, 0), _walk_frames())
 	_world._queue_player_step(Vector2i(1, 0), _walk_frames())
 	for _frame: int in _walk_frames():
-		_world.advance_player_step_frame()
+		_world.advance_player_step_pass()
 	assert_true(_world.player_step_in_progress(), "the second step took over")
 	for _frame: int in _walk_frames() - 1:
-		_world.advance_player_step_frame()
+		_world.advance_player_step_pass()
 		assert_true(_world.player_step_in_progress())
-	_world.advance_player_step_frame()
+	_world.advance_player_step_pass()
 	assert_false(_world.player_step_in_progress(), "and cost the same eight")
 
 
 ## The offset the renderer draws the player at closes over the step's own eight
-## frames, which is `StepVectors`' two pixels a frame reaching sixteen.
+## passes, which is `StepVectors`' two pixels a pass reaching sixteen.
 func test_the_offset_covers_one_cell() -> void:
 	_world._start_player_step(Vector2i(1, 0), _walk_frames())
 	for _frame: int in _walk_frames() - 1:
-		_world.advance_player_step_frame()
+		_world.advance_player_step_pass()
 	assert_ne(
 		_world.player_step_offset_cells(), Vector2.ZERO,
 		"the pic is still short of the cell"
 	)
-	_world.advance_player_step_frame()
+	_world.advance_player_step_pass()
 	assert_eq(_world.player_step_offset_cells(), Vector2.ZERO, "and lands on it")
 
 
@@ -108,11 +167,15 @@ func _walk_onto_the_door() -> Gen2WorldScreen:
 
 
 func _screen_below_the_door() -> Gen2WorldScreen:
+	return await _screen_at(Fixture.WARP_CELL + Vector2i.DOWN)
+
+
+func _screen_at(start: Vector2i) -> Gen2WorldScreen:
 	var packed: PackedScene = load("res://game/world/world_screen.tscn")
 	var screen: Gen2WorldScreen = packed.instantiate() as Gen2WorldScreen
 	screen.map_group = Fixture.MAP_GROUP
 	screen.map_number = Fixture.MAP_NUMBER
-	screen.start_cell = Fixture.WARP_CELL + Vector2i.DOWN
+	screen.start_cell = start
 	screen.encounter_seed = 1
 	screen.set_data(_data)
 	add_child(screen)
@@ -129,19 +192,24 @@ func _screen_below_the_door() -> Gen2WorldScreen:
 func test_a_warp_waits_for_the_step_onto_its_tile_to_land() -> void:
 	_screen = await _screen_below_the_door()
 	_screen.move_up()   # `.CheckTurning`: the first press only turns.
-	for _frame: int in Gen2WorldAPI.STEP_FRAMES_TURN:
+	for _frame: int in _turn_screen_frames():
 		_screen.advance_frame()
 	_screen.move_up()
 	assert_true(_screen._world.player_step_in_progress(), "the step onto the door started")
-	for _frame: int in Gen2WorldAPI.STEP_FRAMES_WALK - 1:
-		_screen.advance_frame()
+	## Driven to the landing rather than counted: which of the two frames of a
+	## pass the press arrived on decides whether the step's first pass is this
+	## frame or the next, and neither is the thing under test.
+	var frames: int = 0
+	while _screen._world.player_step_in_progress() and frames < WALK_FRAME_CAP:
 		assert_true(
 			_screen.map_fade().is_empty(),
 			"no warp while the player is still between the two cells",
 		)
-	assert_true(_screen._world.player_step_in_progress(), "the last frame of the step")
-	_screen.advance_frame()
-	assert_false(_screen._world.player_step_in_progress(), "which lands it")
+		_screen.advance_frame()
+		frames += 1
+	assert_false(_screen._world.player_step_in_progress(), "the step landed")
+	assert_gt(frames, _walk_screen_frames() - Gen2WorldAPI.FRAMES_PER_OVERWORLD_PASS,
+		"and cost a pass short of sixteen frames at worst")
 	assert_false(_screen.map_fade().is_empty(), "and the warp is taken on that frame")
 
 
@@ -197,23 +265,23 @@ func test_no_input_is_taken_while_the_warp_fade_runs() -> void:
 
 ## `InitMapNameSign` sits inside the same setup script: the warp crosses from the
 ## map's own landmark into the house's, so a sign is raised, and
-## `PlaceMapNameSign` counts `wLandmarkSignTimer`'s sixty frames down behind it.
+## `PlaceMapNameSign` counts `wLandmarkSignTimer`'s sixty passes down behind it.
 func test_a_warp_into_another_landmark_raises_the_map_name_sign() -> void:
 	_screen = await _walk_onto_the_door()
-	assert_eq(_screen.map_name_sign_frames(), 0, "nothing is up while the fade runs")
+	assert_eq(_screen.map_name_sign_passes(), 0, "nothing is up while the fade runs")
 	for _frame: int in WALK_FRAME_CAP:
 		_screen.advance_frame()
-		if _screen.map_name_sign_frames() > 0:
+		if _screen.map_name_sign_passes() > 0:
 			break
 	assert_eq(
-		_screen.map_name_sign_frames(), Gen2WorldAPI.MAP_NAME_SIGN_FRAMES,
-		"the sign is raised once the map is loaded, with all sixty frames to spend"
+		_screen.map_name_sign_passes(), Gen2WorldAPI.MAP_NAME_SIGN_PASSES,
+		"the sign is raised once the map is loaded, with all sixty passes to spend"
 	)
-	for _frame: int in Gen2WorldAPI.MAP_NAME_SIGN_FRAMES - 1:
+	for _frame: int in _screen_frames(Gen2WorldAPI.MAP_NAME_SIGN_PASSES) - 1:
 		_screen.advance_frame()
-	assert_eq(_screen.map_name_sign_frames(), 1, "still up on its last frame")
+	assert_eq(_screen.map_name_sign_passes(), 1, "still up on its last pass")
 	_screen.advance_frame()
-	assert_eq(_screen.map_name_sign_frames(), 0, "and gone on the sixtieth")
+	assert_eq(_screen.map_name_sign_passes(), 0, "and gone on the sixtieth")
 
 
 ## `PlayerEvents` zeroes `wLandmarkSignTimer` behind `DoPlayerEvent`, so only a
@@ -225,18 +293,19 @@ func test_a_queued_map_callback_does_not_take_the_sign_down() -> void:
 	_screen = await _walk_onto_the_door()
 	for _frame: int in WALK_FRAME_CAP:
 		_screen.advance_frame()
-		if _screen.map_name_sign_frames() > 0:
+		if _screen.map_name_sign_passes() > 0:
 			break
-	assert_eq(_screen.map_name_sign_frames(), Gen2WorldAPI.MAP_NAME_SIGN_FRAMES)
+	assert_eq(_screen.map_name_sign_passes(), Gen2WorldAPI.MAP_NAME_SIGN_PASSES)
 	## The fixture's house has no callback of its own, so one stands on the
 	## queue directly: what is under test is that a waiting script is not what
 	## takes the sign down, whatever put it there.
 	_screen._world._script_queue.append({})
 	assert_true(_screen._world.script_busy(), "a callback is waiting to run")
-	_screen.advance_frame()
+	for _frame: int in Gen2WorldAPI.FRAMES_PER_OVERWORLD_PASS:
+		_screen.advance_frame()
 	assert_eq(
-		_screen.map_name_sign_frames(), Gen2WorldAPI.MAP_NAME_SIGN_FRAMES - 1,
-		"and the sign spent that frame rather than being taken down"
+		_screen.map_name_sign_passes(), Gen2WorldAPI.MAP_NAME_SIGN_PASSES - 1,
+		"and the sign spent that pass rather than being taken down"
 	)
 
 
@@ -249,19 +318,19 @@ func test_only_a_player_event_result_takes_the_sign_down() -> void:
 	_screen = await _walk_onto_the_door()
 	for _frame: int in WALK_FRAME_CAP:
 		_screen.advance_frame()
-		if _screen.map_name_sign_frames() > 0:
+		if _screen.map_name_sign_passes() > 0:
 			break
-	var raised: int = _screen.map_name_sign_frames()
-	assert_eq(raised, Gen2WorldAPI.MAP_NAME_SIGN_FRAMES)
+	var raised: int = _screen.map_name_sign_passes()
+	assert_eq(raised, Gen2WorldAPI.MAP_NAME_SIGN_PASSES)
 
 	_screen._zero_map_name_sign_for([{"source": {"kind": &"callback"}}])
-	assert_eq(_screen.map_name_sign_frames(), raised, "a map callback raises no event")
+	assert_eq(_screen.map_name_sign_passes(), raised, "a map callback raises no event")
 
 	_screen._zero_map_name_sign_for([{"source": {"kind": &"scene"}, "deferred": false}])
-	assert_eq(_screen.map_name_sign_frames(), raised, "and nor does a scene of bare ends")
+	assert_eq(_screen.map_name_sign_passes(), raised, "and nor does a scene of bare ends")
 
 	_screen._zero_map_name_sign_for([{"source": {"kind": &"scene"}, "deferred": true}])
-	assert_eq(_screen.map_name_sign_frames(), 0, "an `sdefer` is the carry that does")
+	assert_eq(_screen.map_name_sign_passes(), 0, "an `sdefer` is the carry that does")
 
 
 ## `.CheckMovingWithinLandmark`: the map the world opens on is `wPrevLandmark`,

@@ -271,8 +271,8 @@ func test_trainer_approach_step_interpolates_the_objects_position() -> void:
 	assert_true(saw_step)
 	# tick_step() spends one hardware frame, the same one the emote and
 	# movement-delay counters are spent by; the offset eases down to one
-	# STEP_FRAMES_WALK-th of a cell on the frame before the step formally ends.
-	assert_eq(lowest_magnitude, Gen2WorldAPI.CELL_PIXELS / Gen2WorldAPI.STEP_FRAMES_WALK)
+	# STEP_PASSES_WALK-th of a cell on the frame before the step formally ends.
+	assert_eq(lowest_magnitude, Gen2WorldAPI.CELL_PIXELS / Gen2WorldAPI.STEP_PASSES_WALK)
 
 
 func test_victory_displays_imported_text_reloads_objects_and_keeps_player_cell() -> void:

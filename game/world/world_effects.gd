@@ -201,14 +201,14 @@ func start_cut(
 ## `SpawnShadow`, under a jumping object for twice the jump it was spawned in.
 ## Tracks whoever is jumping, and sits below them because the jump is an offset
 ## on the sprite alone.
-func start_jump_shadow(object_index: int, cell: Vector2i, direction: Vector2i, step_frames: int) -> void:
+func start_jump_shadow(object_index: int, cell: Vector2i, direction: Vector2i, step_passes: int) -> void:
 	_sprites.append({
 		"kind": SPRITE_SHADOW,
 		"cell": cell,
 		"object_index": object_index,
 		"palette": PAL_OW_EMOTE,
 		"frame": 0,
-		"duration": (int(float(maxi(0, step_frames)) / 2.0) + 1) * 2,
+		"duration": (int(float(maxi(0, step_passes)) / 2.0) + 1) * 2,
 		"direction": _direction_index(direction),
 	})
 
@@ -231,14 +231,14 @@ func start_grass_rustle(object_index: int, cell: Vector2i, frames: int) -> void:
 ## `SpawnStrengthBoulderDust`, spawned where the boulder starts sliding.
 ## `MovementFunction_BoulderDust` spends `(step duration + 1) * 2` frames, so the
 ## dust outlives the push.
-func start_boulder_dust(object_index: int, cell: Vector2i, direction: Vector2i, step_frames: int) -> void:
+func start_boulder_dust(object_index: int, cell: Vector2i, direction: Vector2i, step_passes: int) -> void:
 	_sprites.append({
 		"kind": SPRITE_BOULDER_DUST,
 		"cell": cell,
 		"object_index": object_index,
 		"palette": PAL_OW_EMOTE,
 		"frame": 0,
-		"duration": (maxi(0, step_frames) + 1) * 2,
+		"duration": (maxi(0, step_passes) + 1) * 2,
 		"direction": _direction_index(direction),
 	})
 
@@ -267,15 +267,20 @@ func start_heal_machine(machine_type: int, balls: int) -> void:
 	})
 
 
-func advance_frame() -> bool:
-	var moved: bool = false
-	var running: Array = []
-	for sprite: Dictionary in _sprites:
-		sprite["frame"] = int(sprite["frame"]) + 1
-		if int(sprite["frame"]) < int(sprite["duration"]):
-			running.append(sprite)
-		moved = true
-	_sprites = running
+## The three sprites that are temporary map objects on the cartridge, so their
+## countdowns are `HandleMap`'s passes rather than screen frames
+## (Gen2WorldAPI.FRAMES_PER_OVERWORLD_PASS). The other four are a routine's own
+## `DelayFrame` loop: `ShakeHeadbuttTree`, `OWCutAnimation` and `HealMachineAnim`
+## each spin on one while the script waits, so they keep the screen's rate.
+const PASS_PACED_SPRITES: Array[StringName] = [
+	SPRITE_SHADOW, SPRITE_GRASS_RUSTLE, SPRITE_BOULDER_DUST,
+]
+
+
+## One `HandleMap` pass: the tracking sprites, and `step_shake`'s own screen
+## shake, which is a movement and so is spent with the object that runs it.
+func advance_pass() -> bool:
+	var moved: bool = _spend_sprites(true)
 	if not active():
 		return moved
 	_frame += 1
@@ -283,6 +288,27 @@ func advance_frame() -> bool:
 		_kind = &"none"
 		_source = {}
 	return true
+
+
+## One hardware frame: the four sprites whose source routine spins on
+## `DelayFrame` rather than being stepped by `HandleObjectStep`.
+func advance_frame() -> bool:
+	return _spend_sprites(false)
+
+
+func _spend_sprites(pass_paced: bool) -> bool:
+	var moved: bool = false
+	var running: Array = []
+	for sprite: Dictionary in _sprites:
+		if PASS_PACED_SPRITES.has(StringName(sprite["kind"])) != pass_paced:
+			running.append(sprite)
+			continue
+		sprite["frame"] = int(sprite["frame"]) + 1
+		if int(sprite["frame"]) < int(sprite["duration"]):
+			running.append(sprite)
+		moved = true
+	_sprites = running
+	return moved
 
 
 func active() -> bool:

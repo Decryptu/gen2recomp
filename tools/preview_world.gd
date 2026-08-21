@@ -367,7 +367,9 @@ func _process(_delta: float) -> bool:
 				):
 					## player_cell commits when the step starts, so the frames
 					## the player is still walking are spent before the picture.
-					_screen.advance_frames(Gen2WorldAPI.STEP_FRAMES_WALK)
+					_screen.advance_frames(
+						Gen2WorldAPI.passes_in_frames(Gen2WorldAPI.STEP_PASSES_WALK)
+					)
 					break
 		elif _kind == &"ledge":
 			## `StepFunction_PlayerJump` at the top of its arc: the player is
@@ -388,8 +390,8 @@ func _process(_delta: float) -> bool:
 			for _frame: int in WARP_FRAME_CAP:
 				_screen.move_left()
 				_screen.advance_frame()
-				if _screen.map_name_sign_frames() > 0 \
-					and _screen.map_name_sign_frames() < Gen2WorldAPI.MAP_NAME_SIGN_FRAMES:
+				if _screen.map_name_sign_passes() > 0 \
+					and _screen.map_name_sign_passes() < Gen2WorldAPI.MAP_NAME_SIGN_PASSES:
 					break
 		elif _kind == &"pokepic":
 			_screen.preview_pokepic(POKEPIC_SPECIES)
