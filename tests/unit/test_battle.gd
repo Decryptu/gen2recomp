@@ -3118,7 +3118,7 @@ func test_a_class_with_no_items_carries_none_into_the_battle() -> void:
 	var battle: Gen2Battle = _battle(
 		_mon(Fixture.PIKACHU, 50, [Fixture.TACKLE]), _mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
 	)
-	battle.load_trainer_items(0)
+	battle.init_enemy_trainer(0)
 	assert_eq(battle.enemy_items, [] as Array[int])
 
 
@@ -4348,3 +4348,95 @@ func test_region_check_keeps_the_fast_ship_and_victory_road_in_johto() -> void:
 	## Gold and Silver's table is one shorter from LANDMARK_BATTLE_TOWER on.
 	assert_true(Gen2Battle.region_is_kanto(Gen2WorldRadio.KANTO_LANDMARK - 1, false))
 	assert_false(Gen2Battle.region_is_kanto(Gen2WorldRadio.LANDMARK_FAST_SHIP - 1, false))
+
+
+## `InitEnemyTrainer`'s `.partyloop`: standing in front of a gym leader is what
+## pays, not beating one, and `ld a, [hli] / or [hl] / jr z` skips a member that
+## is already down. Class 1 is FALKNER, the first row of `GymLeaders`.
+func test_a_gym_leader_raises_the_whole_standing_party_at_the_start() -> void:
+	var battle: Gen2Battle = _party_battle(
+		[_mon(Fixture.CHARMANDER, 5, [Fixture.TACKLE]),
+		_mon(Fixture.GEODUDE, 5, [Fixture.TACKLE])],
+		[_mon(Fixture.GEODUDE, 5, [Fixture.TACKLE])]
+	)
+	var before: int = battle.party(Gen2Battle.PLAYER).at(0).happiness
+	_faint(battle.party(Gen2Battle.PLAYER).at(1))
+	battle.init_enemy_trainer(1)
+	assert_eq(
+		battle.party(Gen2Battle.PLAYER).at(0).happiness,
+		Gen2WorldPartyHost.change_happiness(_data, before, Gen2Battle.HAPPINESS_GYMBATTLE)
+	)
+	assert_eq(battle.party(Gen2Battle.PLAYER).at(1).happiness, before, "a fainted member is skipped")
+
+
+## `IsGymLeader` answers no for every other class, so an ordinary trainer moves
+## nothing. Class 9 is RIVAL1.
+func test_an_ordinary_trainer_moves_no_happiness() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.CHARMANDER, 5, [Fixture.TACKLE]),
+		_mon(Fixture.GEODUDE, 5, [Fixture.TACKLE])
+	)
+	var before: int = battle.player.happiness
+	battle.init_enemy_trainer(Gen2Battle.TRAINER_CLASS_RIVAL1)
+	assert_eq(battle.player.happiness, before)
+
+
+## `UpdateFaintedPlayerMon`: HAPPINESS_FAINTED under the enemy's level plus
+## thirty and HAPPINESS_BEATENBYSTRONGFOE at or above it, charged once no matter
+## how many places report the same faint. The enemy's own faints reach no row.
+func test_a_faint_costs_happiness_once_and_reads_the_enemy_level() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.CHARMANDER, 5, [Fixture.TACKLE]),
+		_mon(Fixture.GEODUDE, 20, [Fixture.TACKLE])
+	)
+	var before: int = battle.player.happiness
+	_faint(battle.player)
+	var events: Array = []
+	battle.note_faint(Gen2Battle.PLAYER, events)
+	battle.note_faint(Gen2Battle.PLAYER, events)
+	assert_eq(events.size(), 2, "both reports still reach the caller")
+	assert_eq(
+		battle.player.happiness,
+		Gen2WorldPartyHost.change_happiness(_data, before, Gen2Battle.HAPPINESS_FAINTED),
+		"charged once for going down once"
+	)
+
+	var strong: Gen2Battle = _battle(
+		_mon(Fixture.CHARMANDER, 5, [Fixture.TACKLE]),
+		_mon(Fixture.GEODUDE, 35, [Fixture.TACKLE])
+	)
+	_faint(strong.player)
+	strong.note_faint(Gen2Battle.PLAYER, [])
+	assert_eq(
+		strong.player.happiness,
+		Gen2WorldPartyHost.change_happiness(
+			_data, before, Gen2Battle.HAPPINESS_BEATENBYSTRONGFOE
+		),
+		"level 35 is the fallen Pokemon's 5 plus 30"
+	)
+
+	var enemy_down: Gen2Battle = _battle(
+		_mon(Fixture.CHARMANDER, 5, [Fixture.TACKLE]),
+		_mon(Fixture.GEODUDE, 5, [Fixture.TACKLE])
+	)
+	var enemy_before: int = enemy_down.enemy.happiness
+	_faint(enemy_down.enemy)
+	enemy_down.note_faint(Gen2Battle.ENEMY, [])
+	assert_eq(enemy_down.enemy.happiness, enemy_before)
+
+
+## A faint reported through the ordinary turn loop reaches the same seam, which
+## is the point of routing every report through it.
+func test_a_faint_taken_in_a_turn_costs_happiness() -> void:
+	var battle: Gen2Battle = _battle(
+		_mon(Fixture.CHARMANDER, 5, [Fixture.TACKLE]),
+		_mon(Fixture.GEODUDE, 20, [Fixture.TACKLE])
+	)
+	battle.player.hp = 1
+	var before: int = battle.player.happiness
+	var events: Array = battle.take_turn(0, 0)
+	assert_true(battle.player.is_fainted(), JSON.stringify(events.size()))
+	assert_eq(
+		battle.player.happiness,
+		Gen2WorldPartyHost.change_happiness(_data, before, Gen2Battle.HAPPINESS_FAINTED)
+	)

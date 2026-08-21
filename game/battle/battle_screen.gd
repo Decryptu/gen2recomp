@@ -797,7 +797,7 @@ func show_trainer(
 	)
 	if _battle == null:
 		return
-	_battle.load_trainer_items(trainer_class)
+	_battle.init_enemy_trainer(trainer_class)
 
 	_init_battle_display()
 
@@ -896,7 +896,7 @@ func start_world_battle(
 	## `LevelUpHappinessMod` compares it against the winner's caught location.
 	_battle.landmark = _world_context.landmark if _world_context != null \
 		else Gen2Battle.LANDMARK_NONE
-	_battle.load_trainer_items(_enemy_trainer_class)
+	_battle.init_enemy_trainer(_enemy_trainer_class)
 	var player_party_ready: Gen2Party = prepared["player_party"]
 	var enemy_party_ready: Gen2Party = prepared["enemy_party"]
 	_player = player_party_ready.active_mon().species

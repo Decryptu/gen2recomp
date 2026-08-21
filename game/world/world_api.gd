@@ -5002,7 +5002,7 @@ func move_result(direction: Vector2i) -> Dictionary:
 		kind = &"water_move"
 	player_cell = destination
 	player_facing = _facing_for_direction(direction)
-	state.consume_repel_step()
+	state.count_step()
 	_advance_followers(-1, from_cell)
 	_start_player_step(direction, _step_frames_for_movement())
 	return {
@@ -5062,7 +5062,7 @@ func _forced_step(direction: Vector2i, destination: Vector2i) -> Dictionary:
 	var from_cell: Vector2i = player_cell
 	player_cell = destination
 	player_facing = _facing_for_direction(direction)
-	state.consume_repel_step()
+	state.count_step()
 	_advance_followers(-1, from_cell)
 	_start_player_step(direction, STEP_FRAMES_WALK)
 	return {
@@ -5170,7 +5170,7 @@ func _try_ledge_hop(direction: Vector2i) -> Dictionary:
 	var from_cell: Vector2i = player_cell
 	player_cell = landing
 	player_facing = _facing_for_direction(direction)
-	state.consume_repel_step()
+	state.count_step()
 	_advance_followers(-1, from_cell)
 	_start_player_step(direction * 2, STEP_FRAMES_HOP, true)
 	return {

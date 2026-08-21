@@ -316,8 +316,7 @@ static func use_item(
 ## ForgetMove when its own scan finds no zero.
 ##
 ## An HM is not consumed: TeachTMHM returns straight after IsHM, so it skips both
-## ConsumeTM and the happiness change. The happiness change a TM does make is a
-## boundary, since no ChangeHappiness table is imported.
+## ConsumeTM and the happiness change.
 static func teach_tm_hm(
 	world: Gen2WorldAPI,
 	save: Gen2SaveData,
@@ -407,8 +406,10 @@ static func teach_tm_hm(
 	}
 
 
-## `ChangeHappiness` over the imported table, without the egg and battle-mon
-## halves: an egg cannot reach a caller here, and no caller runs inside a battle.
+## `ChangeHappiness` over the imported table, taking the byte rather than the
+## Pokemon: `wCurPartyMon`'s egg guard and the `wBattleMonHappiness` mirror
+## behind it are the caller's, because a caller here holds either a
+## [Gen2SaveMon] or a [Gen2BattleMon] and never both.
 ##
 ## The three rows are picked by HAPPINESS_THRESHOLD_1 and _2, and the sign of a
 ## change is `cp $64`: a byte from 100 up is the subtracting branch, which is why
@@ -423,6 +424,29 @@ static func change_happiness(data: GameData, happiness: int, kind: int) -> int:
 	var row: int = 0 if happiness < HAPPINESS_THRESHOLD_1 \
 		else (1 if happiness < HAPPINESS_THRESHOLD_2 else 2)
 	return clampi(happiness + changes[row], 0, 255)
+
+
+## `StepHappiness`, spent [param times] over: one flat point to every party
+## member that is not an egg, saturating at 255 rather than wrapping, and
+## reaching no `HappinessChanges` row at all. The step counter that decides how
+## often is [method Gen2WorldState.count_step]'s.
+##
+## Answers the slots that moved, so a caller can persist only when the walk
+## actually changed something.
+static func apply_step_happiness(save: Gen2SaveData, times: int = 1) -> Array[int]:
+	var moved: Array[int] = []
+	if save == null or times <= 0:
+		return moved
+	for index: int in save.party.size():
+		var mon: Gen2SaveMon = save.party[index] as Gen2SaveMon
+		if mon == null or mon.is_egg:
+			continue
+		var raised: int = mini(255, mon.happiness + times)
+		if raised == mon.happiness:
+			continue
+		mon.happiness = raised
+		moved.append(index)
+	return moved
 
 
 

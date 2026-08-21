@@ -567,6 +567,14 @@ var parties: Dictionary = {}
 ## every [method send_out], reset once experience is awarded.
 var _participants: Dictionary = {PLAYER: {}, ENEMY: {}}
 
+## Which of the player's Pokemon have already been charged
+## `UpdateFaintedPlayerMon`'s happiness, keyed by instance id. The cartridge runs
+## that routine once per faint, off its own turn loop; this engine reports a
+## faint from a dozen places and would otherwise charge one Pokemon several
+## times for going down once. A revive clears the entry, since a revived
+## Pokemon can faint again in the same fight.
+var _faint_charged: Dictionary = {}
+
 ## The last direct damage each side took this action pair, which Counter and
 ## Mirror Coat read after the faster side has acted. Cleared each pair: the
 ## cartridge's `wCurDamage` is move-local, not a history.
@@ -676,10 +684,10 @@ static func use_item(item: int) -> Dictionary:
 	return {"type": ACTION_ITEM, "item": item}
 
 
-## Fills [member enemy_items] from a trainer class's own attributes, the way
-## `LoadEnemyMon`'s caller copies `TRNATTR_ITEM1` and `TRNATTR_ITEM2` into the
-## two working slots. `NO_ITEM` is zero and is not carried.
-func load_trainer_items(trainer_class: int) -> void:
+## `InitEnemyTrainer`: the class's own `TRNATTR_ITEM1` and `TRNATTR_ITEM2` into
+## the two working slots, and then `IsGymLeader`'s own party walk. `NO_ITEM` is
+## zero and is not carried.
+func init_enemy_trainer(trainer_class: int) -> void:
 	enemy_items = []
 	if data == null or trainer_class <= 0:
 		return
@@ -688,6 +696,51 @@ func load_trainer_items(trainer_class: int) -> void:
 		var item: int = int(attributes.get(key, 0))
 		if item != 0:
 			enemy_items.append(item)
+	_gain_gym_battle_happiness(trainer_class)
+
+
+## `InitEnemyTrainer`'s `.partyloop`, which runs on the frame the trainer's pic
+## is placed rather than on the win: standing in front of a gym leader is what
+## pays, and a fainted member is skipped by `ld a, [hli] / or [hl] / jr z`.
+func _gain_gym_battle_happiness(trainer_class: int) -> void:
+	if not (KANTO_GYM_LEADERS.has(trainer_class) or JOHTO_GYM_LEADERS.has(trainer_class)):
+		return
+	for member: Gen2BattleMon in party(PLAYER).mons:
+		if member == null or member.is_fainted():
+			continue
+		member.happiness = Gen2WorldPartyHost.change_happiness(
+			data, member.happiness, HAPPINESS_GYMBATTLE
+		)
+
+
+## Reports one faint. Every site that knows a battler has gone down goes through
+## here rather than appending the event itself, because `UpdateFaintedPlayerMon`
+## hangs off the same moment and the cartridge reaches it once.
+func note_faint(side: int, events: Array, extra: Dictionary = {}) -> void:
+	var event: Dictionary = {"type": FAINTED, "side": side}
+	event.merge(extra, true)
+	events.append(event)
+	_charge_faint_happiness(side)
+
+
+## `UpdateFaintedPlayerMon`'s happiness half: HAPPINESS_BEATENBYSTRONGFOE when
+## the enemy stands at the fallen Pokemon's level plus thirty or above, and
+## HAPPINESS_FAINTED under it. The enemy's own faints reach no table.
+func _charge_faint_happiness(side: int) -> void:
+	if side != PLAYER:
+		return
+	var fallen: Gen2BattleMon = mon(PLAYER)
+	if fallen == null or not fallen.is_fainted():
+		return
+	var key: int = fallen.get_instance_id()
+	if _faint_charged.has(key):
+		return
+	_faint_charged[key] = true
+	var foe: Gen2BattleMon = mon(ENEMY)
+	var kind: int = HAPPINESS_FAINTED
+	if foe != null and foe.level >= fallen.level + 30:
+		kind = HAPPINESS_BEATENBYSTRONGFOE
+	fallen.happiness = Gen2WorldPartyHost.change_happiness(data, fallen.happiness, kind)
 
 
 func party(side: int) -> Gen2Party:
@@ -1334,7 +1387,7 @@ func _spikes_damage(side: int, events: Array) -> void:
 		"hp": entering.hp, "max_hp": entering.max_hp(),
 	})
 	if entering.is_fainted():
-		events.append({"type": FAINTED, "side": side})
+		note_faint(side, events)
 
 
 ## `UpdateUsedMoves`: remembered once, four kept, and a fifth drops the oldest
@@ -1508,7 +1561,7 @@ func _report_unannounced_action_faints(events: Array, since: int) -> void:
 				reported = true
 				break
 		if not reported:
-			events.append({"type": FAINTED, "side": side})
+			note_faint(side, events)
 
 
 ## `HandleFutureSight`, player then enemy: the count is decremented before it is
@@ -1684,7 +1737,7 @@ func _residual_status(side: int, events: Array) -> void:
 		"max_hp": current.max_hp(),
 	})
 	if current.is_fainted():
-		events.append({"type": FAINTED, "side": side})
+		note_faint(side, events)
 
 
 ## An eighth off the seeded Pokémon and onto the one opposite, capped by
@@ -1711,7 +1764,7 @@ func _residual_leech_seed(side: int, events: Array) -> void:
 		"to_max_hp": sapper.max_hp(),
 	})
 	if current.is_fainted():
-		events.append({"type": FAINTED, "side": side})
+		note_faint(side, events)
 
 
 ## Nothing here asks whether the sufferer is still asleep, because waking is what
@@ -1727,7 +1780,7 @@ func _residual_nightmare(side: int, events: Array) -> void:
 		"hp": current.hp, "max_hp": current.max_hp(),
 	})
 	if current.is_fainted():
-		events.append({"type": FAINTED, "side": side})
+		note_faint(side, events)
 
 
 func _residual_curse(side: int, events: Array) -> void:
@@ -1741,7 +1794,7 @@ func _residual_curse(side: int, events: Array) -> void:
 		"hp": current.hp, "max_hp": current.max_hp(),
 	})
 	if current.is_fainted():
-		events.append({"type": FAINTED, "side": side})
+		note_faint(side, events)
 
 
 ## `HandleWeather`: a turn off the count, its line, and a Sandstorm's eighth off
@@ -1779,7 +1832,7 @@ func _tick_weather(events: Array) -> void:
 			"max_hp": current.max_hp(),
 		})
 		if current.is_fainted():
-			events.append({"type": FAINTED, "side": side})
+			note_faint(side, events)
 
 
 ## `HandleWrap`: a turn off each bound Pokémon's counter and a sixteenth of its
@@ -1811,7 +1864,7 @@ func _tick_wrap(events: Array) -> void:
 			"max_hp": current.max_hp(),
 		})
 		if current.is_fainted():
-			events.append({"type": FAINTED, "side": side})
+			note_faint(side, events)
 
 
 ## `HandlePerishSong`: one off each count, said out loud, and whoever reaches zero
@@ -1834,7 +1887,7 @@ func _tick_perish(events: Array) -> void:
 
 		current.substatus &= ~Gen2Substatus.PERISH
 		current.hp = 0
-		events.append({"type": FAINTED, "side": side})
+		note_faint(side, events)
 
 
 ## `HandleBetweenTurnEffects`' leftovers block: `HandleLeftovers`,
@@ -2186,6 +2239,7 @@ func _apply_party_item(
 		if not target.is_fainted():
 			return {"ok": false, "reason": &"item_has_no_effect"}
 		target.hp = target.max_hp() if item == ITEM_MAX_REVIVE else maxi(target.max_hp() / 2, 1)
+		_faint_charged.erase(target.get_instance_id())
 		return {"ok": true, "revived": true, "healed": target.hp}
 	if target.is_fainted():
 		return {"ok": false, "reason": &"item_has_no_effect"}
@@ -2598,6 +2652,9 @@ const LANDMARK_NONE: int = -1
 ## takes it. Gold and Silver ship neither the second row nor the compare in
 ## front of it: their `.skip_active_mon_update` passes HAPPINESS_GAINLEVEL flat.
 const HAPPINESS_GAINLEVEL: int = 0x01
+const HAPPINESS_GYMBATTLE: int = 0x04
+const HAPPINESS_FAINTED: int = 0x06
+const HAPPINESS_BEATENBYSTRONGFOE: int = 0x08
 const HAPPINESS_GAINLEVELATHOME: int = 0x13
 
 

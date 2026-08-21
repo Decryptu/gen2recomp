@@ -1734,7 +1734,7 @@ static func _check_faint(turn: Gen2Turn) -> void:
 	_destiny_bond_takes_user(turn)
 	for side: int in [turn.target, turn.side]:
 		if turn.battle.mon(side).is_fainted():
-			turn.events.append({"type": Gen2Battle.FAINTED, "side": side})
+			turn.battle.note_faint(side, turn.events)
 	if turn.battle.mon(turn.target).is_fainted():
 		turn.end()
 
@@ -2786,7 +2786,7 @@ static func _curse_ghost(turn: Gen2Turn, user: Gen2BattleMon) -> void:
 	# `HasPlayerFainted` behind every move, and this engine has no such step, so
 	# whoever took the health reports it, as `_residual_damage` already does.
 	if user.is_fainted():
-		turn.emit(Gen2Battle.FAINTED)
+		turn.battle.note_faint(turn.side, turn.events)
 
 
 ## Field state [method Gen2Battle._spikes_damage] charges to whoever walks onto

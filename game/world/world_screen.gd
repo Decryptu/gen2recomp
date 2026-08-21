@@ -1075,6 +1075,7 @@ func _complete_player_step(movement: Dictionary) -> bool:
 	## the step back onto land both reach one. `edge_warp` is
 	## `DoPlayerMovement.CheckWarp`'s own answer, which has already made the
 	## check `CheckWarpTile` refuses for a carpet.
+	_spend_step_happiness()
 	var kind: StringName = StringName(movement.get("kind", &""))
 	if kind == &"edge_warp" or (kind in [
 		&"move", &"ledge_hop", &"water_move", &"exit_water", &"forced_move",
@@ -1087,6 +1088,24 @@ func _complete_player_step(movement: Dictionary) -> bool:
 		_start_map_fade()
 		return true
 	return _after_map_settled()
+
+
+## `StepHappiness`, which `CountStep` reaches every 256 steps and which acts on
+## every second visit. [method Gen2WorldState.count_step] counts on the step
+## itself, wherever it was taken; the party lives on the save, which is here.
+## The cartridge raises happiness in WRAM and writes SRAM only when the player
+## saves, so this touches the loaded save and persists nothing of its own.
+func _spend_step_happiness() -> void:
+	if _world == null or _world.state == null:
+		return
+	var owed: int = _world.state.take_pending_step_happiness()
+	if owed <= 0:
+		return
+	var save: Gen2SaveData = active_save()
+	if save == null:
+		return
+	if not Gen2WorldPartyHost.apply_step_happiness(save, owed).is_empty():
+		_refresh_labels()
 
 
 ## `EnterMap`'s own tail, which a warp reaches once its setup script has run and

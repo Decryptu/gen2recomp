@@ -473,3 +473,48 @@ func test_a_state_without_an_unown_dex_restores_empty() -> void:
 	var raw: Dictionary = state.to_dict()
 	raw.erase("unown_dex")
 	assert_true(Gen2WorldState.from_dict(raw).unown_dex().is_empty())
+
+
+## `CountStep` and `StepHappiness`: the party gains a point every 512 steps,
+## because `wStepCount` has to wrap for `StepHappiness` to be reached at all and
+## its own `and 1` acts on every second visit. `wPoisonStepCount` counts on the
+## same step and wraps on its own byte.
+func test_count_step_owes_step_happiness_every_five_hundred_and_twelve_steps() -> void:
+	var state := Gen2WorldState.new()
+	for _step: int in 511:
+		state.count_step()
+	assert_eq(state.step_count(), 511 & 0xFF)
+	assert_eq(state.take_pending_step_happiness(), 0, "the first wrap is the odd visit")
+	state.count_step()
+	assert_eq(state.step_count(), 0)
+	assert_eq(state.poison_step_count(), 0)
+	assert_eq(state.take_pending_step_happiness(), 1)
+	assert_eq(state.take_pending_step_happiness(), 0, "draining forgets what it took")
+	for _step: int in 512:
+		state.count_step()
+	assert_eq(state.take_pending_step_happiness(), 1)
+
+
+## The Repel countdown was the whole of this call before the counters joined it,
+## and it still spends one step at a time and stops at zero.
+func test_count_step_spends_a_repel_step_and_stops_at_zero() -> void:
+	var state := Gen2WorldState.new({}, {}, {}, {}, 0, {}, 2)
+	state.count_step()
+	assert_eq(state.repel_steps(), 1)
+	state.count_step()
+	state.count_step()
+	assert_eq(state.repel_steps(), 0)
+
+
+## The three counters are saved beside the Repel countdown. A state written
+## before they existed carries none of the keys and restores as a fresh walk.
+func test_step_counters_round_trip_and_default_to_a_fresh_walk() -> void:
+	var state := Gen2WorldState.new()
+	for _step: int in 300:
+		state.count_step()
+	var restored := Gen2WorldState.from_dict(state.to_dict())
+	assert_eq(restored.step_count(), 300 & 0xFF)
+	assert_eq(restored.poison_step_count(), 300 & 0xFF)
+	var legacy := Gen2WorldState.from_dict({"items": {}})
+	assert_eq(legacy.step_count(), 0)
+	assert_eq(legacy.poison_step_count(), 0)
