@@ -23,7 +23,7 @@ const SFX_JUMP_OVER_LEDGE: int = 0x16
 ## constants/sfx_constants.asm's SFX_PLACE_PUZZLE_PIECE_DOWN, played by
 ## OWCutAnimation before its sprite animation. The animation itself is not
 ## rendered here; the sound is.
-const SFX_CUT: int = 0x1E
+const SFX_CUT: int = 0x38
 ## constants/sfx_constants.asm's SFX_SURF, which is what PlayWhirlpoolSound plays
 ## (engine/events/field_moves.asm); there is no whirlpool-specific effect.
 const SFX_WHIRLPOOL: int = 0x53
@@ -128,6 +128,9 @@ var _evolution_after: Callable = Callable()
 ## The party the open pass applies to, which is the fought save rather than
 ## whatever is selected while the screen is up.
 var _evolution_save: Gen2SaveData = null
+## `OverworldHatchEgg`'s screen and the save whose party it has already written.
+var _hatch_host: Gen2EggHatchScreen = null
+var _hatch_save: Gen2SaveData = null
 ## Whether a field-move message is on screen waiting for its acknowledge. The
 ## world is idle while it is, the same way a script text pause holds it.
 var _field_move_text: bool = false
@@ -605,6 +608,8 @@ func advance_frame() -> void:
 	## `DelayFrames` counts are spent from this pump.
 	if _evolution_host != null:
 		_evolution_host.advance_frame()
+	if _hatch_host != null:
+		_hatch_host.advance_frame()
 	_spending_frame = false
 
 
@@ -747,7 +752,7 @@ func _overlay_open() -> bool:
 		or _start_menu_host != null or _party_host != null \
 		or _hall_of_fame_host != null or _trainer_card_host != null \
 		or _pokedex_host != null or _credits_host != null \
-		or _evolution_host != null
+		or _evolution_host != null or _hatch_host != null
 
 
 ## Wandering objects keep to themselves while anything else owns the world. A
@@ -841,6 +846,11 @@ func _handle_button(button: int) -> bool:
 	## behind it, so its B is the animation's cancel rather than the pack's back.
 	if _evolution_host != null:
 		_evolution_host.handle_button(button)
+		return true
+	## The same rule for `OverworldHatchEgg`, which `PlayerEvents` runs with the
+	## map loop suspended in exactly the same place.
+	if _hatch_host != null:
+		_hatch_host.handle_button(button)
 		return true
 	## Before the PC and the party overlay because the Hall of Fame is the one
 	## overlay a script opens with nothing behind it: there is no map to go back
@@ -1097,6 +1107,7 @@ func _complete_player_step(movement: Dictionary) -> bool:
 	## `DoPlayerMovement.CheckWarp`'s own answer, which has already made the
 	## check `CheckWarpTile` refuses for a carpet.
 	_spend_step_happiness()
+	_spend_egg_steps()
 	var kind: StringName = StringName(movement.get("kind", &""))
 	if kind == &"edge_warp" or (kind in [
 		&"move", &"ledge_hop", &"water_move", &"exit_water", &"forced_move",
@@ -1127,6 +1138,77 @@ func _spend_step_happiness() -> void:
 		return
 	if not Gen2WorldPartyHost.apply_step_happiness(save, owed).is_empty():
 		_refresh_labels()
+
+
+## `DoEggStep` and the `PLAYEREVENT_HATCH` it raises. The party lives on the
+## save, so the walk counts the step and this spends it, the way
+## [method _spend_step_happiness] does for `StepHappiness`.
+##
+## `HatchEggs` walks the whole party, so every egg the pass left on zero hatches
+## in one screen rather than one per step.
+func _spend_egg_steps() -> void:
+	if _world == null or _world.state == null or _hatch_host != null:
+		return
+	var owed: int = _world.state.take_pending_egg_steps()
+	if owed <= 0:
+		return
+	var save: Gen2SaveData = active_save()
+	if save == null:
+		return
+	if Gen2WorldPartyHost.apply_egg_steps(save, owed) < 0:
+		return
+	var hatches: Array = []
+	for index: int in save.party.size():
+		var summary: Dictionary = Gen2WorldPartyHost.hatch_egg(_world, save, index)
+		if not summary.is_empty():
+			hatches.append(summary)
+	if hatches.is_empty():
+		return
+	_open_hatch(hatches, save)
+
+
+## `OverworldHatchEgg`. The rows are already written; the screen owns the
+## sequence and the nickname alone.
+func _open_hatch(hatches: Array, save: Gen2SaveData) -> void:
+	var host := Gen2EggHatchScreen.new()
+	host.set_context(_data, hatches)
+	_hatch_save = save
+	host.named.connect(_on_hatch_named)
+	host.closed.connect(_on_hatch_closed)
+	host.cry_requested.connect(_play_species_cry)
+	host.sfx_requested.connect(_play_sfx)
+	host.music_requested.connect(_play_evolution_music)
+	host.z_index = 30
+	_hatch_host = host
+	_screen.display(host)
+	if _hatch_host == null:
+		return
+	_script_prompt = "Hatching"
+	_refresh_labels()
+
+
+## `InitName`, which writes whatever the naming screen left into the row's
+## nickname. `.nonickname` reaches this too, with the species name.
+func _on_hatch_named(party_index: int, nickname: String) -> void:
+	if _hatch_save == null or party_index < 0 \
+		or party_index >= _hatch_save.party.size():
+		return
+	var mon: Gen2SaveMon = _hatch_save.party[party_index] as Gen2SaveMon
+	if mon == null:
+		return
+	mon.nickname = nickname
+	_script_prompt = "%s hatched" % nickname
+
+
+func _on_hatch_closed() -> void:
+	var host: Gen2EggHatchScreen = _hatch_host
+	_hatch_host = null
+	_hatch_save = null
+	if host != null:
+		Gen2Screen.drop(host)
+	if _renderer != null:
+		_renderer.refresh()
+	_refresh_labels()
 
 
 ## `EnterMap`'s own tail, which a warp reaches once its setup script has run and
@@ -1891,6 +1973,36 @@ func preview_item_evolution_use() -> void:
 		if int((rows[index] as Dictionary).get("item", 0)) == int(stone["item"]):
 			_start_menu_host.set("_pack_cursor", index)
 			break
+
+
+## Public screenshot driver and scene-test entry for `OverworldHatchEgg`: it
+## stands an egg with one cycle left in the first party slot of an injected
+## save, spends the egg step, and opens the sequence on whatever hatched.
+##
+## [param species] is what is inside the egg; 0 takes the first species the
+## cache holds, so the driver works on all three without a table.
+func preview_egg_hatch(species: int = 0) -> void:
+	if _world == null or _data == null or _hatch_host != null:
+		return
+	var save: Gen2SaveData = _embedded_party_save()
+	if save == null or save.party.is_empty():
+		_script_prompt = "Hatch preview needs a party"
+		_refresh_labels()
+		return
+	var mon: Gen2SaveMon = save.party[0]
+	mon.species = species if species > 0 else 1
+	mon.is_egg = true
+	mon.hp = 0
+	mon.nickname = "EGG"
+	## One cycle left, so the pass this drains is the one that hatches it.
+	mon.happiness = 1
+	_injected_save = save
+	if Gen2WorldPartyHost.apply_egg_steps(save, 1) < 0:
+		return
+	var summary: Dictionary = Gen2WorldPartyHost.hatch_egg(_world, save, 0)
+	if summary.is_empty():
+		return
+	_open_hatch([summary], save)
 
 
 ## The first `EVOLVE_ITEM` row this cache carries, as `{species, item}`. Walked

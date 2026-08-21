@@ -186,10 +186,14 @@ func _clear(map: PackedInt32Array, x: int, y: int, rows: int, columns: int) -> v
 			_put(map, Vector2i(x + column, y + row), BLANK_TILE)
 
 
+## A prompt is one `PlaceString` per row, and `.Pokemon`'s two are `hlcoord 5, 2`
+## and `hlcoord 5, 4`: the rows the screen prints on are two apart.
 func _string(map: PackedInt32Array, text: String, at: Vector2i) -> void:
-	var codes: PackedByteArray = Gen2Text.encode(text)
-	for index: int in codes.size():
-		_put(map, at + Vector2i(index, 0), codes[index])
+	var lines: PackedStringArray = text.split("\n")
+	for line: int in lines.size():
+		var codes: PackedByteArray = Gen2Text.encode(lines[line])
+		for index: int in codes.size():
+			_put(map, at + Vector2i(index, line * 2), codes[index])
 
 
 func _put(map: PackedInt32Array, at: Vector2i, tile: int) -> void:

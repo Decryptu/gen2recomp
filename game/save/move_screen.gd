@@ -17,7 +17,7 @@ signal closed
 signal sfx_requested(index: int, waited: bool)
 
 ## `constants/sfx_constants.asm`.
-const SFX_READ_TEXT_2: int = 0x02
+const SFX_READ_TEXT_2: int = 0x08
 const SFX_SWITCH_POKEMON: int = Gen2PartyScreen.SFX_SWITCH_POKEMON
 
 var _data: GameData = null

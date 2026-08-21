@@ -1501,6 +1501,14 @@ const BACKPIC_TILES: int = 6
 ## The battle screen's frontpic window, and so the atlas cell size.
 const FRONTPIC_MAX_TILES: int = 7
 
+## `EGG` is a party species rather than a Pokemon: `PokemonPicPointers` and
+## `PokemonPalettes` both carry an entry for it past the 251, and nothing else
+## in either table does.
+const EGG_SPECIES: int = 0xFD
+## `gfx/pokemon/egg/front.animated.2bpp`, five tiles square like the smallest
+## front pics.
+const EGG_PIC_TILES: int = 5
+
 ## Byte positions within a 32-byte base stats entry.
 const STAT_HP: int = 1
 const STAT_ATTACK: int = 2
@@ -1731,6 +1739,13 @@ const GOLD_SILVER: Dictionary = {
 	# `GetTrainerBackpic`'s pics, LZ at the address rather than behind a
 	# pointer. Gold and Silver have one player character, so there is no Kris.
 	"player_backpic": {"chris": 0x3F9CB, "kris": -1, "dude": 0x3FB5B},
+	# `EggPic`, LZ at the address the way the back pics are: Gold and Silver's
+	# `PokemonPicPointers` stops at NUM_POKEMON and `_GetFrontpic` reaches the
+	# egg through its own `cp EGG / ld hl, EggPic` instead. The picture is not
+	# Crystal's and carries no animation frames. Located by decompressing at
+	# every offset and keeping the run that reproduces pokegold's own
+	# `gfx/pokemon/egg/egg.png`; the hit is unique and the same in both dumps.
+	"egg_pic": 0x53A83,
 	# Trainer card. Located by converting the pinned gfx/trainer_card PNGs and
 	# matching the bytes in the cartridge; the run is contiguous and
 	# self-consistent, status running straight into the two leader copies and
@@ -2202,6 +2217,9 @@ const CRYSTAL: Dictionary = {
 		"tiles": 0x8C2F4, "palette": 0x8C6A1, "dark_palette": 0x8C6A9,
 	},
 	"player_backpic": {"chris": 0x2BA1A, "kris": 0x88ED6, "dude": 0x2BBAA},
+	# Crystal's `PokemonPicPointers` carries an EGG entry and `_GetFrontpic`
+	# reads the egg through it like any other pic, so there is no address to pin.
+	"egg_pic": -1,
 	# Trainer card; see the Gold and Silver block above for how these were
 	# located. Crystal splits the card pic in two by gender and stores both
 	# column-major, and adds the one-tile right corner Gold and Silver lack.

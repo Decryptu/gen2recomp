@@ -193,7 +193,9 @@ func _build_live(data: GameData, group: int, number: int, cell: Vector2i) -> voi
 	## cell, so the player is left where the map puts them.
 	if _kind_cell.x >= 0:
 		_screen.start_cell = _kind_cell
-	elif cell.x >= 0 and _kind not in [&"battle_transition", &"level_evolution"]:
+	elif cell.x >= 0 and _kind not in [
+		&"battle_transition", &"level_evolution", &"egg_hatch",
+	]:
 		_screen.start_cell = cell
 	## Pinned so two captures of the same map are the same picture: the seed the
 	## screen resolves is what a wandering NPC's own generator is built from.
@@ -248,6 +250,19 @@ func _process(_delta: float) -> bool:
 				if evolving == null:
 					break
 				if evolving.awaiting_press():
+					_screen.press_button(Gen2Button.A)
+		elif _kind == &"egg_hatch":
+			## `OverworldHatchEgg`, driven the same way and for the same reason:
+			## the sequence is five hundred frames of picture, so the first
+			## number is how far into it to photograph and the second is the
+			## species inside the egg, 0 for the first the cache holds.
+			_screen.preview_egg_hatch(maxi(_cell.y, 0))
+			for _frame: int in maxi(_cell.x, 0):
+				_screen.advance_frame()
+				var hatching: Gen2EggHatchScreen = _screen.get("_hatch_host")
+				if hatching == null:
+					break
+				if hatching.awaiting_press():
 					_screen.press_button(Gen2Button.A)
 		elif _kind == &"yes_no":
 			## `Script_yesorno`'s own box: the NPC beside the player is talked
@@ -338,7 +353,7 @@ func _process(_delta: float) -> bool:
 			_screen.preview_effect_sprites(_kind)
 		if _kind not in [
 			&"warp", &"door", &"map_name_sign", &"ledge", &"heal_machine",
-			&"battle_transition", &"level_evolution",
+			&"battle_transition", &"level_evolution", &"egg_hatch",
 		]:
 			## Those kinds drove themselves to the frame they want; every other
 			## kind stages a sprite and then spends the frames it needs.

@@ -259,8 +259,8 @@ const BOX_TEXT_COLUMN: int = 1
 ## `MUSIC_POKEMON_TALK`, `MUSIC_POKEMON_MARCH` and `MUSIC_POKEMON_LULLABY`
 ## (`constants/music_constants.asm`), the three tracks a segment restarts.
 const MUSIC_POKEMON_TALK: int = 29
-const MUSIC_POKEMON_MARCH: int = 30
-const MUSIC_POKEMON_LULLABY: int = 31
+const MUSIC_POKEMON_MARCH: int = 0x51
+const MUSIC_POKEMON_LULLABY: int = 0x50
 
 var _data: GameData = null
 var _random: RandomNumberGenerator = null

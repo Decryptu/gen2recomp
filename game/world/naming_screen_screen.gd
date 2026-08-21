@@ -12,6 +12,11 @@ extends Control
 ## nothing else, so a caller that never sees this signal has no name to take.
 signal closed(name: String)
 
+## `wNamingScreenType`'s two that a screen here opens. Both are the player's
+## keyboard; NAME_MON differs only in `MON_NAME_LENGTH - 1` behind it.
+const KIND_PLAYER: StringName = &"player"
+const KIND_MON: StringName = &"mon"
+
 var _screen: Gen2NamingScreen = null
 var _page: Gen2NamingScreenPage = null
 var _prompt: String = ""
@@ -31,17 +36,23 @@ var palette: PackedColorArray = PackedColorArray():
 ## names a Pokemon, the rival and Mom under its own prompt. Answers false when
 ## the cache carried no keyboards, which the caller reports rather than opening
 ## a screen with nothing on it.
-func open(data: GameData, prompt: String, box: bool = false) -> bool:
+func open(data: GameData, prompt: String, kind: StringName = KIND_PLAYER) -> bool:
 	_prompt = prompt
 	_page = Gen2NamingScreenPage.from_data(data)
 	if _page == null or not _page.ready():
 		return false
-	_screen = Gen2NamingScreen.for_box(data) if box else Gen2NamingScreen.for_player(data)
+	_screen = _model(data, kind)
 	if _screen.rows().is_empty():
 		return false
 	if is_inside_tree():
 		_refresh()
 	return true
+
+
+static func _model(data: GameData, kind: StringName) -> Gen2NamingScreen:
+	if kind == KIND_MON:
+		return Gen2NamingScreen.for_mon(data)
+	return Gen2NamingScreen.for_player(data)
 
 
 func _ready() -> void:

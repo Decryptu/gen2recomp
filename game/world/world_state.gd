@@ -18,6 +18,10 @@ const MUSIC_NONE: int = 0
 ## `wUndergroundSwitchPositions`, the phone rematch counters), so they are
 ## kept as an address-keyed byte map rather than a WRAM image.
 const SCRIPT_MEMORY_CAPACITY: int = 64
+
+## `CountStep`'s `cp $80`: the step count `DoEggStep` runs on, half a wrap away
+## from the `StepHappiness` pass at zero.
+const EGG_STEP_PHASE: int = 0x80
 const PHONE_RECEIVE_DELAYS: Array[int] = [20, 10, 5, 3]
 const TEMPORARY_MAP_RELOAD_FLAGS: Array[int] = [0, 1, 2, 3, 4, 5, 6, 7]
 ## Crystal maps STATUSFLAGS_HALL_OF_FAME_F through the source engine flag
@@ -139,6 +143,10 @@ var _happiness_step_count: int = 0
 ## How many `StepHappiness` passes the walk owes but no party owner has spent.
 ## The state has no party; the screen that does drains this.
 var _pending_step_happiness: int = 0
+## The same for `DoEggStep`, which `CountStep` reaches on the pass `wStepCount`
+## is `$80`, so an egg loses one hatch cycle every 256 steps offset 128 from the
+## happiness pass.
+var _pending_egg_steps: int = 0
 ## `wStatusFlags`' `STATUSFLAGS_NO_WILD_ENCOUNTERS_F`, which `wildoff` sets and
 ## `wildon` clears around a scripted sequence.
 var _wild_encounters_off: bool = false
@@ -417,6 +425,7 @@ func restore_from_dict(raw: Variant) -> void:
 	_poison_step_count = restored._poison_step_count
 	_happiness_step_count = restored._happiness_step_count
 	_pending_step_happiness = 0
+	_pending_egg_steps = 0
 	_wild_encounters_off = restored._wild_encounters_off
 	_park_balls = restored._park_balls
 	_bug_contest_started = restored._bug_contest_started.duplicate()
@@ -1055,6 +1064,8 @@ func count_step() -> void:
 		_happiness_step_count = (_happiness_step_count + 1) & 1
 		if _happiness_step_count == 0:
 			_pending_step_happiness += 1
+	if _step_count == EGG_STEP_PHASE:
+		_pending_egg_steps += 1
 	if _repel_steps > 0:
 		_repel_steps -= 1
 	changed.emit()
@@ -1073,6 +1084,13 @@ func poison_step_count() -> int:
 func take_pending_step_happiness() -> int:
 	var owed: int = _pending_step_happiness
 	_pending_step_happiness = 0
+	return owed
+
+
+## The same for the owed `DoEggStep` passes.
+func take_pending_egg_steps() -> int:
+	var owed: int = _pending_egg_steps
+	_pending_egg_steps = 0
 	return owed
 
 

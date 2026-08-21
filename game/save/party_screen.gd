@@ -772,12 +772,16 @@ func _blend_stats_pic(image: Image, snapshot: Dictionary) -> void:
 	var species: int = int(snapshot.get("species", 0))
 	if species <= 0:
 		return
-	var pic: Dictionary = _data.species_pic(species)
+	## `EggStatsScreen` draws the egg rather than what is inside it, which is
+	## `GetEggFrontpic`'s own picture and its own palette entry.
+	var egg: bool = bool(snapshot.get("egg", false))
+	var pic: Dictionary = _data.egg_pic() if egg else _data.species_pic(species)
 	if pic.is_empty():
 		return
 	var art: Image = Gen2PicImage.from_atlas(
 		_data.atlas_indices(pic["atlas"]), _data.atlas(pic["atlas"]), pic,
-		_data.palette(species, bool(snapshot.get("shiny", false)))
+		_data.egg_palette() if egg \
+			else _data.palette(species, bool(snapshot.get("shiny", false)))
 	)
 	if art == null:
 		return

@@ -26,8 +26,8 @@ signal music_requested(index: int)
 const MUSIC_NONE: int = 0
 const MUSIC_EVOLUTION: int = 0x22
 ## constants/sfx_constants.asm.
-const SFX_EVOLVED: int = 0x4F
-const SFX_CAUGHT_MON: int = 0x2F
+const SFX_EVOLVED: int = 0xA4
+const SFX_CAUGHT_MON: int = 0x02
 
 const TILE: int = Gen2Font.TILE
 ## `hlcoord 7, 2`, the 7x7 block both pics are placed in.

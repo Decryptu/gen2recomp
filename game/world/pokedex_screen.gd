@@ -44,7 +44,7 @@ const CURSOR_BLINK_FRAMES: int = 8
 ## with `SFX_CHANGE_DEX_MODE` played between them.
 const CHANGING_MODES_FRAMES: int = 64
 ## constants/sfx_constants.asm.
-const SFX_CHANGE_DEX_MODE: int = 0x5C
+const SFX_CHANGE_DEX_MODE: int = 0x15
 
 ## `DexEntryScreen_ArrowCursorData`'s four positions, in its own order. PRNT
 ## wants a printer, which is deliberately out, so it is drawn and refuses.

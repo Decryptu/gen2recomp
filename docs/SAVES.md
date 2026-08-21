@@ -31,8 +31,11 @@ Save format version 6 stores:
   cartridge's own bugs are reproduced, and the trainer-AI difficulty);
 - `is_egg` for received eggs. An egg keeps its party slot and is skipped when
   the battle party is built, matching the cartridge refusing it as a combatant
-  rather than removing it; the writeback puts it back in the same slot. Hatch
-  behavior does not exist yet.
+  rather than removing it; the writeback puts it back in the same slot. Its
+  `happiness` byte is its hatch counter, which is what `GiveEgg` writes and what
+  `DoEggStep` drains: the walk takes one cycle off every egg in the party every
+  256 steps, and the first to reach zero hatches where it stands. Breeding and
+  the Day-Care do not exist, so the only egg the game hands out is a script's.
 
 Derived battle stats are recalculated on load. Volatile state, including stages,
 confusion, recharge, Disable, Encore, trapping, Fly, Dig, Rollout and rampage,

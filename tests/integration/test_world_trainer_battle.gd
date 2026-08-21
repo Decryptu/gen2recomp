@@ -1185,10 +1185,14 @@ func _write_level_evolution() -> void:
 func _settle_evolution(cancel: bool = false) -> void:
 	for _frame: int in 4000:
 		if _world_screen.get("_evolution_host") == null:
+			## `queue_free` lands at the end of the frame, so the screen is only
+			## gone once one has passed; without this the run reports it orphaned.
+			await get_tree().process_frame
 			return
 		_world_screen.advance_frame()
 		var screen: Gen2EvolutionScreen = _world_screen.get("_evolution_host")
 		if screen == null:
+			await get_tree().process_frame
 			return
 		if cancel and screen.phase() == Gen2EvolutionScreen.Phase.FLASH:
 			_world_screen.press_button(Gen2Button.B)
@@ -1211,7 +1215,7 @@ func test_a_level_evolution_is_presented_after_the_battle_and_then_applied() -> 
 	assert_eq(screen.remaining(), 1)
 	assert_eq(save.party[0].species, EVOLVING_SPECIES, "nothing is written before the animation")
 
-	_settle_evolution()
+	await _settle_evolution()
 	assert_null(_world_screen.get("_evolution_host"), "and it closes on its own")
 	assert_eq(save.party[0].species, EVOLVED_SPECIES)
 	assert_eq(save.party[0].nickname, "BAYLEEF", "UpdateSpeciesNameIfNotNicknamed")
@@ -1232,8 +1236,106 @@ func test_b_during_the_flash_cancels_the_evolution_and_says_so() -> void:
 	save.party[0].level = EVOLVE_LEVEL
 
 	_world_screen.preview_level_evolution()
-	_settle_evolution(true)
+	await _settle_evolution(true)
 
 	assert_eq(save.party[0].species, EVOLVING_SPECIES, "the species is unchanged")
 	assert_eq(save.party[0].nickname, "CHIKORITA")
 	assert_false(_world_screen._world.state.has_caught_species(EVOLVED_SPECIES))
+
+
+## Runs the open hatch screen to its end, pressing A for every page and box it
+## waits on, the way the overworld's own pump and funnel do.
+func _settle_hatch(nickname: bool = false) -> void:
+	for _frame: int in 4000:
+		var screen: Gen2EggHatchScreen = _world_screen.get("_hatch_host")
+		if screen == null:
+			await get_tree().process_frame
+			return
+		_world_screen.advance_frame()
+		screen = _world_screen.get("_hatch_host")
+		if screen == null:
+			await get_tree().process_frame
+			return
+		if screen.phase() == Gen2EggHatchScreen.Phase.NAMING:
+			var model: Gen2NamingScreen = screen.naming_screen().model()
+			if model.length == 0:
+				_world_screen.press_button(Gen2Button.A)
+			else:
+				## END, which is `NamingScreen_StoreEntry`.
+				model.column = Gen2NamingScreen.LAST_COLUMN
+				model.row = model.command_row()
+				_world_screen.press_button(Gen2Button.A)
+			continue
+		if screen.phase() == Gen2EggHatchScreen.Phase.ASK_NICKNAME and not nickname:
+			_world_screen.press_button(Gen2Button.B)
+			continue
+		if screen.awaiting_press():
+			_world_screen.press_button(Gen2Button.A)
+	fail_test("the hatch screen never closed")
+
+
+## `HatchEggs` has already written the row when the sequence opens, so the
+## screen is presentation and the nickname alone. `.nonickname` keeps the
+## species name `GetPokemonName` put there.
+func test_an_egg_hatches_into_the_species_it_was_carrying() -> void:
+	await _open_world(true)
+	var save: Gen2SaveData = _world_screen._injected_save
+	_world_screen.preview_egg_hatch()
+	save = _world_screen._injected_save
+	var screen: Gen2EggHatchScreen = _world_screen.get("_hatch_host")
+	assert_not_null(screen, "the pass opened its screen")
+	assert_false(save.party[0].is_egg, "the row is written before the sequence")
+	assert_true(save.party[0].hp > 0)
+	assert_eq(" ".join(screen.text_lines()).strip_edges(), "Huh?",
+		"`Text_BreedHuh` is printed over the map before anything is cleared")
+	assert_true(screen.awaiting_press(), "its `para` waits for a press")
+	var species_name: String = String(
+		_data.species(save.party[0].species).get("name", "")
+	)
+	for _frame: int in 4000:
+		if screen.phase() == Gen2EggHatchScreen.Phase.HATCHED:
+			break
+		_world_screen.advance_frame()
+		if screen.awaiting_press():
+			_world_screen.press_button(Gen2Button.A)
+	assert_eq(
+		" ".join(screen.text_lines()),
+		Gen2WorldPartyHost.hatch_text(species_name).replace("\n", " ")
+	)
+
+	await _settle_hatch()
+	assert_null(_world_screen.get("_hatch_host"), "and it closes on its own")
+	assert_eq(
+		save.party[0].nickname,
+		String(_data.species(save.party[0].species).get("name", "")),
+		"NO keeps the species name"
+	)
+	assert_true(_world_screen._world.state.has_caught_species(save.party[0].species))
+
+
+## YES reaches `NamingScreen` under NAME_MON, and what it stores is the row's
+## nickname. An empty entry keeps the species name, which is `InitName`.
+func test_yes_opens_the_naming_screen_and_its_entry_becomes_the_nickname() -> void:
+	await _open_world(true)
+	_world_screen.preview_egg_hatch()
+	var save: Gen2SaveData = _world_screen._injected_save
+	var screen: Gen2EggHatchScreen = _world_screen.get("_hatch_host")
+	for _frame: int in 4000:
+		if screen.phase() == Gen2EggHatchScreen.Phase.ASK_NICKNAME:
+			break
+		_world_screen.advance_frame()
+		if screen.awaiting_press():
+			_world_screen.press_button(Gen2Button.A)
+	assert_eq(screen.nickname_cursor(), 0, "YesNoBox opens on YES")
+	_world_screen.press_button(Gen2Button.A)
+	assert_eq(screen.phase(), Gen2EggHatchScreen.Phase.NAMING)
+	var model: Gen2NamingScreen = screen.naming_screen().model()
+	assert_eq(model.max_length, Gen2NamingScreen.MON_MAX_LENGTH)
+	model.press_a()
+	model.column = Gen2NamingScreen.LAST_COLUMN
+	model.row = model.command_row()
+	_world_screen.press_button(Gen2Button.A)
+
+	await _settle_hatch()
+	assert_null(_world_screen.get("_hatch_host"))
+	assert_eq(save.party[0].nickname.length(), 1, "the one letter that was entered")
