@@ -522,11 +522,15 @@ func _write_stone_item() -> void:
 	for raw: Dictionary in species:
 		match int(raw.get("number", 0)):
 			155:
+				## Distinct names, since the fixture calls every filler species
+				## FILLER and the two boxes are about which name is used.
+				raw["name"] = "CHIKORITA"
 				raw["evolutions"] = [{
 					"method": RomLayout.EVOLVE_ITEM, "parameter": MOON_STONE,
 					"condition": 0, "target": EVOLVED_SPECIES,
 				}]
 			EVOLVED_SPECIES:
+				raw["name"] = "BAYLEEF"
 				raw["learnset"] = [{"level": 5, "move": OFFERED_MOVE}]
 	RomCache.write_json(RomCache.species_path(Fixture.directory()), species)
 	## Reopened the way before_each does: the rows above are read on open.
@@ -580,6 +584,30 @@ func test_a_field_stone_says_the_mon_is_evolving_and_what_it_became() -> void:
 	var result: String = String(host.get("_pack_result"))
 	assert_true(result.contains("%s is evolving!" % nickname), result)
 	assert_true(result.contains("evolved into"), result)
+
+
+## `GetNickname` / `CopyName1` run before the species is replaced, and BOTH
+## boxes read that buffer: an un-nicknamed Pokemon is named by what it WAS on the
+## way in, never by what it became. Reading it back off the party row said
+## "What? <NEW> is evolving!" instead.
+func test_the_evolving_line_names_what_the_mon_was_not_what_it_became() -> void:
+	_write_stone_item()
+	await _open_world()
+	var save: Gen2SaveData = _world_screen._injected_save
+	var before: String = String(_data.species(155).get("name", ""))
+	var after: String = String(_data.species(EVOLVED_SPECIES).get("name", ""))
+	assert_ne(before, after, "the two species are named differently")
+	## No nickname at all, which is the row `_party_targets` used to answer for.
+	save.party[0].nickname = ""
+	var host: Gen2StartMenuScreen = await _open_stone_pack()
+	await _use_stone_on_first_member(host)
+
+	var result: String = String(host.get("_pack_result"))
+	assert_true(result.contains("What? %s is evolving!" % before), result)
+	assert_true(result.contains("Your %s evolved into %s!" % [before, after]), result)
+	assert_false(result.contains("What? %s" % after), result)
+	## `UpdateSpeciesNameIfNotNicknamed` still runs, after both boxes.
+	assert_eq(save.party[0].nickname, after)
 
 
 ## `EvolveAfterBattle` calls `LearnMove` over the new learnset, so a move the new

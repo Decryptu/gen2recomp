@@ -77,7 +77,10 @@ static func nickname_after_evolution(
 ) -> String:
 	if data == null or old_species == new_species:
 		return nickname
-	if nickname != String(data.species(old_species).get("name", "")):
+	# A cartridge party row always holds a name, so an empty one here is this
+	# project's own way of saying un-nicknamed rather than a third case.
+	if not nickname.is_empty() \
+		and nickname != String(data.species(old_species).get("name", "")):
 		return nickname
 	return String(data.species(new_species).get("name", nickname))
 
