@@ -72,12 +72,17 @@ const EXPECTED_DEFERRED: Dictionary = {
 	69: "DayCareMon1", 70: "DayCareMon2",
 }
 
-## Script rows whose linear walk runs past a `jumptext` pointer table and decodes
-## its addresses as commands, so the `special` it reports names no routine at
-## all. Pinned rather than filtered: `Gen2WorldScript.is_terminal` stops at
-## `end` and `endcallback` alone, and until the commands that never return stop
-## it too, this is what that costs measured at one place.
-const EXPECTED_OUT_OF_TABLE: Dictionary = {&"crystal": 23, &"gold": 25, &"silver": 25}
+## Decoded `special` operands that name no `SpecialsPointers` entry. Pinned
+## rather than filtered, so a walker that starts overrunning a script again is
+## caught here: every one of these comes from a cached script pointer, and a
+## pointer only exists because some walk collected it.
+##
+## Crystal's one is the cartridge's own. BattleTowerElevator.asm's receptionist
+## is an `OBJECTTYPE_SCRIPT` object whose script word is
+## `MovementData_BattleTowerElevatorReceptionistWalksIn`, so the bytes behind it
+## are movement rather than commands; the object stands in a room the scene
+## script drives and is never talked to.
+const EXPECTED_OUT_OF_TABLE: Dictionary = {&"crystal": 1, &"gold": 0, &"silver": 0}
 
 ## The five fades and what each of them costs, from `ConvertTimePals*HL`'s own
 ## `ld c` and `BattleTowerFade`'s. A fade that spends no frame is what this
@@ -86,16 +91,6 @@ const EXPECTED_FADE_FRAMES: Dictionary = {46: 8, 47: 28, 48: 8, 49: 8, 50: 8}
 
 ## `data/events/special_pointers.asm`'s own length, the same in both pins.
 const SPECIALS_POINTERS_SIZE: int = 169
-
-## A linear walk has to stop where control leaves the script, or it decodes the
-## pointer table a `jumptext` list is followed by as commands. These are the
-## decoder's own names for the commands that never come back;
-## `scall`/`farscall`/`callstd` do and are not here.
-const WALK_ENDS: Array[String] = [
-	"end", "endcallback", "reloadend", "endall", "stopandsjump",
-	"sjump", "farsjump", "memjump", "jumpstd",
-	"jumptext", "farjumptext", "jumptextfaceplayer",
-]
 
 var _r: RefCounted = null
 ## Which indices the runner answers, derived from the runner rather than kept
@@ -207,12 +202,12 @@ func _verify_slow_cry(data: GameData) -> void:
 
 ## Every cached script on one cartridge, walked for `special` and tallied.
 func _verify_corpus(data: GameData, crystal_commands: bool) -> void:
-	var scripts: Variant = RomCache.read_json(RomCache.world_scripts_path(data.directory))
-	if not scripts is Dictionary:
+	var scripts: Array = data.world_script_keys()
+	if scripts.is_empty():
 		_r.fail("the script table is missing")
 		return
 	var reached: Dictionary = {}
-	for raw_key: Variant in (scripts as Dictionary):
+	for raw_key: Variant in scripts:
 		var parts: PackedStringArray = String(raw_key).split(":")
 		if parts.size() != 2:
 			continue
@@ -273,7 +268,7 @@ func _specials_in(bytes: PackedByteArray, crystal_commands: bool) -> Array[int]:
 			))
 		steps += 1
 		offset += int(command["width"])
-		if name in WALK_ENDS:
+		if not Gen2WorldScript.continues_after(int(command["opcode"]), crystal_commands):
 			break
 	return out
 

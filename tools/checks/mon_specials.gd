@@ -220,7 +220,7 @@ func _commands_from(bytes: PackedByteArray, crystal_commands: bool) -> PackedStr
 		out.append(String(command.get("name", "")))
 		steps += 1
 		offset += int(command["width"])
-		if Gen2WorldScript.is_terminal(int(command["opcode"]), crystal_commands):
+		if not Gen2WorldScript.continues_after(int(command["opcode"]), crystal_commands):
 			break
 	return out
 
@@ -242,6 +242,6 @@ func _special_at(bytes: PackedByteArray, crystal_commands: bool, special: int) -
 			return index
 		index += 1
 		offset += int(command["width"])
-		if Gen2WorldScript.is_terminal(int(command["opcode"]), crystal_commands):
+		if not Gen2WorldScript.continues_after(int(command["opcode"]), crystal_commands):
 			return -1
 	return -1

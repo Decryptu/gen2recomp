@@ -163,16 +163,16 @@ func advance_frame() -> void:
 		_open_question(Phase.BETTER_ASK)
 
 
-func _text(name: String) -> String:
-	return String(_texts.get(name, ""))
+func _text(key: String) -> String:
+	return String(_texts.get(key, ""))
 
 
 ## Every one of the routine's texts that names `wStringBuffer1` is filled with
 ## `GetCurNickname`'s own answer, which is the chosen member's nickname before
 ## the copy and its new one after.
-func _filled(name: String, nickname: String) -> String:
+func _filled(key: String, nickname: String) -> String:
 	return Gen2TextStream.fill_all_markers(
-		_text(name), Gen2TextStream.RAM_MARKER, nickname
+		_text(key), Gen2TextStream.RAM_MARKER, nickname
 	)
 
 
@@ -202,8 +202,8 @@ func _show_text(text: String, prompt: bool = false) -> void:
 	_text_box.show_text(text, prompt)
 
 
-func _open_question(phase: int) -> void:
-	_phase = phase
+func _open_question(next_phase: int) -> void:
+	_phase = next_phase
 	_yes = true
 	_draw_yes_no()
 

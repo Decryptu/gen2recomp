@@ -376,3 +376,37 @@ func test_reference_scan_reports_command_queue_pointers() -> void:
 	assert_eq(queues.size(), 1)
 	assert_eq(queues[0], {"bank": 48, "address": 0x572B})
 	assert_true(references["scripts"].is_empty())
+
+
+## The commands that never come back, on both profiles. A walker bounded on
+## `is_terminal` alone read the pointer table behind a `jumptext` as commands.
+func test_commands_that_never_return_end_a_linear_walk() -> void:
+	## Crystal: sjump, jumpstd, jumptextfaceplayer, farjumptext, jumptext,
+	## stopandsjump, end, endall, fruittree, credits.
+	for opcode: int in [0x03, 0x0C, 0x51, 0x52, 0x53, 0x8F, 0x91, 0x93, 0x9B, 0xA2]:
+		assert_false(
+			Gen2WorldScript.continues_after(opcode, true),
+			"crystal %02X continues" % opcode
+		)
+	## Gold and Silver, one lower from jumptext on and two from halloffame on.
+	for opcode: int in [0x03, 0x0C, 0x51, 0x52, 0x8E, 0x90, 0x92, 0x9A, 0xA0]:
+		assert_false(
+			Gen2WorldScript.continues_after(opcode, false),
+			"gold %02X continues" % opcode
+		)
+
+
+## `endifjustbattled`'s `jp Script_end` sits behind a `ret z` and
+## `reloadmapafterbattle` jumps only on LOSE, so the stream carries on after
+## both; Route30.asm's rematch counter is the `loadmem` after one.
+func test_conditional_enders_do_not_stop_a_linear_walk() -> void:
+	for opcode: int in [Gen2WorldScript.SCALL, 0x60, 0x66, 0x3C, 0x8A]:
+		assert_true(
+			Gen2WorldScript.continues_after(opcode, true),
+			"crystal %02X stops" % opcode
+		)
+	for opcode: int in [Gen2WorldScript.SCALL, 0x5F, 0x65, 0x3C, 0x89]:
+		assert_true(
+			Gen2WorldScript.continues_after(opcode, false),
+			"gold %02X stops" % opcode
+		)

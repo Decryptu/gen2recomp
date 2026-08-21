@@ -249,9 +249,37 @@ func world_maps() -> Array:
 
 ## Every imported script's `bank:address` key, sorted, for a caller that has to
 ## walk the whole corpus rather than follow one pointer. See [Gen2WorldCatalog].
+##
+## The keys an item ball, a hidden item or a conditional background event points
+## at are NOT here. Their bytes live in the map-scripts bank and are cached with
+## the scripts because every runtime reader asks [method world_script] for them,
+## but they are `db item, quantity`, `dwb event, item` and a `conditional_event`
+## record rather than commands, and a corpus walk that decoded them read item
+## counts as opcodes.
 func world_script_keys() -> Array:
-	var out: Array = _scripts().keys()
+	var data_only: Dictionary = _script_data_pointers()
+	var out: Array = []
+	for key: Variant in _scripts():
+		if not data_only.has(String(key)):
+			out.append(key)
 	out.sort()
+	return out
+
+
+## The pointer keys [method world_script_keys] leaves out, derived from the maps
+## rather than stored, so the importer and this side cannot drift apart.
+func _script_data_pointers() -> Dictionary:
+	var out: Dictionary = {}
+	for map: Gen2WorldMap in _maps():
+		var bank: int = int(map.events.get("bank", 0))
+		for source: String in ["bg_events", "objects"]:
+			for raw: Variant in map.events.get(source, []):
+				if not raw is Dictionary:
+					continue
+				var event: Dictionary = raw
+				if Gen2WorldImporter.event_pointer_is_script(source, event):
+					continue
+				out[Gen2WorldScript.pointer_key(bank, int(event.get("script", 0)))] = true
 	return out
 
 

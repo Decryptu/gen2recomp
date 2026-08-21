@@ -595,6 +595,36 @@ static func is_terminal(opcode: int, crystal_commands: bool = true) -> bool:
 	return is_end(opcode, crystal_commands) or is_endcallback(opcode, crystal_commands)
 
 
+## pokegold-numbered opcodes whose handler reaches ScriptJump, Script_end or
+## Script_endall unconditionally, so the bytes after the command are never read
+## as one. Two near misses are deliberately absent: `endifjustbattled`'s
+## `jp Script_end` sits behind a `ret z`, and `reloadmapafterbattle` jumps only
+## on LOSE and otherwise falls into `Script_reloadmap`, whose `StopScript`
+## leaves the script pointer where it stands (Route30.asm resumes on the
+## `loadmem` after it).
+const NON_RETURNING_SOURCE_OPCODES: Array[int] = [
+	0x03, 0x04, 0x05,  ## sjump, farsjump, memjump
+	0x0C,  ## jumpstd
+	0x51,  ## jumptextfaceplayer
+	0x64,  ## scripttalkafter
+	0x8E, 0x8F, 0x90, 0x91, 0x92,  ## stopandsjump, endcallback, end, reloadend, endall
+	0x99, 0x9A,  ## describedecoration, fruittree
+	0x9F, 0xA0,  ## halloffame, credits
+]
+
+
+## Whether the command at [param opcode] is followed by another command.
+##
+## A linear walk over a script stops here, not at [method is_terminal]: a script
+## that ends in `jumptext` is followed by the text it named, and a `jumpstd`
+## table by its pointers. Only the live runner, which dispatches one command at
+## a time and is told where to go next, uses `is_terminal`.
+static func continues_after(opcode: int, crystal_commands: bool = true) -> bool:
+	if is_text_jump(opcode, crystal_commands):
+		return false
+	return source_opcode(opcode, crystal_commands) not in NON_RETURNING_SOURCE_OPCODES
+
+
 static func is_waitbutton(opcode: int, crystal_commands: bool = true) -> bool:
 	return opcode == WAITBUTTON if crystal_commands else opcode == 0x53
 
@@ -918,7 +948,7 @@ static func scan_references(
 				command_queues.append({"bank": bank, "address": int(command["address"])})
 		at += int(command["width"])
 		command_count += 1
-		if is_terminal(opcode, crystal_commands):
+		if not continues_after(opcode, crystal_commands):
 			break
 	return {
 		"scripts": scripts, "texts": texts, "movements": movements,

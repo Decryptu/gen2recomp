@@ -142,7 +142,7 @@ func _audit_scripts(data: GameData, crystal: bool) -> Dictionary:
 				unknown_commands += 1
 				break
 			at += int(command.get("width", 1))
-			if Gen2WorldScript.is_terminal(int(command.get("opcode", 0)), crystal):
+			if not Gen2WorldScript.continues_after(int(command.get("opcode", 0)), crystal):
 				break
 	return {
 		"failures": failures,

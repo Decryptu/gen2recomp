@@ -759,7 +759,7 @@ static func _scan_menu_references(
 			if not uses.has(use):
 				uses.append(use)
 		at += int(command["width"])
-		if Gen2WorldScript.is_terminal(opcode, crystal_commands):
+		if not Gen2WorldScript.continues_after(opcode, crystal_commands):
 			break
 
 

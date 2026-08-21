@@ -1,12 +1,20 @@
 class_name Gen2WorldImporter
 extends RefCounted
 
+const OBJECTTYPE_SCRIPT: int = 0
 const OBJECTTYPE_TRAINER: int = 2
 const TRAINER_RECORD_SIZE: int = 12
 ## The two background-event types whose pointer addresses a conditional_event
 ## record rather than a script (constants/script_constants.asm).
 const BGEVENT_IFSET: int = 5
 const BGEVENT_IFNOTSET: int = 6
+
+## The background-event types whose pointer is the script `BGEventJumptable`
+## calls (engine/overworld/events.asm): `.read` and the four `.checkdir`
+## entries. `.itemifset` and `.copy` copy their two bytes into
+## `wHiddenItemData`, and `.ifset`/`.ifnotset` read a conditional_event first,
+## which is [method _collect_conditional_bg_script]'s job.
+const BGEVENT_SCRIPT_TYPES: Array[int] = [0, 1, 2, 3, 4]
 
 ## Imports the map table, map attributes, map events, tileset tables, overworld
 ## object graphics and addressable overworld tile strips for a verified
@@ -982,7 +990,8 @@ static func _read_map(
 				continue
 			_collect_script(
 				rom, scripts_bank, int(event.get("script", 0)),
-				script_data, text_data, movement_data
+				script_data, text_data, movement_data,
+				event_pointer_is_script(source, event)
 			)
 			if source == "bg_events":
 				_collect_conditional_bg_script(
@@ -1279,6 +1288,25 @@ static func _read_map_scripts(
 	return {"ok": true, "scenes": scenes, "callbacks": callbacks}
 
 
+## Whether an event record's own pointer addresses commands.
+##
+## Only `ObjectEventTypeArray`'s `.script` and `BGEventJumptable`'s five reading
+## entries reach `CallScript` with it. An item ball's word is the `itemball`
+## macro's `db item, quantity`, a hidden item's is `hiddenitem`'s
+## `dwb event, item`, a conditional background event's is a `conditional_event`
+## record, and `OBJECTTYPE_3` through `OBJECTTYPE_6` are dummy events that run
+## nothing. Decoding those as commands and following what they named is where 50
+## Crystal and 20 Gold `loadmenu` records came from, and the `special` operands
+## that name no `SpecialsPointers` entry with them.
+static func event_pointer_is_script(source: String, event: Dictionary) -> bool:
+	match source:
+		"objects":
+			return int(event.get("object_type", -1)) == OBJECTTYPE_SCRIPT
+		"bg_events":
+			return int(event.get("type", -1)) in BGEVENT_SCRIPT_TYPES
+	return true
+
+
 ## A `BGEVENT_IFSET` or `BGEVENT_IFNOTSET` background event does not point at a
 ## script. It points at the four-byte `conditional_event` record
 ## (`macros/scripts/maps.asm`), an event flag then a near script pointer, and the
@@ -1306,6 +1334,10 @@ static func _collect_conditional_bg_script(
 	)
 
 
+## [param follow_references] is false for a pointer whose bytes are data rather
+## than commands. The slice is still cached, because every runtime reader of an
+## item ball, a hidden item and a conditional background event asks
+## `Gen2GameData.world_script` for it, but nothing decodes it as a script.
 static func _collect_script(
 	rom: RomFile,
 	bank: int,
@@ -1313,6 +1345,7 @@ static func _collect_script(
 	script_data: Dictionary,
 	text_data: Dictionary,
 	movement_data: Dictionary,
+	follow_references: bool = true,
 ) -> void:
 	if address < RomFile.BANK_SIZE or address >= RomFile.BANK_SIZE * 2:
 		return
@@ -1327,6 +1360,8 @@ static func _collect_script(
 	if bytes.is_empty():
 		return
 	script_data[key] = Array(bytes)
+	if not follow_references:
+		return
 	var references: Dictionary = Gen2WorldScript.scan_references(
 		bytes, bank, address, rom.id == &"crystal"
 	)
