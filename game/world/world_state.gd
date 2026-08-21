@@ -55,6 +55,11 @@ const ENGINE_ROCKETS_IN_RADIO_TOWER: int = 19
 const ENGINE_ROCKETS_IN_RADIO_TOWER_GOLD_SILVER: int = 18
 const ENGINE_GOLDENROD_UNDERGROUND_MERCHANT_CLOSED: int = 86
 const ENGINE_GOLDENROD_UNDERGROUND_MERCHANT_CLOSED_GOLD_SILVER: int = 85
+## `CELEBIEVENT_FOREST_IS_RESTLESS_F`, which `ForestTreeLeftAnimation` and its
+## three neighbours read every tick: while it is set, Ilex Forest's two tree
+## tiles cycle instead of standing on their first frame. Crystal only, the Gold
+## and Silver `TilesetForestAnim` carrying no tree frame at all.
+const ENGINE_FOREST_IS_RESTLESS: int = 100
 ## The first entry in the same `wDailyFlags1` byte. `KurtsHouse.asm` sets it
 ## when the apricorns are handed over and reads it to decide whether the ball is
 ## ready, so the day boundary is the whole of the errand's wait.

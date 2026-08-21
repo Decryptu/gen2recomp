@@ -31,6 +31,11 @@ var _timer: int = 0
 var _water_color: int = -1
 var _cave_color: int = -1
 var _time_of_day: int = Gen2WorldPalette.TIME_MORNING
+## The world's own flag store, read live by the four forest tree commands the
+## way `ForestTreeLeftAnimation` reads `wCelebiEvent` on every tick.
+var _state: Gen2WorldState = null
+## Which engine flag table `_state` is keyed by. See Gen2WorldState.engine_flag().
+var _crystal_flags: bool = true
 var _changed: bool = false
 ## Which tiles a run of commands rewrote, and whether a palette row moved. A
 ## renderer that keeps a texture only has to redo these tiles: the sequence
@@ -44,6 +49,8 @@ func configure(world: Gen2WorldAPI, time_of_day: int = Gen2WorldPalette.TIME_MOR
 	data = world.data if world != null else null
 	map = world.current_map if world != null else null
 	tileset = world.current_tileset if world != null else null
+	_state = world.state if world != null else null
+	_crystal_flags = Gen2WorldState.is_crystal_profile(data)
 	_time_of_day = clampi(time_of_day, 0, 3)
 	_command_index = 0
 	_timer = 0
@@ -222,13 +229,13 @@ func tick() -> bool:
 				"fountain", 0, TIMER_FOUNTAIN_FRAMES[_timer & 7], int(command.get("tile", -1))
 			)
 		"forest_left":
-			_copy_asset_tile("forest", 0, 0, 0x0C)
+			_copy_asset_tile("forest", 0, _forest_tree_frame(false), 0x0C)
 		"forest_right":
-			_copy_asset_tile("forest", 0, 0, 0x0F, 32)
+			_copy_asset_tile("forest", 0, _forest_tree_frame(false), 0x0F, 32)
 		"forest_left_2":
-			_copy_asset_tile("forest", 0, 0, 0x0C)
+			_copy_asset_tile("forest", 0, _forest_tree_frame(true), 0x0C)
 		"forest_right_2":
-			_copy_asset_tile("forest", 0, 0, 0x0F, 32)
+			_copy_asset_tile("forest", 0, _forest_tree_frame(true), 0x0F, 32)
 		"lava_1":
 			_copy_asset_tile("lava", 0, (((_timer & 6) >> 1) + 2) & 3, 0x5B)
 		"lava_2":
@@ -266,6 +273,19 @@ func tick() -> bool:
 					_palette_changed = true
 				_cave_color = cave_color
 	return true
+
+
+## `GetForestTreeFrame`: the parity of `wTileAnimationTimer`, which the two
+## `...Animation2` routines then flip with their own `xor %10`. Outside the
+## Celebi event all four routines take the `jr nz` branch to the first frame, so
+## an ordinary visit to Ilex Forest sees the trees standing still.
+func _forest_tree_frame(offset: bool) -> int:
+	if _state == null or not _state.is_engine_flag_active(
+		Gen2WorldState.engine_flag(Gen2WorldState.ENGINE_FOREST_IS_RESTLESS, _crystal_flags)
+	):
+		return 0
+	var frame: int = _timer & 1
+	return 1 - frame if offset else frame
 
 
 func _copy_asset_tile(

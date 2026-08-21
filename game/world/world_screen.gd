@@ -576,11 +576,20 @@ func advance_frame() -> void:
 	## animate on every frame while the objects standing on them move on passes.
 	if _animation != null and _animation.advance_frame() and _renderer != null:
 		_renderer.refresh_animation()
+	## `GetJoypad` and `PlayerEvents` are both inside the pass, so a held
+	## direction starts a step on a pass and never between two. Before the step
+	## below, which is `HandleMap`'s own order: `MapEvents` starts the step and
+	## `HandleMapObjects` moves it in the same pass, so a walk begun from
+	## standing covers its first two pixels on the pass the press landed on.
+	if map_pass:
+		_advance_forced_movement()
+		_advance_held_direction()
 	if map_pass and _world != null and _world.advance_player_step_pass() \
 		and _renderer != null:
 		_renderer.refresh()
-	## `_HandlePlayerStep` runs before `PlayerEvents` in `HandleMap`, so the step
-	## that finishes on this frame is the one whose events this frame runs.
+	## `CheckPlayerState` reads the step flags at the end of `HandleMap`, after
+	## `HandleMapObjects`, so the step that finishes on this frame is the one
+	## whose events this frame runs.
 	if map_pass and not _pending_step_events.is_empty() and _world != null \
 		and not _world.player_step_in_progress():
 		var landed: Dictionary = _pending_step_events
@@ -603,11 +612,6 @@ func advance_frame() -> void:
 		_renderer.refresh()
 	_spend_actor_requests()
 	_spend_hidden_item_requests()
-	## `GetJoypad` and `PlayerEvents` are both inside the pass, so a held
-	## direction starts a step on a pass and never between two.
-	if map_pass:
-		_advance_forced_movement()
-		_advance_held_direction()
 	if map_pass and _objects_may_move() \
 		and _world.advance_object_steps_pass(_object_random) \
 		and _renderer != null:

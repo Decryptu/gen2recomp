@@ -314,6 +314,10 @@ var _player_queued_steps: Array = []
 var _player_scripted_steps: bool = false
 ## The player's own OBJECT_STEP_FRAME. See Gen2WorldObject.step_frame.
 var _player_step_frame: int = 0
+## How far the player has moved that hSCX/hSCY have not been given yet: one
+## pass's step vector, since `ScrollScreen` runs after `NextOverworldFrame`.
+## See visible_origin_cells().
+var _camera_lag_cells: Vector2 = Vector2.ZERO
 ## Frames left of the counted wait a script is standing in, -1 while it is not
 ## standing in one or has not started counting.
 var _script_wait_frames: int = -1
@@ -662,11 +666,14 @@ func player_position_cells() -> Vector2:
 func visible_origin_cells() -> Vector2:
 	if current_map == null:
 		return Vector2.ZERO
-	return player_position_cells() - Vector2(PLAYER_VIEW_CELL)
+	return player_position_cells() - _camera_lag_cells - Vector2(PLAYER_VIEW_CELL)
 
 
-## The player's screen pixel after applying the same fine scroll as the map.
-## The hardware keeps this at PLAYER_VIEW_CELL while hSCX/hSCY move the world.
+## The player's screen pixel, which is PLAYER_VIEW_CELL plus whatever hSCX/hSCY
+## have not caught up with: `ScrollScreen` sits after `NextOverworldFrame` in
+## `HandleMapBackground`, so the scroll a pass computed is written two frames
+## after the sprite moved and a walking player is drawn two pixels ahead of its
+## resting cell for the whole walk.
 func player_pixel_position() -> Vector2i:
 	return Vector2i(
 		(player_position_cells() - visible_origin_cells()) * float(CELL_PIXELS)
@@ -813,6 +820,7 @@ func _begin_player_step(
 
 
 func _clear_player_step() -> void:
+	_camera_lag_cells = Vector2.ZERO
 	_player_step_began = false
 	_player_jumping = false
 	_player_step_direction = Vector2i.ZERO
@@ -830,11 +838,16 @@ func _clear_player_step() -> void:
 ## never starts a step sees no difference.
 func advance_player_step_pass() -> bool:
 	if _player_step_passes_remaining <= 0:
+		_camera_lag_cells = Vector2.ZERO
 		return false
+	var before: Vector2 = player_position_cells()
 	_player_step_frame = (_player_step_frame + 1) & 0x0F
 	_player_step_passes_remaining -= 1
 	if _player_step_passes_remaining <= 0:
 		_start_next_player_step()
+	## What `ScrollScreen` will add to hSCX/hSCY, which it does not do until
+	## after this pass's own two frames have been spent.
+	_camera_lag_cells = player_position_cells() - before
 	return true
 
 
