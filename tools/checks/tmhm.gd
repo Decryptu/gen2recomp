@@ -180,6 +180,17 @@ func _verify_item_numbers(game_id: StringName, data: GameData) -> void:
 			and not Gen2WorldTMHM.is_hm(RomLayout.ITEM_HM01 - 1),
 		"%s: the HM threshold is not at $%02X." % [game_id, RomLayout.ITEM_HM01]
 	)
+	# The run ends where the byte does. `cp TM01` needs no ceiling on hardware;
+	# a defined item is not a byte, so without one every mod item read as a TM
+	# and as an HM, and answered a move's description instead of its own.
+	_r.check(
+		Gen2WorldTMHM.is_tm_hm(RomLayout.ITEM_BYTE_MAX)
+			and not Gen2WorldTMHM.is_tm_hm(Gen2ContentOverlay.FIRST_MOD_NUMBER)
+			and not Gen2WorldTMHM.is_hm(Gen2ContentOverlay.FIRST_MOD_NUMBER),
+		"%s: a defined item past $%02X still reads as a TM/HM." % [
+			game_id, RomLayout.ITEM_BYTE_MAX,
+		]
+	)
 
 
 ## Every species against every TM/HM number, so a wrong bit order or byte order

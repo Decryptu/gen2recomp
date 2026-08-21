@@ -406,6 +406,64 @@ static func teach_tm_hm(
 	}
 
 
+## `LearnMove` on its own, without the TM/HM that usually reaches it: what an
+## evolution offers a Pokemon whose four slots are full. The refusal order is
+## `LearnMove`'s own, an empty slot always winning over a passed
+## [param forget_slot] the way `.loop` does, and nothing is consumed and no
+## happiness moves because no item was used.
+static func learn_move(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	party_index: int,
+	move: int,
+	forget_slot: int = -1,
+	persist: bool = true
+) -> Dictionary:
+	if world == null or save == null or world.data == null:
+		return _failure(&"missing_save", {})
+	if move <= 0 or world.data.move(move).is_empty():
+		return _failure(&"unknown_move", {"move": move})
+	var mon: Gen2SaveMon = _party_member(save, party_index)
+	if mon == null or mon.is_egg:
+		return _failure(&"invalid_party_index", {"party_index": party_index})
+	if Gen2WorldTMHM.knows_move(mon.moves, move):
+		return _failure(&"already_knows_move", {"move": move})
+	var slot: int = Gen2WorldTMHM.first_empty_slot(mon.moves)
+	var forgot: int = 0
+	if slot < 0:
+		if forget_slot < 0:
+			return _failure(&"moveset_full", {
+				"party_index": party_index, "move": move, "moves": mon.moves.duplicate(),
+			})
+		if forget_slot >= mon.moves.size():
+			return _failure(&"invalid_forget_slot", {"forget_slot": forget_slot})
+		forgot = int(mon.moves[forget_slot])
+		if Gen2MoveForget.is_hm_move(forgot):
+			return _failure(&"cannot_forget_hm", {"forget_slot": forget_slot, "forgot": forgot})
+		slot = forget_slot
+	var opened: Dictionary = Gen2WorldTransaction.begin(world, save)
+	if not bool(opened.get("ok", false)):
+		return _failure(StringName(opened["reason"]), opened.get("details", {}))
+	var candidate: Gen2SaveData = opened["candidate"]
+	var learner: Gen2SaveMon = candidate.party[party_index] as Gen2SaveMon
+	learner.moves[slot] = move
+	learner.pp[slot] = int(world.data.move(move).get("pp", 0))
+	var before: Gen2WorldSnapshot = world.snapshot()
+	var committed: Dictionary = Gen2WorldTransaction.commit(
+		world, save, candidate, before, persist
+	)
+	if not bool(committed.get("ok", false)):
+		return _failure(StringName(committed["reason"]), committed.get("details", {}))
+	return {
+		"ok": true,
+		"party_index": party_index,
+		"move": move,
+		"slot": slot,
+		"forgot": forgot,
+		"pp": learner.pp[slot],
+	}
+
+
 ## `ChangeHappiness` over the imported table, taking the byte rather than the
 ## Pokemon: `wCurPartyMon`'s egg guard and the `wBattleMonHappiness` mirror
 ## behind it are the caller's, because a caller here holds either a
@@ -813,13 +871,30 @@ static func _apply_sacred_ash(data: GameData, save: Gen2SaveData) -> Dictionary:
 	return {"ok": true, "effect": &"sacred_ash", "healed": healed}
 
 
+## The one evolution a field item can cause. The method it runs is a fact on the
+## item row rather than a callback: a defined item that names an
+## [code]evolution[/code] method runs that method's predicate, and an item that
+## names none is a cartridge stone, dispatched through `EvoStoneEffect` the way
+## `.item` is. Everything past the predicate is shared, which is what keeps the
+## adapter, the HP delta and the move offers in one place.
 static func _apply_item_evolution(data: GameData, mon: Gen2SaveMon, item: int) -> Dictionary:
-	if item not in Gen2Evolution.STONE_ITEMS:
+	var declared: Dictionary = data.item(item).get("evolution", {}) as Dictionary
+	var method: int = int(declared.get("method", 0))
+	if method == 0 and item not in Gen2Evolution.STONE_ITEMS:
 		return {}
 	var battle_mon: Gen2BattleMon = Gen2SaveBattleAdapter.to_battle_mon(data, mon)
 	if battle_mon == null:
 		return {}
-	var row: Dictionary = Gen2Evolution.item_evolution(data, battle_mon, item)
+	var row: Dictionary = {}
+	match method:
+		0, RomLayout.EVOLVE_ITEM:
+			row = Gen2Evolution.item_evolution(
+				data, battle_mon, int(declared.get("parameter", item))
+			)
+		RomLayout.EVOLVE_TRADE:
+			row = Gen2Evolution.trade_evolution(data, battle_mon)
+		_:
+			return {}
 	if row.is_empty():
 		return {}
 	var result: Dictionary = Gen2Evolution.evolve(battle_mon, int(row.get("target", 0)))
@@ -832,6 +907,11 @@ static func _apply_item_evolution(data: GameData, mon: Gen2SaveMon, item: int) -
 		if not battle_mon.learn_move(move):
 			move_offers.append(move)
 	mon.species = battle_mon.species
+	# `.trade`'s `xor a / ld [wTempMonItem], a`: a held requirement is spent by
+	# the evolution it caused.
+	if row.has("consumes_held_item"):
+		mon.item = 0
+		battle_mon.item = 0
 	mon.moves = [0, 0, 0, 0]
 	mon.pp = [0, 0, 0, 0]
 	for slot: int in mini(battle_mon.moves.size(), Gen2SaveMon.MAX_MOVES):

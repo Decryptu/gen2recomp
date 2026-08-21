@@ -9,6 +9,8 @@ const HAPPINESS_TO_EVOLVE: int = 220
 const EVERSTONE: int = 70
 ## Item effects.asm dispatches every one of these through EvoStoneEffect.
 const STONE_ITEMS: Array[int] = [8, 0x16, 0x17, 0x18, 0x22, 0xA9]
+## A trade evolution's parameter when it asks for no held item: `inc a / jr z`.
+const TRADE_NO_ITEM: int = 0xFF
 
 static func level_evolution(data: GameData, mon: Gen2BattleMon, time_of_day: int) -> Dictionary:
 	if data == null or mon == null:
@@ -21,14 +23,48 @@ static func level_evolution(data: GameData, mon: Gen2BattleMon, time_of_day: int
 	return {}
 
 
+## `.item`, which is the one branch of `EvolveAfterBattle` that never calls
+## `IsMonHoldingEverstone`: a stone used on an EVERSTONE holder evolves it.
 static func item_evolution(data: GameData, mon: Gen2BattleMon, item: int) -> Dictionary:
-	if data == null or mon == null or mon.item == EVERSTONE:
+	if data == null or mon == null:
 		return {}
 	for row: Dictionary in data.evolutions(mon.species):
 		if int(row.get("method", 0)) == RomLayout.EVOLVE_ITEM \
 			and int(row.get("parameter", 0)) == item:
 			return row.duplicate(true)
 	return {}
+
+
+## `.trade`: EVERSTONE refuses, a `$FF` parameter asks for nothing, and any other
+## value is an item the Pokemon must be HOLDING. The cartridge zeroes
+## `wTempMonItem` on the way through, so a held requirement is CONSUMED; that is
+## the caller's to write, and [code]consumes_held_item[/code] says when.
+static func trade_evolution(data: GameData, mon: Gen2BattleMon) -> Dictionary:
+	if data == null or mon == null or mon.item == EVERSTONE:
+		return {}
+	for row: Dictionary in data.evolutions(mon.species):
+		if int(row.get("method", 0)) != RomLayout.EVOLVE_TRADE:
+			continue
+		var parameter: int = int(row.get("parameter", TRADE_NO_ITEM))
+		if parameter == TRADE_NO_ITEM:
+			return row.duplicate(true)
+		if mon.item != parameter:
+			continue
+		var out: Dictionary = row.duplicate(true)
+		out["consumes_held_item"] = parameter
+		return out
+	return {}
+
+
+## `EvolvingText` then `CongratulationsYourPokemonText` and `_EvolvedIntoText`,
+## as the one line each. Verbatim from data/text/common_3.asm; the source shows
+## them as two boxes with the animation between them.
+static func evolving_text(mon_name: String) -> String:
+	return "What? %s is evolving!" % mon_name
+
+
+static func evolved_text(mon_name: String, new_species_name: String) -> String:
+	return "Congratulations! Your %s evolved into %s!" % [mon_name, new_species_name]
 
 
 static func _eligible(row: Dictionary, mon: Gen2BattleMon, time_of_day: int) -> bool:

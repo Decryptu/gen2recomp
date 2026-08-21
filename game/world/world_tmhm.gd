@@ -17,6 +17,10 @@ extends RefCounted
 ## carries comes from RomLayout.tmhm_number_for_item() rather than subtraction.
 const ITEM_TM01: int = RomLayout.ITEM_TM01
 const ITEM_HM01: int = RomLayout.ITEM_HM01
+## `cp TM01` needs no ceiling on hardware because an item number is a byte. A
+## defined item is not one: Gen2ContentOverlay.FIRST_MOD_NUMBER is 256, so
+## without this every mod item read as a TM, and as an HM.
+const ITEM_BYTE_MAX: int = RomLayout.ITEM_BYTE_MAX
 
 ## Eight bytes of learnable flags on each species, one bit per TMNUM, indexed by
 ## the entry's own zero-based place in TMHMMoves.
@@ -26,12 +30,12 @@ const TMHM_FLAG_BYTES: int = RomLayout.TMHM_BYTES
 ## AskTeachTMHM's first test, `cp TM01` before anything else: an item below TM01
 ## is not a TM or HM and the prompt never appears.
 static func is_tm_hm(item: int) -> bool:
-	return item >= ITEM_TM01
+	return item >= ITEM_TM01 and item <= ITEM_BYTE_MAX
 
 
 ## IsHM, which TeachTMHM asks before ConsumeTM: an HM is never used up.
 static func is_hm(item: int) -> bool:
-	return item >= ITEM_HM01
+	return item >= ITEM_HM01 and item <= ITEM_BYTE_MAX
 
 
 ## GetTMHMItemMove: the move [param item] teaches, or 0 when it is not a TM/HM

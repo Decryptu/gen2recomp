@@ -14,6 +14,9 @@ extends RefCounted
 ## Gold, Silver and Crystal.
 ## Numbering is per kind, so the first species and the first move share one.
 const VOLTLING: int = Gen2ContentOverlay.FIRST_MOD_NUMBER
+## What VOLTLING becomes, a cartridge species so the evolution is visibly the
+## engine's own rather than one more defined row.
+const RAICHU: int = 26
 const STATIC_FIELD: int = Gen2ContentOverlay.FIRST_MOD_NUMBER
 ## An effect byte no cartridge move carries.
 const RECOIL_AND_PARALYSE: int = 0xF0
@@ -86,7 +89,13 @@ func _add_a_species(host: Gen2ModHost, id: StringName) -> void:
 			{"level": 20, "move": STATIC_FIELD},
 			{"level": 36, "move": THUNDERBOLT},
 		],
-		"evolutions": [],
+		# The item below names EVOLVE_TRADE, which is the method rather than the
+		# target: a row with no held requirement ($FF) is what it answers.
+		"evolutions": [{
+			"method": RomLayout.EVOLVE_TRADE,
+			"parameter": Gen2Evolution.TRADE_NO_ITEM,
+			"condition": 0, "target": RAICHU,
+		}],
 		# The pic atlases hold the cartridge's own slots and nothing else, so a
 		# defined species supplies decoded indices instead: two bits a pixel,
 		# row-major, exactly tiles * tiles * 64 of them (`api_version` 4).
@@ -157,6 +166,10 @@ func _add_an_item_and_its_shelf(host: Gen2ModHost, id: StringName) -> void:
 		"name": "CELLBATTERY",
 		"price": 800,
 		"pocket": CURIOS_POCKET,
+		# USE opens the party list, and the evolution it causes is a fact the
+		# host acts on rather than a callback (`api_version` 9).
+		"field_menu": Gen2WorldPack.ITEMMENU_PARTY,
+		"evolution": {"method": RomLayout.EVOLVE_TRADE},
 	})
 	host.register_menu_entry(Gen2ModHost.MENU_PACK_POCKET, id, {
 		"label": "CURIOS",

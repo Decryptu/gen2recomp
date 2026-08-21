@@ -206,6 +206,33 @@ func test_resetting_the_host_drops_what_the_last_load_registered() -> void:
 	assert_true(_data().item(Gen2ContentOverlay.FIRST_MOD_NUMBER).is_empty())
 
 
+## The evolution an item names is a fact the host acts on, so the overlay is
+## where a method it cannot run is refused.
+func test_an_item_may_name_an_evolution_method_and_only_a_real_one() -> void:
+	var host: Gen2ModHost = Gen2ModHost.instance()
+	assert_true(bool(host.register_content(
+		Gen2ContentOverlay.KIND_ITEM, MOD, Gen2ContentOverlay.FIRST_MOD_NUMBER, {
+			"name": "LINKING CORD",
+			"evolution": {"method": RomLayout.EVOLVE_TRADE},
+		}
+	).get("ok", false)))
+	assert_eq(
+		int(_data().item(Gen2ContentOverlay.FIRST_MOD_NUMBER)["evolution"]["method"]),
+		RomLayout.EVOLVE_TRADE
+	)
+	assert_true(_data().item(1).get("evolution", {}).is_empty(), "a cartridge item names none")
+	assert_false(bool(host.register_content(
+		Gen2ContentOverlay.KIND_ITEM, MOD, Gen2ContentOverlay.FIRST_MOD_NUMBER + 3, {
+			"evolution": {"method": RomLayout.EVOLVE_HAPPINESS},
+		}
+	).get("ok", false)))
+	assert_false(bool(host.register_content(
+		Gen2ContentOverlay.KIND_ITEM, MOD, Gen2ContentOverlay.FIRST_MOD_NUMBER + 4, {
+			"evolution": 3,
+		}
+	).get("ok", false)))
+
+
 func test_the_overlay_names_who_claimed_what() -> void:
 	Gen2ModHost.instance().register_content(
 		Gen2ContentOverlay.KIND_SPECIES, MOD, NEW_SPECIES, {"name": "VOLTLING"}

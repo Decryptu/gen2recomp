@@ -133,6 +133,9 @@ var _pack_result_ok: bool = false
 ## pressed through rather than cut off at the frame.
 var _pack_result_pages: Array = []
 var _pack_result_page: int = 0
+## What runs when the last page of the box is pressed past, instead of the pack
+## coming back: the next move an evolution has to offer.
+var _pack_result_next: Callable = Callable()
 ## AskTeachTMHM's resolved prompt, held while its yes/no is on screen, and
 ## whether the party list that follows is ChooseMonToLearnTMHM's rather than
 ## `.Party`'s.
@@ -169,6 +172,14 @@ var _forget_refusal: String = ""
 var _forget_cursor: int = 0
 var _forget_party_index: int = -1
 var _forget_confirm_cursor: int = 0
+## What is being learned, whichever opened the flow: a TM/HM's move or one an
+## evolution offered. `_learning_move` is 0 while a TM owns the flow, so the
+## confirm knows which of the two host calls to make.
+var _forget_move_name: String = ""
+var _learning_move: int = 0
+## The moves a field evolution offered that would not fit, offered one at a time
+## the way `EvolveAfterBattle` calls `LearnMove` over the new learnset.
+var _evolution_offers: Array[int] = []
 
 ## `SaveMenu`'s own state: the text standing in the speech box, which of its
 ## lines is on the top row, `wMenuCursorY` for the yes/no, and the frames the
@@ -462,6 +473,8 @@ func _confirm() -> void:
 		Mode.PACK_RESULT:
 			if _pack_result_advanced():
 				return
+			if _pack_result_continued():
+				return
 			if _give_target >= 0:
 				closed.emit()
 			else:
@@ -496,6 +509,8 @@ func _cancel() -> void:
 			_open_pack_mode(false)
 		Mode.PACK_RESULT:
 			if _pack_result_advanced():
+				return
+			if _pack_result_continued():
 				return
 			if _give_target >= 0:
 				closed.emit()
@@ -661,6 +676,9 @@ func _open_pack_mode(reset: bool = true) -> void:
 	_giving = false
 	_teaching = false
 	_using_registered = false
+	_evolution_offers.clear()
+	_learning_move = 0
+	_forget_move_name = ""
 	_pack_pockets = Gen2WorldPack.build(_data, _world.state) if _world != null else []
 	if reset:
 		_pack_pocket_index = 0
@@ -1218,6 +1236,8 @@ func _teach_selected_item(party_index: int) -> void:
 		_show_pack_result("No save is loaded.", false)
 		return
 	var item: int = int(_teach_prompt.get("item", 0))
+	_learning_move = 0
+	_forget_move_name = String(_teach_prompt.get("move_name", ""))
 	var result: Dictionary = Gen2WorldPartyHost.teach_tm_hm(
 		_world, _pack_save, item, party_index, -1, _pack_persist
 	)
@@ -1285,20 +1305,24 @@ func _confirm_forget() -> void:
 		_forget_refusal = Gen2MoveForget.cant_forget_hm_text()
 		_render_forget_list()
 		return
-	var result: Dictionary = Gen2WorldPartyHost.teach_tm_hm(
+	var slot: int = int(entry.get("slot", -1))
+	var result: Dictionary = Gen2WorldPartyHost.learn_move(
+		_world, _pack_save, _forget_party_index, _learning_move, slot, _pack_persist
+	) if _learning_move > 0 else Gen2WorldPartyHost.teach_tm_hm(
 		_world, _pack_save, int(_teach_prompt.get("item", 0)), _forget_party_index,
-		int(entry.get("slot", -1)), _pack_persist
+		slot, _pack_persist
 	)
 	if not bool(result.get("ok", false)):
 		_show_pack_result(
-			_teach_refusal(StringName(result.get("reason", &"")), _forget_party_index), false
+			_teach_refusal(StringName(result.get("reason", &"")), _forget_party_index), false,
+			_offer_next_evolution_move if _learning_move > 0 else Callable()
 		)
 		return
 	var target_name: String = _target_name(_forget_party_index)
 	_show_pack_result("%s %s" % [
 		Gen2MoveForget.forgot_text(target_name, String(entry.get("name", ""))),
-		Gen2MoveForget.learned_text(target_name, String(_teach_prompt.get("move_name", ""))),
-	], true)
+		Gen2MoveForget.learned_text(target_name, _forget_move_name),
+	], true, _offer_next_evolution_move if _learning_move > 0 else Callable())
 
 
 ## LearnMove.cancel, reached from the ask's no and from B in the list alike.
@@ -1319,8 +1343,8 @@ func _confirm_stop_learning() -> void:
 		_open_forget_ask()
 		return
 	_show_pack_result(Gen2MoveForget.did_not_learn_text(
-		_target_name(_forget_party_index), String(_teach_prompt.get("move_name", ""))
-	), false)
+		_target_name(_forget_party_index), _forget_move_name
+	), false, _offer_next_evolution_move if _learning_move > 0 else Callable())
 
 
 func _target_name(party_index: int) -> String:
@@ -1335,7 +1359,8 @@ func _target_name(party_index: int) -> String:
 ## instead, so the only way to reach the two forget-slot reasons here is a
 ## revalidation failing between the two teach_tm_hm() calls.
 func _teach_refusal(reason: StringName, party_index: int) -> String:
-	var move_name: String = String(_teach_prompt.get("move_name", "that move"))
+	var move_name: String = _forget_move_name if not _forget_move_name.is_empty() \
+		else String(_teach_prompt.get("move_name", "that move"))
 	var target_name: String = _target_name(party_index)
 	match reason:
 		&"not_compatible":
@@ -1390,7 +1415,42 @@ func _use_selected_item(party_index: int) -> void:
 	if not bool(result.get("ok", false)):
 		_show_pack_result(_use_refusal(StringName(result.get("reason", &"")), number), false)
 		return
+	if StringName(result.get("effect", &"")) == &"evolution":
+		_forget_party_index = party_index
+		_evolution_offers.assign(result.get("move_offers", []))
+		_show_pack_result(
+			_use_summary(item, result), true, _offer_next_evolution_move
+		)
+		return
 	_show_pack_result(_use_summary(item, result), true)
+
+
+## `EvolveAfterBattle`'s tail: `LearnMove` over what the new species knows at its
+## own level, one move at a time, each able to open `ForgetMove` in turn.
+func _offer_next_evolution_move() -> void:
+	if _evolution_offers.is_empty():
+		_learning_move = 0
+		_forget_move_name = ""
+		_open_pack_mode(false)
+		return
+	var move: int = _evolution_offers.pop_front()
+	_learning_move = move
+	_forget_move_name = String(_data.move(move).get("name", "")) if _data != null else ""
+	var result: Dictionary = Gen2WorldPartyHost.learn_move(
+		_world, _pack_save, _forget_party_index, move, -1, _pack_persist
+	)
+	if bool(result.get("ok", false)):
+		_show_pack_result(Gen2MoveForget.learned_text(
+			_target_name(_forget_party_index), _forget_move_name
+		), true, _offer_next_evolution_move)
+		return
+	if StringName(result.get("reason", &"")) == &"moveset_full":
+		var details: Dictionary = result.get("details", {})
+		_forget_moves = Gen2MoveForget.options(_data, details.get("moves", []))
+		if not _forget_moves.is_empty():
+			_open_forget_ask()
+			return
+	_offer_next_evolution_move()
 
 
 ## The source has no single "it worked" line: the effect routine prints its own.
@@ -1400,6 +1460,14 @@ func _use_summary(item: Dictionary, result: Dictionary) -> String:
 	if int(result.get("repel_steps", -1)) >= 0:
 		return "%s will repel weak Pokemon for %d steps." % [
 			item_name, int(result.get("repel_steps", 0)),
+		]
+	if StringName(result.get("effect", &"")) == &"evolution" and _data != null:
+		var nickname: String = _target_name(int(result.get("party_index", -1)))
+		return "%s %s" % [
+			Gen2Evolution.evolving_text(nickname),
+			Gen2Evolution.evolved_text(nickname, String(
+				_data.species(int(result.get("new_species", 0))).get("name", "")
+			)),
 		]
 	var healed: int = int(result.get("healed", 0))
 	if healed > 0:
@@ -1538,8 +1606,9 @@ func _fill_item_text(text: String, item_name: String, quantity: int = -1) -> Str
 	return Gen2TextStream.fill_marker(out, Gen2TextStream.RAM_MARKER, item_name)
 
 
-func _show_pack_result(message: String, ok: bool) -> void:
+func _show_pack_result(message: String, ok: bool, next: Callable = Callable()) -> void:
 	_mode = Mode.PACK_RESULT
+	_pack_result_next = next
 	_pack_result = message
 	_pack_result_ok = ok
 	_pack_result_pages = Gen2TextLayout.lay_out(
@@ -1547,6 +1616,17 @@ func _show_pack_result(message: String, ok: bool) -> void:
 	)
 	_pack_result_page = 0
 	_render_pack_result()
+
+
+## The box's last page handing back to whatever queued work is left, which is
+## how an evolution's move offers follow its own two lines.
+func _pack_result_continued() -> bool:
+	if not _pack_result_next.is_valid():
+		return false
+	var next: Callable = _pack_result_next
+	_pack_result_next = Callable()
+	next.call()
+	return true
 
 
 ## `PrintText`'s own wait: a result that runs past the box's two rows is pressed
@@ -1760,11 +1840,10 @@ func box_text() -> String:
 			return String(_teach_prompt.get("text", ""))
 		Mode.PACK_FORGET_ASK:
 			return Gen2MoveForget.ask_text(
-				_target_name(_forget_party_index),
-				String(_teach_prompt.get("move_name", ""))
+				_target_name(_forget_party_index), _forget_move_name
 			)
 		Mode.PACK_STOP_LEARNING:
-			return Gen2MoveForget.stop_text(String(_teach_prompt.get("move_name", "")))
+			return Gen2MoveForget.stop_text(_forget_move_name)
 		Mode.PACK_TOSS_CONFIRM:
 			return _fill_item_text(
 				_pack_text(TEXT_TOSS_ASK_QUANTITY),
