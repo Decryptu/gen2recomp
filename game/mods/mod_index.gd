@@ -78,9 +78,10 @@ static func resolve_source(input: String) -> Dictionary:
 ## Reads a fetched feed into rows the launcher can list.
 ##
 ## Returns { ok, name, entries } where each entry has id, name, version,
-## description and download. An entry missing an id or a usable download is
-## dropped rather than failing the whole feed, because one bad row in someone
-## else's file should not cost the player the rest of the list.
+## description, download, and the optional icon and thumbnail URLs. An entry
+## missing an id or a usable download is dropped rather than failing the whole
+## feed, because one bad row in someone else's file should not cost the player
+## the rest of the list.
 static func parse_feed(text: String) -> Dictionary:
 	if text.length() > MAX_FEED_BYTES:
 		return {"ok": false, "reason": &"index_too_large"}
@@ -263,7 +264,16 @@ static func _entry_from(raw: Dictionary) -> Dictionary:
 		"version": String(raw.get("version", "")),
 		"description": String(raw.get("description", "")),
 		"download": download,
+		# Optional art. Held to the same https rule as the download, and dropped
+		# rather than refused: a listing without a picture is still a listing.
+		"icon": _art_url(raw.get("icon", "")),
+		"thumbnail": _art_url(raw.get("thumbnail", "")),
 	}
+
+
+static func _art_url(raw: Variant) -> String:
+	var url: String = String(raw).strip_edges()
+	return url if is_downloadable(url) else ""
 
 
 static func _github_slug(url: String) -> Dictionary:

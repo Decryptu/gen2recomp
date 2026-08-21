@@ -74,6 +74,10 @@ static func _row(
 		"listed_version": listed_version,
 		"description": String(entry.get("description", "")),
 		"download": String(entry.get("download", "")),
+		# The installed copy's own file when there is one, and the listing's URL
+		# otherwise, so a mod has a face while it is still only being browsed.
+		"icon": Gen2ModArt.icon_path(manifest),
+		"icon_url": String(entry.get("icon", "")),
 		"feed": feed,
 		"source_label": label,
 		"installed": manifest != null,

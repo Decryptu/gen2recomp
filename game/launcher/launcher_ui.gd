@@ -9,6 +9,9 @@ const GAP_XS: int = 4
 const GAP_SM: int = 8
 const GAP_MD: int = 14
 const GAP_LG: int = 22
+## The side a mod's icon is drawn at: a whole multiple of its native 32, so the
+## cartridge's own pixels stay square.
+const MOD_ICON_SIDE: float = 64.0
 ## Empty scroll tail that lets the final control rise clear of the floating dock.
 const DOCK_SAFE_BOTTOM: float = 132.0
 
@@ -282,6 +285,46 @@ static func file_picker(
 	dialog.use_native_dialog = true
 	dialog.theme = theme.control_theme()
 	return dialog
+
+
+## The square a mod's icon is drawn in, on a list row and on its own page.
+##
+## Always the same node whether or not there is a picture, because the alternative
+## is a list whose names start at two different places depending on whose mod it
+## is. A mod with no icon gets the generic glyph, greyed, in the same square.
+##
+## Nearest filtering, and never stretched: an icon is 32x32 pixel art drawn at
+## about 40, so smoothing it would blur exactly the edges it is made of, and
+## letting it fill a square it is not square for would distort it.
+static func mod_icon(
+	theme: Gen2LauncherTheme, texture: Texture2D, side: float = MOD_ICON_SIDE
+) -> Control:
+	if texture == null:
+		var glyph: Gen2LauncherIcon = Gen2LauncherIcon.create(&"mods", side * 0.62, theme.faint)
+		glyph.custom_minimum_size = Vector2(side, side)
+		glyph.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		return glyph
+	var art := TextureRect.new()
+	art.texture = texture
+	art.custom_minimum_size = Vector2(side, side)
+	art.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	art.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	art.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	art.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	art.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return art
+
+
+## Swaps the picture into a square [method mod_icon] already drew, for an icon
+## that arrived from the network after its row was built. A square holding the
+## fallback glyph answers false and is replaced by its owner instead:
+## [Gen2LauncherIcon] is a [TextureRect] too, so filling one would leave a node
+## that draws a mod's art while still believing it is a tinted glyph.
+static func set_mod_icon(square: Control, texture: Texture2D) -> bool:
+	if square is Gen2LauncherIcon or square is not TextureRect or texture == null:
+		return false
+	(square as TextureRect).texture = texture
+	return true
 
 
 static func _label(text: String, size: int, colour: Color) -> Label:

@@ -27,6 +27,8 @@ drops the id, so reinstalling later does not find it silently off.
 user://mods/<id>/
   mod.json
   mod.gd
+  icon.png        optional
+  thumbnail.webp  optional
 ```
 
 `mod.json`:
@@ -40,8 +42,14 @@ user://mods/<id>/
 | `entry` | A `.gd` path inside the mod directory, or inside the pack when there is one |
 | `pack` | Optional `.pck` or `.zip` beside `mod.json`, holding the mod's files |
 | `description` | Optional |
+| `icon` | Optional path to the icon, when it is not one of the conventional names |
+| `thumbnail` | Optional path to the thumbnail, same |
 | `dependencies` | Optional object from required mod ids to SemVer ranges |
 | `games` | Optional list of cartridge ids the mod is for |
+
+Neither art field is an `api_version` change: a host that has never heard of
+one ignores it, so a mod shipping art still installs on an older launcher and
+simply has no face there.
 
 `version` is a strict `major.minor.patch` number. Dependency ranges accept an
 exact version, `*`, component wildcards such as `1.x` or `1.4.*`, comparison
@@ -142,6 +150,35 @@ app's `Documents/mods` on iOS (reachable in the Files app, since the export sets
 `UIFileSharingEnabled`), and internal app storage on Android, where the system
 file picker is how an archive gets in.
 
+## An icon and a thumbnail
+
+Both are optional, and a mod that wants either declares nothing: dropping the
+file at the mod root is the whole of it.
+
+| | File tried, in order | Size | Drawn by |
+|---|---|---|---|
+| Icon | `icon.png`, `icon.webp`, `icon.jpg` | 32x32, square | The launcher's list row and mod page |
+| Thumbnail | `thumbnail.webp`, `thumb.webp`, `thumbnail.png`, `thumb.png` | 1280x720 | Nothing in the game; a listing site |
+
+A manifest may name another path with `icon` or `thumbnail`, which is what a mod
+keeping its art in a subdirectory needs. The path stays inside the mod folder on
+the same rule as `entry`, and one that climbs out is refused as
+`art_escapes_mod`.
+
+32x32 is the party-icon grid the cartridge itself draws on, and the launcher
+draws an icon at a whole multiple of it with nearest filtering, so the pixels
+stay square. Anything up to `Gen2ModArt.MAX_ICON_SIDE` on a side is accepted and
+never stretched to fill its box; past that, or past a megabyte, or not a PNG,
+WebP or JPEG by its own magic, it is ignored and the row keeps the generic
+glyph. A mod's art comes out of a stranger's archive, so every one of those is
+an ordinary answer rather than an error.
+
+An index row may carry `icon` and `thumbnail` as https URLs. That is how a mod
+has a face while it is still only listed: the launcher fetches each one once, on
+its own request so an icon never delays a download or a feed, and keeps it under
+`user://mod_icon_cache/` so a listing browsed offline still has faces. An
+installed copy's own file always wins over the URL.
+
 ## Publishing a source
 
 A source is a JSON feed listing mods that stay in their authors' own
@@ -158,7 +195,9 @@ adds it, because following a source is trusting whoever publishes it.
       "name": "Voxel Preview",
       "version": "1.0.0",
       "description": "Draws the map as geometry.",
-      "download": "https://example.com/voxel_preview-1.0.0.zip"
+      "download": "https://example.com/voxel_preview-1.0.0.zip",
+      "icon": "https://example.com/voxel_preview/icon.png",
+      "thumbnail": "https://example.com/voxel_preview/thumbnail.webp"
     }
   ]
 }
@@ -168,7 +207,9 @@ adds it, because following a source is trusting whoever publishes it.
 format may reuse a field name for something else. Feeds and downloads are https
 only: over plain http anyone on the path could rewrite where a download points.
 A row with no `id`, no usable `download`, or an id that is not a legal mod id is
-dropped, and the rest of the listing still works.
+dropped, and the rest of the listing still works. `icon` and `thumbnail` are
+optional and held to the same https rule; one that is not is dropped on its own
+rather than costing the row.
 
 Pasting `owner/repo`, the repository page, a site root or the feed file all
 resolve to the same feed, `https://<owner>.github.io/<repo>/index.json` for a

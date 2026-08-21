@@ -17,6 +17,8 @@ var _theme: Gen2LauncherTheme = null
 var _title: Label = null
 var _subtitle: Label = null
 var _body: VBoxContainer = null
+var _head: HBoxContainer = null
+var _icon: Control = null
 var _status: Label = null
 var _row: Dictionary = {}
 
@@ -42,6 +44,9 @@ func _build() -> void:
 	back.tooltip_text = "Back to the mod list"
 	back.pressed.connect(func() -> void: closed.emit())
 	head.add_child(back)
+	_head = head
+	_icon = Gen2LauncherUI.mod_icon(_theme, null)
+	head.add_child(_icon)
 	var text: VBoxContainer = Gen2LauncherUI.column(2)
 	text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	head.add_child(text)
@@ -72,6 +77,7 @@ func set_row(row: Dictionary) -> void:
 	if row.is_empty():
 		return
 	_row = row.duplicate(true)
+	_draw_icon(row)
 	_title.text = String(row["name"])
 	_subtitle.text = "%s  %s" % [row["id"], row["source_label"]]
 	Gen2LauncherUI.clear(_body)
@@ -154,6 +160,25 @@ func _summary(row: Dictionary) -> Control:
 		remove.pressed.connect(func() -> void: remove_requested.emit(_row))
 		actions.add_child(remove)
 	return panel
+
+
+## The mod's own icon beside its name, from the installed copy or from whatever
+## the list already fetched for it. This page never asks the network: it is
+## reached by pressing a row that has drawn the same picture already.
+func _draw_icon(row: Dictionary) -> void:
+	var texture: Texture2D = Gen2ModArt.icon_texture(String(row.get("icon", "")))
+	if texture == null:
+		var url: String = String(row.get("icon_url", ""))
+		if not url.is_empty():
+			texture = Gen2ModArt.cached_icon(url)
+	if Gen2LauncherUI.set_mod_icon(_icon, texture):
+		return
+	var art: Control = Gen2LauncherUI.mod_icon(_theme, texture)
+	_head.add_child(art)
+	_head.move_child(art, _icon.get_index())
+	_head.remove_child(_icon)
+	_icon.queue_free()
+	_icon = art
 
 
 ## A field's right-hand side. Wrapping is off, because a label given the room

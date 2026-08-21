@@ -43,6 +43,15 @@ var _pending: Dictionary = {}
 var _busy: bool = false
 var _check_queue: Array[String] = []
 var _check_updates_button: Gen2LauncherButton = null
+## Its own request, because the page's other one is serialised behind `_busy`
+## and an icon must never make a player wait for a download or a feed.
+var _icons: HTTPRequest = null
+## Icon URLs still to fetch, and the squares waiting for them. A square is a
+## node in the list, so a rebuild drops both rather than filling a freed one.
+var _icon_queue: Array[String] = []
+var _icon_targets: Dictionary = {}
+var _icon_busy: bool = false
+var _icon_pending: String = ""
 
 
 static func create(palette: Gen2LauncherTheme, host: Control = null) -> Gen2ModsPage:
@@ -60,6 +69,11 @@ func _build() -> void:
 	_http.use_threads = true
 	_http.body_size_limit = MAX_DOWNLOAD_BYTES
 	add_child(_http)
+	_icons = HTTPRequest.new()
+	_icons.use_threads = true
+	_icons.body_size_limit = Gen2ModArt.MAX_ICON_BYTES
+	_icons.request_completed.connect(_on_icon_arrived)
+	add_child(_icons)
 
 	_views = Control.new()
 	_views.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -128,6 +142,8 @@ func refresh() -> void:
 
 
 func _relist() -> void:
+	_icon_queue.clear()
+	_icon_targets.clear()
 	Gen2LauncherUI.clear(_list)
 	var host: Gen2ModHost = Gen2ModHost.instance()
 	var groups: Array = Gen2ModCatalogue.groups(
@@ -149,6 +165,7 @@ func _relist() -> void:
 		for failure: Dictionary in failures:
 			_list.add_child(_refusal(failure))
 	_list.add_child(Gen2LauncherUI.dock_safe_space())
+	_fetch_next_icon()
 
 
 func _empty_state() -> Control:
@@ -173,9 +190,11 @@ func _card(row: Dictionary) -> Control:
 	var panel: Gen2LauncherCard = Gen2LauncherCard.create(_theme, Gen2LauncherTheme.RADIUS_MD, 18)
 	var line: HBoxContainer = Gen2LauncherUI.row(Gen2LauncherUI.GAP_MD)
 	panel.add_child(line)
+	line.add_child(_icon_square(row))
 
 	var text: VBoxContainer = Gen2LauncherUI.column(1)
 	text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	text.alignment = BoxContainer.ALIGNMENT_CENTER
 	line.add_child(text)
 	text.add_child(Gen2LauncherUI.body(_theme, String(row["name"])))
 	text.add_child(Gen2LauncherUI.muted(_theme, _version_line(row)))
@@ -561,6 +580,72 @@ func _request(url: String, handler: Callable) -> bool:
 		_status("Could not reach %s." % url, _theme.error)
 		return false
 	return true
+
+
+## The square for one row, and the one place that decides where its picture
+## comes from: the installed copy's own file first, then whatever the source
+## already handed over, and the network only for a listing whose icon is not on
+## disk yet.
+func _icon_square(row: Dictionary) -> Control:
+	var texture: Texture2D = Gen2ModArt.icon_texture(String(row.get("icon", "")))
+	var url: String = String(row.get("icon_url", ""))
+	if texture == null and not url.is_empty():
+		texture = Gen2ModArt.cached_icon(url)
+	var square: Control = Gen2LauncherUI.mod_icon(_theme, texture)
+	if texture == null and Gen2ModArt.wants_fetch(url) and not _icon_targets.has(url):
+		# Only a TextureRect can be filled in later, and a square with no picture
+		# is the fallback glyph. It is replaced through its parent instead.
+		_icon_targets[url] = square
+		_icon_queue.append(url)
+	return square
+
+
+func _fetch_next_icon() -> void:
+	if _icon_busy or _icon_queue.is_empty() or _icons == null:
+		return
+	var url: String = _icon_queue.pop_front()
+	_icon_busy = true
+	if _icons.request(url) != OK:
+		_icon_busy = false
+		_icon_targets.erase(url)
+		_fetch_next_icon()
+		return
+	_icon_pending = url
+
+
+func _on_icon_arrived(
+	result: int, code: int, _headers: PackedStringArray, body: PackedByteArray
+) -> void:
+	var url: String = _icon_pending
+	_icon_pending = ""
+	_icon_busy = false
+	# A missing icon is not a failure worth telling anyone about: the row keeps
+	# its glyph and nothing is retried until the list is built again.
+	if result == HTTPRequest.RESULT_SUCCESS and code == 200:
+		var texture: Texture2D = Gen2ModArt.icon_texture_from_bytes(body)
+		if texture != null:
+			Gen2ModArt.cache_icon(url, body)
+			_place_icon(url, texture)
+	_icon_targets.erase(url)
+	_fetch_next_icon()
+
+
+## Puts an arrived picture in the square that was drawn for it, replacing the
+## fallback glyph in place so the row does not move.
+func _place_icon(url: String, texture: Texture2D) -> void:
+	var square: Variant = _icon_targets.get(url, null)
+	if square is not Control or not (square as Control).is_inside_tree():
+		return
+	var control: Control = square as Control
+	if Gen2LauncherUI.set_mod_icon(control, texture):
+		return
+	var parent: Node = control.get_parent()
+	var art: Control = Gen2LauncherUI.mod_icon(_theme, texture)
+	parent.add_child(art)
+	parent.move_child(art, control.get_index())
+	parent.remove_child(control)
+	control.queue_free()
+	_icon_targets[url] = art
 
 
 func _status(message: String, colour: Color) -> void:

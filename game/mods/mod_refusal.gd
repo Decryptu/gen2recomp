@@ -41,6 +41,7 @@ const WORDING: Dictionary = {
 	&"entry_not_gdscript": "A mod's entry script has to be GDScript (%s).",
 	&"entry_escapes_mod": "The entry script points outside the mod folder (%s).",
 	&"pack_escapes_mod": "The mod's resource pack has to be a file beside its mod.json (%s).",
+	&"art_escapes_mod": "The mod's icon or thumbnail points outside the mod folder (%s).",
 	&"pack_not_a_resource_pack": "A mod's pack has to be a .pck or .zip (%s).",
 
 	# Writing it into place.
