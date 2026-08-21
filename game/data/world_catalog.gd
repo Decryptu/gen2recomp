@@ -125,16 +125,16 @@ static func build(data: GameData) -> Gen2WorldCatalog:
 ## both are derived from these rows in a millisecond and would only be a second
 ## copy to keep in step.
 func to_dict() -> Dictionary:
-	var rows: Dictionary = {}
+	var stored_rows: Dictionary = {}
 	for id: int in _rows:
-		rows[str(id)] = _stored_value(_rows[id])
+		stored_rows[str(id)] = _stored_value(_rows[id])
 	var links: Dictionary = {}
 	for at: int in _links:
 		links[str(at)] = _stored_value(_links[at])
 	var kinds: Dictionary = {}
 	for kind: StringName in _by_kind:
 		kinds[String(kind)] = (_by_kind[kind] as Array).duplicate()
-	return {"version": FORMAT_VERSION, "rows": rows, "links": links, "kinds": kinds}
+	return {"version": FORMAT_VERSION, "rows": stored_rows, "links": links, "kinds": kinds}
 
 
 ## The counterpart, bound to [param data] so [method check] can still fold a mod
@@ -162,11 +162,11 @@ static func from_dict(data: GameData, source: Variant) -> Gen2WorldCatalog:
 			return null
 		out._links[at.to_int()] = _restore_value(link)
 	for kind: String in raw["kinds"] as Dictionary:
-		var ids: Variant = (raw["kinds"] as Dictionary)[kind]
-		if not ids is Array:
+		var kind_ids: Variant = (raw["kinds"] as Dictionary)[kind]
+		if not kind_ids is Array:
 			return null
 		var packed: Array = []
-		for id: Variant in ids as Array:
+		for id: Variant in kind_ids as Array:
 			packed.append(int(id))
 		out._by_kind[StringName(kind)] = packed
 	return out
@@ -201,7 +201,9 @@ static func _stored_value(value: Variant) -> Variant:
 static func _restore_value(value: Variant) -> Variant:
 	if value is float:
 		var number: float = value as float
-		return int(number) if is_equal_approx(number, floor(number)) else number
+		if is_equal_approx(number, floor(number)):
+			return int(number)
+		return number
 	if value is Array:
 		var list: Array = []
 		for entry: Variant in value as Array:

@@ -148,8 +148,8 @@ func advance_frame() -> void:
 		_draw_yes_no()
 
 
-func _text(name: String) -> String:
-	return String(_texts.get(name, ""))
+func _text(key: String) -> String:
+	return String(_texts.get(key, ""))
 
 
 func _build() -> void:
@@ -184,8 +184,8 @@ func _show_text(text: String, prompt: bool = false) -> void:
 	_text_box.show_text(text, prompt)
 
 
-func _open_question(phase: int) -> void:
-	_phase = phase
+func _open_question(next_phase: int) -> void:
+	_phase = next_phase
 	_yes = true
 	_draw_yes_no()
 
