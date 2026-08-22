@@ -564,6 +564,11 @@ const TM_ITEM: int = 0xBF
 const HM_ITEM: int = 0xF6
 const TM_MOVE: int = 0xDF
 const HM_MOVE: int = 0x46
+## The three rows `add_mt` appends past HM07, which only Crystal carries. The
+## first member learns MT01 and MT03 and the second neither.
+const MT01_MOVE: int = 0x35
+const MT02_MOVE: int = 0x55
+const MT03_MOVE: int = 0x3A
 
 
 func _add_tmhm_metadata() -> void:
@@ -572,6 +577,7 @@ func _add_tmhm_metadata() -> void:
 		table.append(0x60 + index)
 	table[0] = TM_MOVE
 	table[RomLayout.TMHM_TM_COUNT + 3] = HM_MOVE
+	table.append_array([MT01_MOVE, MT02_MOVE, MT03_MOVE])
 	RomCache.write_json(RomCache.tmhm_moves_path(Fixture.directory()), table)
 
 	var species: Array = RomCache.read_json(RomCache.species_path(Fixture.directory()))
@@ -584,12 +590,14 @@ func _add_tmhm_metadata() -> void:
 			# TMNUM 1 (TM01) and 54 (HM04), bit index TMNUM - 1 from the low bit.
 			flags[0] = 0x01
 			flags[6] = 0x20
+			# TMNUM 58 (MT01) and 60 (MT03), bit index TMNUM - 1 again.
+			flags[7] = 0x02 | 0x08
 		raw["tmhm"] = flags
 	RomCache.write_json(RomCache.species_path(Fixture.directory()), species)
 
 	var moves: Array = RomCache.read_json(RomCache.moves_path(Fixture.directory()))
 	for raw: Dictionary in moves:
-		if int(raw["number"]) in [TM_MOVE, HM_MOVE]:
+		if int(raw["number"]) in [TM_MOVE, HM_MOVE, MT01_MOVE, MT02_MOVE, MT03_MOVE]:
 			raw["pp"] = 15
 	RomCache.write_json(RomCache.moves_path(Fixture.directory()), moves)
 
@@ -1177,3 +1185,78 @@ func test_daisys_grooming_overruns_its_table_on_a_roll_of_255() -> void:
 	var groomed: Dictionary = Gen2WorldPartyHost.groom_outcome(&"grooming", 254, true)
 	assert_eq(int(groomed["script_value"]), 2)
 	assert_eq(int(groomed["happiness_kind"]), Gen2Battle.HAPPINESS_GROOMING)
+
+
+## `.GetMoveTutorMove` reads MT01_MOVE through MT03_MOVE, which are TMHMMoves
+## entries past HM07 rather than pinned move numbers, and anything outside the
+## three MOVETUTOR_* values falls through to ICE_BEAM the way its `cp` chain
+## does. A cartridge whose table stops at HM07 answers nothing.
+func test_the_tutor_reads_its_three_moves_off_the_imported_table() -> void:
+	_add_tmhm_metadata()
+	assert_eq(Gen2MoveTutor.move_for_value(_data, Gen2MoveTutor.VALUE_FLAMETHROWER), MT01_MOVE)
+	assert_eq(Gen2MoveTutor.move_for_value(_data, Gen2MoveTutor.VALUE_THUNDERBOLT), MT02_MOVE)
+	assert_eq(Gen2MoveTutor.move_for_value(_data, Gen2MoveTutor.VALUE_ICE_BEAM), MT03_MOVE)
+	assert_eq(Gen2MoveTutor.move_for_value(_data, 0), MT03_MOVE, "the fall-through branch")
+	assert_eq(Gen2MoveTutor.move_for_value(_data, 9), MT03_MOVE)
+	assert_eq(Gen2MoveTutor.move_for_value(null, 1), 0)
+
+
+## `CheckCanLearnMoveTutorMove` is `LearnMove` with `CanLearnTMHMMove` in front
+## and `ld c, HAPPINESS_LEARNMOVE` behind, and no item on either side: the coins
+## are the map script's `takecoins`.
+func test_the_tutor_teaches_at_full_pp_and_charges_happiness_but_no_item() -> void:
+	var mon: Gen2SaveMon = _teachable_save()
+	mon.happiness = 70
+	var result: Dictionary = Gen2WorldPartyHost.teach_tutor_move(
+		_world, _save, 0, MT01_MOVE, -1, false
+	)
+	assert_true(result["ok"], JSON.stringify(result))
+	assert_eq(int(result["slot"]), 1)
+	assert_eq(int(result["pp"]), 15)
+	assert_eq(int(result["happiness_change"]), 1)
+	assert_eq(_save.party[0].moves[1], MT01_MOVE)
+	assert_eq(_save.party[0].pp[1], 15)
+	assert_eq(_save.party[0].happiness, 71)
+
+
+## The tutor's own `predef CanLearnTMHMMove`, which the plain `LearnMove` an
+## evolution offers does not run: the same species and move answer differently
+## through the two entry points.
+func test_the_tutor_checks_compatibility_where_a_level_up_offer_does_not() -> void:
+	_teachable_save()
+	var refused: Dictionary = Gen2WorldPartyHost.teach_tutor_move(
+		_world, _save, 0, MT02_MOVE, -1, false
+	)
+	assert_false(refused["ok"])
+	assert_eq(refused["reason"], &"not_compatible")
+	assert_eq(_save.party[0].moves[1], 0, "nothing was written")
+
+	var offered: Dictionary = Gen2WorldPartyHost.learn_move(
+		_world, _save, 0, MT02_MOVE, -1, false
+	)
+	assert_true(offered["ok"], JSON.stringify(offered))
+	assert_eq(int(offered["happiness_change"]), 0, "no item, no happiness row")
+
+
+## `LearnMove` is still the last of the three, so a full moveset asks rather
+## than replacing one, and the happiness row is only charged once the move is
+## actually written.
+func test_the_tutor_asks_before_replacing_a_full_moveset_and_charges_nothing() -> void:
+	var mon: Gen2SaveMon = _teachable_save()
+	mon.moves = [1, 2, 3, 4]
+	mon.pp = [10, 10, 10, 10]
+	mon.happiness = 70
+	var asked: Dictionary = Gen2WorldPartyHost.teach_tutor_move(
+		_world, _save, 0, MT03_MOVE, -1, false
+	)
+	assert_false(asked["ok"])
+	assert_eq(asked["reason"], &"moveset_full")
+	assert_eq(_save.party[0].happiness, 70, "the ask writes nothing")
+
+	var replaced: Dictionary = Gen2WorldPartyHost.teach_tutor_move(
+		_world, _save, 0, MT03_MOVE, 2, false
+	)
+	assert_true(replaced["ok"], JSON.stringify(replaced))
+	assert_eq(int(replaced["forgot"]), 3)
+	assert_eq(_save.party[0].moves, [1, 2, MT03_MOVE, 4])
+	assert_eq(_save.party[0].happiness, 71)

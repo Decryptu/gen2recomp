@@ -482,15 +482,23 @@ static func teach_tm_hm(
 ## `LearnMove` on its own, without the TM/HM that usually reaches it: what an
 ## evolution offers a Pokemon whose four slots are full. The refusal order is
 ## `LearnMove`'s own, an empty slot always winning over a passed
-## [param forget_slot] the way `.loop` does, and nothing is consumed and no
-## happiness moves because no item was used.
+## [param forget_slot] the way `.loop` does, and by default nothing is consumed
+## and no happiness moves because no item was used.
+##
+## [param compatibility_checked] is `CheckCanLearnMoveTutorMove`'s own
+## `predef CanLearnTMHMMove`, which stands in front of `KnowsMove` there and
+## nowhere else, and [param happiness_kind] its `ld c, HAPPINESS_LEARNMOVE`,
+## charged inside the same transaction the move is written in. A level-up offer
+## passes neither, which is what makes it the plain `LearnMove` it is.
 static func learn_move(
 	world: Gen2WorldAPI,
 	save: Gen2SaveData,
 	party_index: int,
 	move: int,
 	forget_slot: int = -1,
-	persist: bool = true
+	persist: bool = true,
+	compatibility_checked: bool = false,
+	happiness_kind: int = 0
 ) -> Dictionary:
 	if world == null or save == null or world.data == null:
 		return _failure(&"missing_save", {})
@@ -499,6 +507,9 @@ static func learn_move(
 	var mon: Gen2SaveMon = _party_member(save, party_index)
 	if mon == null or mon.is_egg:
 		return _failure(&"invalid_party_index", {"party_index": party_index})
+	if compatibility_checked \
+		and not Gen2WorldTMHM.can_learn(world.data, mon.species, move):
+		return _failure(&"not_compatible", {"species": mon.species, "move": move})
 	if Gen2WorldTMHM.knows_move(mon.moves, move):
 		return _failure(&"already_knows_move", {"move": move})
 	var slot: int = Gen2WorldTMHM.first_empty_slot(mon.moves)
@@ -521,6 +532,14 @@ static func learn_move(
 	var learner: Gen2SaveMon = candidate.party[party_index] as Gen2SaveMon
 	learner.moves[slot] = move
 	learner.pp[slot] = int(world.data.move(move).get("pp", 0))
+	## `.learned` is what `CheckCanLearnMoveTutorMove` tests before its
+	## `ChangeHappiness`, so a cancelled forget charges nothing: the refusals
+	## above have already answered by here.
+	var happiness_before: int = learner.happiness
+	if happiness_kind > 0:
+		learner.happiness = change_happiness(
+			world.data, learner.happiness, happiness_kind
+		)
 	var before: Gen2WorldSnapshot = world.snapshot()
 	var committed: Dictionary = Gen2WorldTransaction.commit(
 		world, save, candidate, before, persist
@@ -534,7 +553,27 @@ static func learn_move(
 		"slot": slot,
 		"forgot": forgot,
 		"pp": learner.pp[slot],
+		"happiness": learner.happiness,
+		"happiness_change": learner.happiness - happiness_before,
 	}
+
+
+## `CheckCanLearnMoveTutorMove` (`engine/events/move_tutor.asm`): the same
+## `LearnMove` a TM reaches, with `CanLearnTMHMMove` in front of it and
+## `HAPPINESS_LEARNMOVE` behind it, and no item either way. The tutor charges
+## coins in its map script rather than here.
+static func teach_tutor_move(
+	world: Gen2WorldAPI,
+	save: Gen2SaveData,
+	party_index: int,
+	move: int,
+	forget_slot: int = -1,
+	persist: bool = true
+) -> Dictionary:
+	return learn_move(
+		world, save, party_index, move, forget_slot, persist,
+		true, RomLayout.HAPPINESS_LEARNMOVE
+	)
 
 
 ## `ChangeHappiness` over the imported table, taking the byte rather than the

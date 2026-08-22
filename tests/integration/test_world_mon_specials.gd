@@ -361,6 +361,155 @@ func test_no_on_the_confirmation_leaves_the_moves_alone() -> void:
 	)
 
 
+## `MoveTutor` from here down, one special further on again. Its map script is
+## `setval` then `special`, since `.GetMoveTutorMove` reads the value the
+## `verticalmenu` in front of it left.
+const TUTOR_MOVE: int = 0x35
+
+
+func _write_tutor_script(value: int) -> void:
+	var directory: String = Fixture.directory()
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(directory))
+	scripts[Gen2WorldScript.pointer_key(Fixture.BANK, Fixture.TUTORIAL_SCRIPT)] = [
+		Gen2WorldScript.SETVAL, value,
+		Gen2WorldScript.SPECIAL, Gen2WorldScriptRunner.SPECIAL_MOVE_TUTOR, 0x00,
+		Gen2WorldScript.WAITBUTTON,
+		Gen2WorldScript.END,
+	]
+	RomCache.write_json(RomCache.world_scripts_path(directory), scripts)
+
+
+## The three `add_mt` rows past HM07 and one species that learns the first of
+## them, which is what `CanLearnTMHMMove` reads.
+func _write_tutor_tables(learnable: bool) -> void:
+	var directory: String = Fixture.directory()
+	var table: Array = []
+	for index: int in RomLayout.TMHM_TM_COUNT + RomLayout.TMHM_HM_COUNT:
+		table.append(0x60 + index)
+	table.append_array([TUTOR_MOVE, TUTOR_MOVE + 1, TUTOR_MOVE + 2])
+	RomCache.write_json(RomCache.tmhm_moves_path(directory), table)
+	var species: Array = RomCache.read_json(RomCache.species_path(directory))
+	for raw: Dictionary in species:
+		var flags: Array = []
+		flags.resize(RomLayout.TMHM_BYTES)
+		for index: int in flags.size():
+			flags[index] = 0
+		# TMNUM 58 is MT01, bit index 57 counted from the low bit of byte 7.
+		flags[7] = 0x02 if learnable else 0x00
+		raw["tmhm"] = flags
+	RomCache.write_json(RomCache.species_path(directory), species)
+
+
+func _open_tutor_world(
+	value: int = Gen2MoveTutor.VALUE_FLAMETHROWER, learnable: bool = true
+) -> void:
+	Fixture.build()
+	_write_tutor_script(value)
+	_write_tutor_tables(learnable)
+	_data = GameData.open_directory(Fixture.directory())
+	await _open_world()
+	var mon: Gen2SaveMon = _world_screen.active_save().party[0]
+	mon.moves = [1, 0, 0, 0]
+	mon.pp = [10, 0, 0, 0]
+	mon.happiness = 70
+
+
+func _tutor() -> Gen2MoveTutorScreen:
+	return _world_screen._move_tutor_host
+
+
+## `MoveTutor` opens on `ChooseMonToLearnTMHM` with no box of its own: every
+## line before the list belongs to the map script.
+func test_the_tutor_special_opens_the_party_list_first() -> void:
+	await _open_tutor_world()
+	_run_script()
+	assert_not_null(_tutor())
+	assert_eq(_tutor().phase(), Gen2MoveTutorScreen.Phase.SELECT_MON)
+	assert_not_null(_tutor().party_screen())
+	assert_false(_world_screen.move_player(Vector2i.RIGHT))
+
+
+## `.quit`'s `xor a`: a learned move answers FALSE, which is the branch the map
+## script takes to `takecoins`.
+func test_a_learned_move_answers_false_and_costs_happiness() -> void:
+	await _open_tutor_world()
+	_run_script()
+	_tutor().party_screen().handle_button(Gen2Button.A)
+	assert_null(_tutor())
+	var mon: Gen2SaveMon = _world_screen.active_save().party[0]
+	assert_eq(mon.moves, [1, TUTOR_MOVE, 0, 0])
+	assert_eq(mon.happiness, 71)
+	assert_eq(_world_screen._world._active_script._script_value, Gen2MoveTutor.SCRIPT_VALUE_LEARNED)
+
+
+## `.cancel`'s `ld a, -1`: B on the list is the one exit that is not a learned
+## move, and it writes nothing.
+func test_backing_out_of_the_list_answers_minus_one() -> void:
+	await _open_tutor_world()
+	_run_script()
+	_tutor().party_screen().handle_button(Gen2Button.B)
+	assert_null(_tutor())
+	assert_eq(_world_screen.active_save().party[0].moves, [1, 0, 0, 0])
+	assert_eq(_world_screen._world._active_script._script_value, Gen2MoveTutor.SCRIPT_VALUE_CANCELLED)
+
+
+## `.didnt_learn` is `and a / ret`, and `jr nc, .loop` reads that as another
+## pass: an incompatible member prints its line and comes back to the list
+## rather than ending the special.
+func test_an_incompatible_member_loops_back_to_the_list() -> void:
+	await _open_tutor_world(Gen2MoveTutor.VALUE_FLAMETHROWER, false)
+	_run_script()
+	_tutor().party_screen().handle_button(Gen2Button.A)
+	assert_eq(_tutor().phase(), Gen2MoveTutorScreen.Phase.REFUSAL)
+	assert_true(_tutor().box_text().contains("not compatible"))
+	## The line is three lines of text and the box pages, so the presses that
+	## dismiss it are the player's own; what matters is where they land.
+	var guard: int = 8
+	while guard > 0 and _tutor() != null \
+		and _tutor().phase() == Gen2MoveTutorScreen.Phase.REFUSAL:
+		_settle_tutor()
+		_world_screen.press_button(Gen2Button.A)
+		guard -= 1
+	assert_not_null(_tutor())
+	assert_eq(_tutor().phase(), Gen2MoveTutorScreen.Phase.SELECT_MON)
+	assert_eq(_world_screen.active_save().party[0].moves, [1, 0, 0, 0])
+
+
+## `LearnMove` reaches `ForgetMove` last of the three, so a full moveset asks
+## before anything is written, and `.hmmove` is `jr .loop` rather than a cancel.
+func test_a_full_moveset_asks_and_refuses_an_hm_without_closing_the_list() -> void:
+	await _open_tutor_world()
+	var mon: Gen2SaveMon = _world_screen.active_save().party[0]
+	mon.moves = [Gen2MoveForget.HM_MOVES[0], 2, 3, 4]
+	mon.pp = [10, 10, 10, 10]
+	_run_script()
+	_tutor().party_screen().handle_button(Gen2Button.A)
+	assert_eq(_tutor().phase(), Gen2MoveTutorScreen.Phase.FORGET_ASK)
+	_settle_tutor()
+	_world_screen.press_button(Gen2Button.A)
+	assert_eq(_tutor().phase(), Gen2MoveTutorScreen.Phase.FORGET_LIST)
+	_world_screen.press_button(Gen2Button.A)
+	assert_eq(_tutor().phase(), Gen2MoveTutorScreen.Phase.FORGET_LIST, "the list stays open")
+	assert_eq(_tutor().box_text(), Gen2MoveForget.cant_forget_hm_text())
+	_settle_tutor()
+	_world_screen.press_button(Gen2Button.DOWN)
+	_world_screen.press_button(Gen2Button.A)
+	assert_null(_tutor())
+	assert_eq(_world_screen.active_save().party[0].moves[1], TUTOR_MOVE)
+	assert_eq(_world_screen._world._active_script._script_value, Gen2MoveTutor.SCRIPT_VALUE_LEARNED)
+
+
+func _settle_tutor() -> void:
+	var guard: int = 600
+	while guard > 0:
+		var host: Gen2MoveTutorScreen = _tutor()
+		if host == null or host._text_box == null or not host._text_box.is_revealing():
+			break
+		_world_screen.advance_frame()
+		guard -= 1
+	_world_screen.advance_frame()
+
+
 ## `engine/events/haircut.asm`'s four routines are the same `SelectMonFromParty`
 ## with no boxes of their own: every line the player reads belongs to the map
 ## script, so the special owes a party list and an answer and nothing else.

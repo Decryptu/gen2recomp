@@ -154,6 +154,10 @@ var _name_rater_save: Gen2SaveData = null
 ## `special MoveDeletion`'s screen. It needs no save of its own beside it: the
 ## moves and their PP belong to the save it was handed and it writes them itself.
 var _move_deleter_host: Gen2MoveDeleterScreen = null
+var _move_tutor_host: Gen2MoveTutorScreen = null
+## `MoveTutor`'s answer, held between the screen's `finished` and its `closed`
+## the way the Day-Care's is.
+var _move_tutor_script_value: int = Gen2MoveTutor.SCRIPT_VALUE_CANCELLED
 ## The Day-Care's five routines, all one screen. It edits the save's party and
 ## the world state directly, which is what `DepositBreedmon` and `RetrieveBreedmon`
 ## do, so the save it was handed is kept beside it only to write nothing else.
@@ -686,6 +690,8 @@ func advance_frame() -> void:
 		_name_rater_host.advance_frame()
 	if _move_deleter_host != null:
 		_move_deleter_host.advance_frame()
+	if _move_tutor_host != null:
+		_move_tutor_host.advance_frame()
 	if _day_care_host != null:
 		_day_care_host.advance_frame()
 	if _unown_puzzle_host != null:
@@ -838,6 +844,7 @@ func _overlay_open() -> bool:
 		or _pokedex_host != null or _credits_host != null \
 		or _evolution_host != null or _hatch_host != null \
 		or _name_rater_host != null or _move_deleter_host != null \
+		or _move_tutor_host != null \
 		or _day_care_host != null or _unown_puzzle_host != null \
 		or _slot_machine_host != null or _card_flip_host != null
 
@@ -948,7 +955,10 @@ func _handle_button(button: int) -> bool:
 	if _name_rater_host != null:
 		_name_rater_host.handle_button(button)
 		return true
-	## `special MoveDeletion` is the same shape one house further on.
+	## `special MoveTutor` and `special MoveDeletion`, the same shape again.
+	if _move_tutor_host != null:
+		_move_tutor_host.handle_button(button)
+		return true
 	if _move_deleter_host != null:
 		_move_deleter_host.handle_button(button)
 		return true
@@ -1638,6 +1648,83 @@ func _on_move_deleter_closed() -> void:
 	if _world != null:
 		_show_script_results(_world.complete_runtime_request({"ok": true}))
 	_refresh_labels()
+
+
+## `special MoveTutor`, hosted exactly as `special MoveDeletion` is. The move
+## comes from the request, since `.GetMoveTutorMove` has already read the map's
+## own `setval`.
+func _open_move_tutor(request: Dictionary) -> bool:
+	if _move_tutor_host != null or _world == null or _data == null:
+		return false
+	var move: int = int((request.get("values", {}) as Dictionary).get("move", 0))
+	if move <= 0:
+		return false
+	var save: Gen2SaveData = _embedded_party_save()
+	if save == null:
+		_script_prompt = "The move tutor needs a validated save"
+		return false
+	var host := Gen2MoveTutorScreen.new()
+	host.set_context(_data, _world, save, move)
+	host.finished.connect(_on_move_tutor_finished)
+	host.closed.connect(_on_move_tutor_closed)
+	host.sfx_requested.connect(_play_sfx)
+	host.z_index = 30
+	_move_tutor_host = host
+	_move_tutor_script_value = Gen2MoveTutor.SCRIPT_VALUE_CANCELLED
+	_screen.display(host)
+	_script_prompt = "Move tutor"
+	_refresh_labels()
+	return true
+
+
+## The screen has already written the move, its PP and the happiness row. What
+## is left is `LearnedMoveText`, which the map script's own `promptbutton`
+## presses on the branch that reached it.
+func _on_move_tutor_finished(
+	script_value: int, _party_index: int, ending_text: String
+) -> void:
+	_move_tutor_script_value = script_value
+	if ending_text.is_empty() or _text_box == null or _text_box.font == null:
+		return
+	_apply_text_box_options()
+	_text_awaits_press = false
+	_text_box.show_text(ending_text, false)
+	_text_box.visible = true
+
+
+func _on_move_tutor_closed() -> void:
+	var host: Gen2MoveTutorScreen = _move_tutor_host
+	_move_tutor_host = null
+	if host != null:
+		Gen2Screen.drop(host)
+	if _renderer != null:
+		_renderer.refresh()
+	if _world != null:
+		_show_script_results(_world.complete_runtime_request({
+			"ok": true, "script_value": _move_tutor_script_value,
+		}))
+	_refresh_labels()
+
+
+## Public screenshot driver for `special MoveTutor`, the same way
+## [method preview_move_deleter] is. The move is MT01, the first of the three
+## rows `add_mt` appends past HM07, so a cartridge without them draws nothing.
+func preview_move_tutor() -> void:
+	if _world == null or _data == null or _move_tutor_host != null:
+		return
+	var move: int = Gen2MoveTutor.move_for_value(_data, Gen2MoveTutor.VALUE_FLAMETHROWER)
+	if move <= 0:
+		_script_prompt = "This cartridge has no move tutor moves"
+		_refresh_labels()
+		return
+	var save: Gen2SaveData = _embedded_party_save()
+	if save == null or save.party.is_empty():
+		_script_prompt = "Move tutor preview needs a party"
+		_refresh_labels()
+		return
+	save.party[0].is_egg = false
+	_injected_save = save
+	_open_move_tutor({"values": {"move": move}})
 
 
 ## Public screenshot driver for `special MoveDeletion`, the same way
@@ -5023,6 +5110,10 @@ func _show_script_results(results: Array) -> void:
 					continue
 				if StringName(request.get("kind", &"")) == &"move_deleter_requested":
 					if _open_move_deleter():
+						break
+					continue
+				if StringName(request.get("kind", &"")) == &"move_tutor_requested":
+					if _open_move_tutor(request):
 						break
 					continue
 				if StringName(request.get("kind", &"")) == &"day_care_requested":

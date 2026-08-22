@@ -187,6 +187,8 @@ static func _reason_for(kind: StringName) -> StringName:
 			return &"name_rater_data_unavailable"
 		&"move_deleter_requested":
 			return &"move_deleter_data_unavailable"
+		&"move_tutor_requested":
+			return &"move_tutor_data_unavailable"
 		&"day_care_requested":
 			return &"day_care_data_unavailable"
 		&"pc_requested":
@@ -233,6 +235,16 @@ static func _resolve_data_request(world: Gen2WorldAPI, request: Dictionary) -> D
 			if boxes.is_empty():
 				return {"ok": false, "reason": &"move_deleter_text_unavailable"}
 			return {"ok": true, "data": {"move_deleter_text": boxes}}
+		&"move_tutor_requested":
+			## Every box `MoveTutor` prints is `LearnMove`'s or `TeachTMHM`'s,
+			## which [Gen2MoveForget] and [Gen2WorldTMHM] already own, so the
+			## request's own data is the move the script chose.
+			return {
+				"ok": true,
+				"data": {"move": int((request.get("values", {}) as Dictionary).get(
+					"move", 0
+				))},
+			}
 		&"day_care_requested":
 			var day_care: Dictionary = day_care_texts(world.data)
 			if day_care.is_empty():

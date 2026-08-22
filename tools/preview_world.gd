@@ -52,6 +52,8 @@ extends SceneTree
 ## MoveDeletion`, which no fixture cell reaches: the first number is how many
 ## presses into the routine to photograph, so 0 is the introduction, 2 its last
 ## page with the YES/NO up, and 4 the party list),
+## `move_tutor` (`special MoveTutor`, driven the same way, except that it opens
+## on `ChooseMonToLearnTMHM` rather than on a box: 0 is that list),
 ## `day_care` (the Day-Care's five specials, driven the same way: the first
 ## number is how many presses in and the second which routine, 0 the man,
 ## 1 the lady, 2 the man outside, 3 and 4 the two signs),
@@ -229,7 +231,7 @@ func _build_live(data: GameData, group: int, number: int, cell: Vector2i) -> voi
 		_screen.start_cell = _kind_cell
 	elif cell.x >= 0 and _kind not in [
 		&"battle_transition", &"level_evolution", &"egg_hatch", &"name_rater",
-		&"move_deleter", &"day_care", &"unown_puzzle", &"slot_machine",
+		&"move_deleter", &"move_tutor", &"day_care", &"unown_puzzle", &"slot_machine",
 		&"card_flip", &"tile_anim",
 	]:
 		_screen.start_cell = cell
@@ -251,9 +253,12 @@ func _build_live(data: GameData, group: int, number: int, cell: Vector2i) -> voi
 func _settle_mon_special(host_property: String) -> void:
 	for _frame: int in MON_SPECIAL_FRAME_CAP:
 		var routine: Control = _screen.get(host_property)
-		if routine == null:
-			return
-		var box: Gen2TextBox = routine.get("_text_box")
+		## The routine's last box is handed back to the map, which reveals it on
+		## its own clock, so a closed host still owes the frames its ending text
+		## is printing. Photographing on the frame the host went away shows an
+		## empty box.
+		var box: Gen2TextBox = routine.get("_text_box") if routine != null \
+			else _screen.get("_text_box") as Gen2TextBox
 		if box == null or not box.is_revealing():
 			break
 		_screen.advance_frame()
@@ -377,19 +382,21 @@ func _process(_delta: float) -> bool:
 					break
 				_screen.press_button(Gen2Button.A)
 				_settle_mon_special("_day_care_host")
-		elif _kind in [&"name_rater", &"move_deleter"]:
+		elif _kind in [&"name_rater", &"move_deleter", &"move_tutor"]:
 			## `special NameRater` and `special MoveDeletion`, neither of which
 			## any fixture cell reaches. The first number is how many presses
 			## into the routine to photograph: 2 is the introduction's last page
 			## with its YES/NO up, 4 the party list, and so on. Presses are spent
 			## only once the box owes no frames, since nothing shortens a
 			## printing text.
-			if _kind == &"name_rater":
-				_screen.preview_name_rater()
-			else:
-				_screen.preview_move_deleter()
-			var host_property: String = "_name_rater_host" \
-				if _kind == &"name_rater" else "_move_deleter_host"
+			match _kind:
+				&"name_rater":
+					_screen.preview_name_rater()
+				&"move_tutor":
+					_screen.preview_move_tutor()
+				_:
+					_screen.preview_move_deleter()
+			var host_property: String = "_%s_host" % _kind
 			_settle_mon_special(host_property)
 			for _press: int in maxi(_cell.x, 0):
 				if _screen.get(host_property) == null:
@@ -488,7 +495,7 @@ func _process(_delta: float) -> bool:
 		if _kind not in [
 			&"warp", &"door", &"map_name_sign", &"ledge", &"heal_machine",
 			&"battle_transition", &"level_evolution", &"egg_hatch", &"name_rater",
-			&"move_deleter", &"day_care",
+			&"move_deleter", &"move_tutor", &"day_care",
 		]:
 			## Those kinds drove themselves to the frame they want; every other
 			## kind stages a sprite and then spends the frames it needs.
