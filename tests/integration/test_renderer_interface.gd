@@ -872,3 +872,36 @@ func test_a_framed_screen_hands_back_its_whole_surface() -> void:
 		(renderer.get("screens") as Array).back(),
 		Rect2i(Vector2i.ZERO, screen.native_size()),
 	)
+
+
+## The map and cell readout and the shortcut legend are the two things over the
+## picture that no player should ever see. A release build hides them in
+## `_ready`, so the scene has to arrive hidden too: a label that starts visible
+## draws its placeholder for the frame before the script runs.
+func test_the_debug_readout_is_off_in_the_scene_a_release_build_loads() -> void:
+	var packed: PackedScene = load("res://game/world/world_screen.tscn")
+	var state: SceneState = packed.get_state()
+	var hidden: Array[String] = []
+	for index: int in state.get_node_count():
+		if not ["Caption", "Hint"].has(String(state.get_node_name(index))):
+			continue
+		for property: int in state.get_node_property_count(index):
+			if String(state.get_node_property_name(index, property)) == "visible":
+				assert_false(
+					bool(state.get_node_property_value(index, property)),
+					String(state.get_node_name(index)),
+				)
+				hidden.append(String(state.get_node_name(index)))
+	assert_eq(hidden.size(), 2, "both labels state their own visibility")
+
+
+## Why the world could not be built is not scaffolding: it is the only thing on
+## a screen that would otherwise be black, so it survives the same hiding the
+## readout gets in a release build.
+func test_a_world_that_cannot_be_built_says_so_with_the_readout_off() -> void:
+	await _open_world(NATIVE_SOURCE)
+	_world_screen.hide_debug_readout()
+	_world_screen._show_load_failure("No imported cache", "Import a cartridge first.")
+	assert_true(_world_screen._caption.visible, "the reason is shown")
+	assert_true(_world_screen._hint.visible, "and so is what to do about it")
+	assert_eq(_world_screen._caption.text, "No imported cache")

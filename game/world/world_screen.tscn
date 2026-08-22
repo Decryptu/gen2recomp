@@ -54,6 +54,7 @@ script = ExtResource("4")
 
 [node name="Caption" type="Label" parent="."]
 unique_name_in_owner = true
+visible = false
 layout_mode = 1
 anchors_preset = 10
 anchor_right = 1.0
@@ -67,6 +68,7 @@ horizontal_alignment = 1
 
 [node name="Hint" type="Label" parent="."]
 unique_name_in_owner = true
+visible = false
 layout_mode = 1
 anchors_preset = 12
 anchor_top = 1.0

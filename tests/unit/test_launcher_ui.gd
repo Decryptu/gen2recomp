@@ -164,6 +164,7 @@ func test_every_glyph_the_launcher_asks_for_is_one_the_set_draws() -> void:
 		&"shelf", &"mods", &"settings", &"about", &"play", &"plus", &"back",
 		&"folder", &"trash", &"refresh", &"download", &"check", &"warning",
 		&"save", &"dots", &"close", &"power", &"refresh_square",
+		&"bug", &"github", &"discord",
 	]
 	for glyph: StringName in used:
 		assert_true(Gen2LauncherIcon.has_glyph(glyph), String(glyph))
@@ -568,3 +569,30 @@ func _icon_of(from: Node) -> Gen2LauncherIcon:
 		for child: Node in node.get_children():
 			queue.append(child)
 	return null
+
+
+func test_the_about_page_offers_both_ways_to_report_a_bug() -> void:
+	# The two destinations are what the page exists to hand over, so they are
+	# asserted by the URL a press would open rather than by button order.
+	var page: Gen2AboutPage = Gen2AboutPage.create(_light)
+	add_child_autofree(page)
+	page.open_report_sheet()
+	await get_tree().process_frame
+	var opened: Array[String] = []
+	for button: Gen2LauncherButton in _buttons_under(page):
+		if not button.tooltip_text.is_empty():
+			opened.append(button.tooltip_text)
+	assert_has(opened, Gen2AppVersion.ISSUES, "the tracker, for anyone who uses one")
+	assert_has(opened, Gen2AppVersion.DISCORD, "the chat, for everyone else")
+	assert_has(opened, Gen2AppVersion.REPOSITORY, "and the project itself on the page")
+
+
+## Every button in [param root]'s subtree, which is how a page built in code is
+## inspected without naming the containers it happens to nest them in.
+func _buttons_under(root: Node) -> Array[Gen2LauncherButton]:
+	var found: Array[Gen2LauncherButton] = []
+	if root is Gen2LauncherButton:
+		found.append(root)
+	for child: Node in root.get_children():
+		found.append_array(_buttons_under(child))
+	return found

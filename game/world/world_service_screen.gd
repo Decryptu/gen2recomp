@@ -1341,11 +1341,9 @@ func _set_overlay_open(open: bool) -> void:
 	_apply_layer_visibility()
 
 
-## The one place either layer is shown. The debug panel is a fallback for a host
-## handed no cartridge cache, never a layer *under* the hardware one: exactly one
-## of the two can be on screen, and neither is while an overlay is up or before a
-## service has opened. Setting the two by hand at each entrance is what left the
-## panel standing behind whatever the mode drew.
+## The one place the hardware layer is shown: never while an overlay is up, and
+## never before a service has opened. Setting it by hand at each entrance is what
+## left it standing behind whatever the mode drew.
 func _apply_layer_visibility() -> void:
 	if _service_hardware != null:
 		_service_hardware.visible = _mode >= 0 and not _overlay_open and _service_drawn

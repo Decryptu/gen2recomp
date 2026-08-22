@@ -5,6 +5,11 @@ extends TextureRect
 ## drawn. Source SVGs remain editable in `assets/launcher/icons`; their
 ## `currentColor` fill is replaced with the active palette colour at runtime.
 ##
+## `github`, `discord` and `bug` are the project's own drawings rather than
+## Material Symbols, so `LICENSE-MATERIAL-SYMBOLS.txt` beside them does not cover
+## those three; the two logos are the services' trade marks and are drawn only to
+## point at those services.
+##
 ## Each source carries `importer="keep"`, because this reads the SVG text rather
 ## than the texture Godot's own SVG importer makes: an imported `.svg` ships as
 ## its `.ctex` alone, so `_svg()` came back empty on every exported build and
@@ -15,12 +20,15 @@ const ICON_DIRECTORY: String = "res://assets/launcher/icons"
 const PATHS: Dictionary = {
 	&"about": "about.svg",
 	&"back": "back.svg",
+	&"bug": "bug.svg",
 	&"check": "check.svg",
 	&"chevron": "chevron.svg",
 	&"close": "close.svg",
+	&"discord": "discord.svg",
 	&"dots": "dots.svg",
 	&"download": "download.svg",
 	&"folder": "folder.svg",
+	&"github": "github.svg",
 	&"mods": "mods.svg",
 	&"play": "play.svg",
 	&"plus": "plus.svg",

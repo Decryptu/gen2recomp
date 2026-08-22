@@ -11,7 +11,7 @@ extends RefCounted
 ## this build exists, so it happens when the player asks and not before.
 
 const RELEASES_API: String = "https://api.github.com/repos/Decryptu/pokerecomp/releases/latest"
-const RELEASES_PAGE: String = "https://github.com/Decryptu/pokerecomp/releases"
+const RELEASES_PAGE: String = "%s/releases" % Gen2AppVersion.REPOSITORY
 ## A release document is metadata. Anything larger is not one.
 const MAX_RESPONSE_BYTES: int = 1024 * 1024
 

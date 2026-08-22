@@ -62,7 +62,7 @@ func _build() -> void:
 	_settings.appearance_changed.connect(_reload_appearance)
 	_shell.add_page(&"settings", "Settings", &"settings", _settings)
 
-	_about = Gen2AboutPage.create(_palette)
+	_about = Gen2AboutPage.create(_palette, self)
 	_about.update_check_requested.connect(check_for_updates)
 	_shell.add_page(&"about", "About", &"about", _about)
 
@@ -430,6 +430,9 @@ func preview_sheet(view: StringName) -> void:
 		&"bugs":
 			select_page(&"settings")
 			_settings._open_rules_sheet()
+		&"report":
+			select_page(&"about")
+			_about.open_report_sheet()
 		&"binding":
 			select_page(&"settings")
 			var sheet: Gen2BindingSheet = Gen2BindingSheet.for_button(
