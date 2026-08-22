@@ -89,6 +89,18 @@ func _build() -> void:
 			_options.video_mode = Gen2Options.VIDEO_MODES[index]
 			_persist()
 	)))
+	app.add_child(Gen2LauncherUI.field(_theme, "Screen", Gen2LauncherUI.segmented(
+		_theme, ["Framed", "Fill"], 1 if _options.screen_fill else 0,
+		func(index: int) -> void:
+			_options.screen_fill = index == 1
+			_persist()
+	)))
+	app.add_child(Gen2LauncherUI.muted(
+		_theme,
+		"Fill gives the overworld the whole window instead of black bars, drawing "
+		+ "the connected maps around this one. Menus and boxes stay where the "
+		+ "hardware put them. Zoom with + and - while walking."
+	))
 	app.add_child(Gen2LauncherUI.field(_theme, "Game speed", Gen2LauncherUI.segmented(
 		_theme, _titles(Gen2Options.GAME_SPEEDS),
 		maxi(Gen2Options.GAME_SPEEDS.find(_options.game_speed), 0),

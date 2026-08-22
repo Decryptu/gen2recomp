@@ -36,16 +36,30 @@ func _ready() -> void:
 			_pad = child
 	resized.connect(_relayout)
 	Gen2InputRuntime.instance().touch_controls_changed.connect(_on_touch_controls_changed)
+	if _screen != null:
+		# An expanded screen takes the whole portrait share rather than the 10:9
+		# rectangle in it, so the split has to be redone when it is switched on.
+		_screen.expanded_changed.connect(_on_screen_expanded_changed)
 	_relayout()
 
 
 ## The rectangle the hardware screen occupies, and the one left for the
 ## controller. Split out so a test can check both without a viewport.
-static func split(area: Vector2, controls_shown: bool) -> Dictionary:
+##
+## [param expanded] is a screen that fills whatever it is given
+## ([member Gen2Screen.expanded]): it is handed the whole share rather than the
+## 10:9 rectangle inside it, since the leftover would be void it could have
+## drawn map into.
+static func split(area: Vector2, controls_shown: bool, expanded: bool = false) -> Dictionary:
 	var landscape: bool = area.x >= area.y
 	if landscape or not controls_shown:
 		return {"screen": Rect2(Vector2.ZERO, area), "controls": Rect2(Vector2.ZERO, area)}
-	var offered := Vector2(area.x, area.y * (1.0 - PORTRAIT_CONTROL_SHARE))
+	var offered := Vector2(area.x, floorf(area.y * (1.0 - PORTRAIT_CONTROL_SHARE)))
+	if expanded:
+		return {
+			"screen": Rect2(Vector2.ZERO, offered),
+			"controls": Rect2(Vector2(0.0, offered.y), Vector2(area.x, area.y - offered.y)),
+		}
 	var drawn: Vector2 = Vector2(Gen2Screen.WIDTH, Gen2Screen.HEIGHT) \
 		* float(Gen2Screen.fit_factor(offered))
 	return {
@@ -59,7 +73,11 @@ static func split(area: Vector2, controls_shown: bool) -> Dictionary:
 func _relayout() -> void:
 	if size.x <= 0.0 or size.y <= 0.0:
 		return
-	var rects: Dictionary = split(size, Gen2InputRuntime.instance().touch_controls_shown())
+	var rects: Dictionary = split(
+		size,
+		Gen2InputRuntime.instance().touch_controls_shown(),
+		_screen != null and _screen.expanded,
+	)
 	if _screen != null:
 		var screen_rect: Rect2 = rects["screen"]
 		_screen.position = screen_rect.position
@@ -71,6 +89,10 @@ func _relayout() -> void:
 
 
 func _on_touch_controls_changed(_shown: bool) -> void:
+	_relayout()
+
+
+func _on_screen_expanded_changed(_expanded: bool) -> void:
 	_relayout()
 
 

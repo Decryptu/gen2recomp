@@ -146,6 +146,24 @@ func test_out_of_range_values_are_clamped_rather_than_refused() -> void:
 	assert_eq(options.max_fps, 60, "an unlisted frame cap falls back to 60")
 
 
+## SCREEN FILL and its zoom step are view preferences rather than part of a run,
+## so they live in the options file and survive a session.
+func test_the_screen_fill_rows_round_trip_and_default_on() -> void:
+	assert_true(Gen2Options.new().screen_fill, "the window is not 10:9 by default")
+	assert_eq(Gen2Options.new().zoom_step, 0)
+
+	var options := Gen2Options.new()
+	options.screen_fill = false
+	options.zoom_step = -3
+	var restored: Gen2Options = Gen2Options.parse(options.to_dict())
+	assert_false(restored.screen_fill)
+	assert_eq(restored.zoom_step, -3)
+	assert_eq(
+		Gen2Options.parse({"zoom_step": 900}).zoom_step, 32,
+		"an out of range step is clamped rather than refused",
+	)
+
+
 ## The gameplay rules live in the options file but are their own block: the
 ## settings screen edits them there, and a new run takes a copy.
 func test_the_rules_block_travels_with_the_options_file() -> void:

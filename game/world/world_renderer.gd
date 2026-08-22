@@ -4,6 +4,12 @@ extends Node2D
 ## Draws the visible map page and the development player marker in hardware
 ## pixels. It does not own map state; call [method set_world] when the API
 ## changes or [method refresh] after a movement.
+##
+## The surface is the cartridge's 160x144 unless the world has been given a
+## larger [member Gen2WorldAPI.view_pixels], in which case the map fills all of
+## it: the connected maps the graph places around this one are drawn as well, on
+## [Gen2WorldMapLayer] quads under the sprites, and the border block fills
+## whatever no map covers.
 
 const PLAYER_COLOR: Color = Color("#d34a5a")
 const FALLBACK_BACKGROUND: Color = Color("#f5f1d8")
@@ -27,6 +33,20 @@ var _encounters: Gen2WorldEncounters = null
 var _anim_textures: Dictionary = {}
 var _time_of_day: int = Gen2WorldPalette.TIME_MORNING
 var _atlas: ImageTexture = null
+## The coloured tile strips in use this frame, keyed by the pair that chooses
+## their colours: see [method _atlas_for]. The current map's is [member _atlas].
+var _atlases: Dictionary = {}
+## The map quads, in draw order: the void fill, each connected map, then this
+## map's own block buffer. Pooled rather than rebuilt, since the camera moves
+## every frame and nothing about a quad but its position does.
+var _map_layers: Array[Gen2WorldMapLayer] = []
+var _block_textures: Dictionary = {}
+var _tiles_textures: Dictionary = {}
+## `wOverworldMapBlocks` itself: the map plus the three-block margin
+## `ChangeMap` leaves, resolved through [method Gen2WorldAPI.drawn_block_at] so
+## the connection strips in it are the cartridge's own.
+var _buffer_texture: ImageTexture = null
+var _buffer_revision: int = -1
 ## Kept beside the texture so an animation frame can repaint the one or two
 ## tiles it rewrote instead of recolouring the whole strip.
 var _atlas_image: Image = null
@@ -47,8 +67,11 @@ func set_world(world: Gen2WorldAPI, animation: Gen2WorldAnimation = null) -> voi
 	_animation = animation
 	_actor_textures.clear()
 	_effect_textures.clear()
+	_block_textures.clear()
+	_buffer_texture = null
+	_buffer_revision = -1
 	_rebuild_atlas()
-	queue_redraw()
+	refresh()
 
 
 ## `DoBattleTransition`'s own screen: the cells it has written, the two tiles it
@@ -141,40 +164,77 @@ func refresh_animation() -> void:
 	if changed.is_empty():
 		return
 	var indices: PackedByteArray = _animation.current_indices()
-	var palettes: Array = _tile_palettes()
-	for tile: int in changed:
-		_paint_tile(_atlas_image, indices, palettes, tile)
-	_atlas.update(_atlas_image)
+	for entry: Dictionary in _atlases.values():
+		if not bool(entry["animated"]):
+			continue
+		var image: Image = entry["image"]
+		var palettes: Array = entry["palettes"]
+		for tile: int in changed:
+			_paint_tile(image, indices, palettes, tile)
+		(entry["texture"] as ImageTexture).update(image)
+		entry["indices"] = indices
 	_priority_indices = indices
 	_priority_atlas = null
 	queue_redraw()
 
 
 func _rebuild_atlas() -> void:
+	_atlases.clear()
 	_atlas = null
 	_atlas_image = null
+	_background_color = FALLBACK_BACKGROUND
 	if _world == null or _world.data == null or _world.current_tileset == null:
 		return
-	var indices: PackedByteArray = _world.data.world_tileset_indices(_world.current_tileset.number)
-	if _animation != null and not _animation.current_indices().is_empty():
-		indices = _animation.current_indices()
-	var palettes: Array = _tile_palettes()
+	var entry: Dictionary = _atlas_for(_world.current_map, _world.current_tileset)
+	if entry.is_empty():
+		return
+	var palettes: Array = entry["palettes"]
 	if not palettes.is_empty() and (palettes[0] as PackedColorArray).size() >= 1:
 		_background_color = (palettes[0] as PackedColorArray)[0]
-	else:
-		_background_color = FALLBACK_BACKGROUND
-	var tile_count: int = _world.current_tileset.tile_count
-	if indices.size() < tile_count * Gen2Tiles.TILE_PIXELS:
-		return
-	_atlas_image = Image.create(
-		tile_count * Gen2Tiles.TILE_WIDTH, Gen2Tiles.TILE_HEIGHT, false, Image.FORMAT_RGBA8
-	)
-	for tile: int in tile_count:
-		_paint_tile(_atlas_image, indices, palettes, tile)
-	_atlas = ImageTexture.create_from_image(_atlas_image)
+	_atlas = entry["texture"]
+	_atlas_image = entry["image"]
 	# Built on demand: only an object standing in grass reads it.
-	_priority_indices = indices
+	_priority_indices = entry["indices"]
 	_priority_atlas = null
+	# The quads hold the strip they were configured with, and this is a new one.
+	_sync_map_layers()
+
+
+## The coloured tile strip a map draws with, cached on the two things that
+## choose its colours: the tileset the tiles come from and the environment
+## `GetMapPalette` reads the eight background slots out of. A connected map
+## sharing both shares the strip rather than colouring a second copy of it, and
+## the animation repaints every cached strip that came from its own tileset.
+func _atlas_for(map: Gen2WorldMap, tileset: Gen2WorldTileset) -> Dictionary:
+	if map == null or tileset == null or _world == null or _world.data == null:
+		return {}
+	var key: String = "%d:%d" % [tileset.number, map.environment]
+	if _atlases.has(key):
+		return _atlases[key]
+	var indices: PackedByteArray = _world.data.world_tileset_indices(tileset.number)
+	var animated: bool = _animation != null and _world.current_tileset != null \
+		and tileset.number == _world.current_tileset.number \
+		and not _animation.current_indices().is_empty()
+	if animated:
+		indices = _animation.current_indices()
+	if indices.size() < tileset.tile_count * Gen2Tiles.TILE_PIXELS:
+		return {}
+	var palettes: Array = _tile_palettes_for(map, tileset)
+	var image := Image.create(
+		tileset.tile_count * Gen2Tiles.TILE_WIDTH, Gen2Tiles.TILE_HEIGHT,
+		false, Image.FORMAT_RGBA8,
+	)
+	for tile: int in tileset.tile_count:
+		_paint_tile(image, indices, palettes, tile)
+	var entry: Dictionary = {
+		"texture": ImageTexture.create_from_image(image),
+		"image": image,
+		"palettes": palettes,
+		"indices": indices,
+		"animated": animated,
+	}
+	_atlases[key] = entry
+	return entry
 
 
 ## The one palette `.pal_loop` puts every background tile on, through whatever
@@ -189,19 +249,30 @@ func flood_palette() -> PackedColorArray:
 
 
 func _tile_palettes() -> Array:
+	return _tile_palettes_for(_world.current_map, _world.current_tileset)
+
+
+## The palettes the current map's tile strip was coloured with, which
+## [method _atlas_for] already resolved and kept.
+func _current_palettes() -> Array:
+	var entry: Dictionary = _atlas_for(_world.current_map, _world.current_tileset)
+	return entry["palettes"] if not entry.is_empty() else []
+
+
+func _tile_palettes_for(map: Gen2WorldMap, tileset: Gen2WorldTileset) -> Array:
 	## `StartTrainerBattle_LoadPokeBallGraphics.pal_loop` puts every background
 	## tile on `PAL_BG_TEXT` and fills that one palette, which is why a trainer
 	## transition draws the whole map in four colours.
 	if not _transition_palette.is_empty():
 		var flooded: Array = []
 		var flood: PackedColorArray = flood_palette()
-		for _tile: int in _world.current_tileset.tile_count:
+		for _tile: int in tileset.tile_count:
 			flooded.append(flood)
 		return flooded
 	var rows: Array = Gen2WorldPalette.tile_palettes(
 		_world.data,
-		_world.current_map,
-		_world.current_tileset,
+		map,
+		tileset,
 		_time_of_day,
 		_animation.water_palette_color() if _animation != null else -1,
 		_animation.cave_palette_color() if _animation != null else -1,
@@ -297,22 +368,33 @@ func clear_transition() -> void:
 ## OAM_PRIO pass a sprite standing in grass wants: colour 0 loses that test, so
 ## it is left transparent there and drawn like any other colour here.
 func _draw_transition(
-	page: PackedInt32Array, palettes: Array, window: Vector2i,
-	clip: Rect2 = Rect2(), priority: bool = false
+	camera_pixels: Vector2, clip: Rect2 = Rect2(), priority: bool = false
 ) -> void:
 	var black: int = Gen2BattleTransition.CELL_BLACK
 	var flood: PackedColorArray = flood_palette()
+	## The strip's own palettes, not a fresh resolve: this runs again over the
+	## lower half of every sprite standing in grass, and building one palette
+	## table per sprite was most of such a frame.
+	var palettes: Array = [] if not flood.is_empty() else _current_palettes()
+	## The screen's own top-left corner, which is the surface's until a view
+	## larger than the hardware's puts the twenty by eighteen cells in the middle
+	## of something wider.
+	var origin: Vector2 = screen_offset()
+	var screen_tile := Vector2i(
+		floori((camera_pixels.x + origin.x) / float(Gen2Tiles.TILE_WIDTH)),
+		floori((camera_pixels.y + origin.y) / float(Gen2Tiles.TILE_HEIGHT)),
+	)
 	## The whole screen, or the few cells a sprite's own lower half falls in.
 	var first := Vector2i.ZERO
 	var last := Vector2i(Gen2BattleTransition.COLUMNS - 1, Gen2BattleTransition.ROWS - 1)
 	if priority:
 		first = Vector2i(
-			floori(clip.position.x / Gen2Tiles.TILE_WIDTH),
-			floori(clip.position.y / Gen2Tiles.TILE_HEIGHT),
+			floori((clip.position.x - origin.x) / Gen2Tiles.TILE_WIDTH),
+			floori((clip.position.y - origin.y) / Gen2Tiles.TILE_HEIGHT),
 		)
 		last = Vector2i(
-			mini(ceili(clip.end.x / Gen2Tiles.TILE_WIDTH), last.x),
-			mini(ceili(clip.end.y / Gen2Tiles.TILE_HEIGHT), last.y),
+			mini(ceili((clip.end.x - origin.x) / Gen2Tiles.TILE_WIDTH), last.x),
+			mini(ceili((clip.end.y - origin.y) / Gen2Tiles.TILE_HEIGHT), last.y),
 		)
 	for y: int in range(maxi(first.y, 0), last.y + 1):
 		for x: int in range(maxi(first.x, 0), last.x + 1):
@@ -320,7 +402,7 @@ func _draw_transition(
 			if cell == Gen2BattleTransition.CELL_NONE:
 				continue
 			var at := Rect2(
-				Vector2(x * Gen2Tiles.TILE_WIDTH, y * Gen2Tiles.TILE_HEIGHT),
+				origin + Vector2(x * Gen2Tiles.TILE_WIDTH, y * Gen2Tiles.TILE_HEIGHT),
 				Vector2(Gen2Tiles.TILE_WIDTH, Gen2Tiles.TILE_HEIGHT)
 			)
 			var covered: Rect2 = at if not priority else at.intersection(clip)
@@ -328,7 +410,7 @@ func _draw_transition(
 				continue
 			var palette: PackedColorArray = flood
 			if palette.is_empty():
-				var tile: int = page[y * window.x + x] if y * window.x + x < page.size() else 0
+				var tile: int = _drawn_tile_at(screen_tile.x + x, screen_tile.y + y)
 				palette = palettes[tile] if tile >= 0 and tile < palettes.size() \
 					else PackedColorArray()
 			if cell == black or _transition_tiles.is_empty():
@@ -370,49 +452,208 @@ func _transition_texture(
 
 
 func refresh() -> void:
+	_sync_map_layers()
 	queue_redraw()
 
 
-func _draw() -> void:
-	draw_rect(
-		Rect2(Vector2.ZERO, Vector2(Gen2Screen.WIDTH, Gen2Screen.HEIGHT)),
-		_background_color,
-		true,
+## Lays the map quads out under this frame's camera.
+##
+## The order is the order the cartridge's own buffer would be read in if it had
+## one this wide: the border block under everything, then each connected map
+## furthest first, then `wOverworldMapBlocks` itself over the top. That last one
+## is what keeps the three-block margin byte for byte the cartridge's -- a
+## connection strip stops at the `length` the macro stored, and a neighbour map
+## drawn whole does not -- so nothing a 20x18 screen can reach changes.
+func _sync_map_layers() -> void:
+	if _world == null or _world.current_map == null or _world.current_tileset == null \
+		or _atlas == null:
+		_show_map_layers(0)
+		return
+	var map: Gen2WorldMap = _world.current_map
+	var tileset: Gen2WorldTileset = _world.current_tileset
+	var camera: Vector2 = _world.view_origin_pixels().floor()
+	var view := Vector2(view_pixels())
+	var block_pixels: int = RomLayout.MAP_BLOCK_CELL_WIDTH * Gen2WorldAPI.CELL_PIXELS
+	var used: int = 0
+
+	var fill: Gen2WorldMapLayer = _map_layer(used)
+	used += 1
+	fill.configure(
+		_atlas, _one_block_texture(), _tiles_texture(tileset), Vector2i.ZERO,
+		map.border_block, tileset.block_count, tileset.tile_count, true,
 	)
-	if _world == null:
+	fill.place(Vector2.ZERO, view, camera)
+
+	if view.x > Gen2WorldAPI.VIEW_PIXELS.x or view.y > Gen2WorldAPI.VIEW_PIXELS.y:
+		var placements: Array = _world.map_placements().values()
+		placements.reverse()
+		for placement: Dictionary in placements:
+			var near: Gen2WorldMap = placement["map"]
+			var near_tileset: Gen2WorldTileset = _world.data.world_tileset(near.tileset)
+			if near_tileset == null:
+				continue
+			var at: Vector2 = Vector2(placement["origin"] as Vector2i) * float(block_pixels) \
+				- camera
+			var size := Vector2(near.width_blocks, near.height_blocks) * float(block_pixels)
+			if not Rect2(at, size).intersects(Rect2(Vector2.ZERO, view)):
+				continue
+			var blocks: ImageTexture = _blocks_texture(near)
+			var strip: Dictionary = _atlas_for(near, near_tileset)
+			if blocks == null or strip.is_empty():
+				continue
+			var layer: Gen2WorldMapLayer = _map_layer(used)
+			used += 1
+			layer.configure(
+				strip["texture"], blocks, _tiles_texture(near_tileset),
+				Vector2i(near.width_blocks, near.height_blocks), near.border_block,
+				near_tileset.block_count, near_tileset.tile_count, false,
+			)
+			layer.place(at.floor(), size)
+
+	var buffer: ImageTexture = _map_buffer_texture()
+	if buffer != null:
+		var span := Vector2i(
+			map.width_blocks + 2 * Gen2WorldAPI.BUFFER_BLOCKS,
+			map.height_blocks + 2 * Gen2WorldAPI.BUFFER_BLOCKS,
+		)
+		var layer: Gen2WorldMapLayer = _map_layer(used)
+		used += 1
+		layer.configure(
+			_atlas, buffer, _tiles_texture(tileset), span, map.border_block,
+			tileset.block_count, tileset.tile_count, false,
+		)
+		layer.place(
+			(Vector2.ONE * float(-Gen2WorldAPI.BUFFER_BLOCKS * block_pixels) - camera).floor(),
+			Vector2(span) * float(block_pixels),
+		)
+	_show_map_layers(used)
+
+
+func _map_layer(index: int) -> Gen2WorldMapLayer:
+	while _map_layers.size() <= index:
+		var layer := Gen2WorldMapLayer.new()
+		_map_layers.append(layer)
+		add_child(layer)
+	return _map_layers[index]
+
+
+func _show_map_layers(count: int) -> void:
+	for index: int in _map_layers.size():
+		_map_layers[index].visible = index < count
+
+
+## `wOverworldMapBlocks`: the map's own blocks with the three-block margin
+## around them, every byte through [method Gen2WorldAPI.drawn_block_at], so the
+## connection strips and the border fill in it are the cartridge's own.
+func _map_buffer_texture() -> ImageTexture:
+	if _world == null or _world.current_map == null:
+		return null
+	if _buffer_texture != null and _buffer_revision == _world.block_revision:
+		return _buffer_texture
+	var map: Gen2WorldMap = _world.current_map
+	var span := Vector2i(
+		map.width_blocks + 2 * Gen2WorldAPI.BUFFER_BLOCKS,
+		map.height_blocks + 2 * Gen2WorldAPI.BUFFER_BLOCKS,
+	)
+	if span.x <= 0 or span.y <= 0:
+		return null
+	var bytes := PackedByteArray()
+	bytes.resize(span.x * span.y)
+	for y: int in span.y:
+		var row: int = y * span.x
+		for x: int in span.x:
+			bytes[row + x] = _world.drawn_block_at(
+				x - Gen2WorldAPI.BUFFER_BLOCKS, y - Gen2WorldAPI.BUFFER_BLOCKS
+			) & 0xFF
+	_buffer_texture = Gen2WorldMapLayer.block_texture(bytes, span)
+	_buffer_revision = _world.block_revision
+	return _buffer_texture
+
+
+## A connected map's own block list, which nothing a run does edits: only the
+## loaded map takes `changeblock`.
+func _blocks_texture(map: Gen2WorldMap) -> ImageTexture:
+	var key: String = "%d:%d" % [map.group, map.number]
+	if _block_textures.has(key):
+		return _block_textures[key]
+	var texture: ImageTexture = Gen2WorldMapLayer.block_texture(
+		map.blocks, Vector2i(map.width_blocks, map.height_blocks)
+	)
+	_block_textures[key] = texture
+	return texture
+
+
+## The tileset's metatile table as sixteen bytes a block, with anything past the
+## tile strip folded to zero the way [method Gen2WorldTileset.tile_index] does.
+func _tiles_texture(tileset: Gen2WorldTileset) -> ImageTexture:
+	if _tiles_textures.has(tileset.number):
+		return _tiles_textures[tileset.number]
+	var slots: int = RomLayout.MAP_BLOCK_TILE_WIDTH * RomLayout.MAP_BLOCK_TILE_WIDTH
+	var bytes := PackedByteArray()
+	bytes.resize(slots * maxi(tileset.block_count, 1))
+	for at: int in bytes.size():
+		var index: int = tileset.meta[at] if at < tileset.meta.size() else 0
+		bytes[at] = index if index < tileset.tile_count else 0
+	var texture: ImageTexture = Gen2WorldMapLayer.block_texture(
+		bytes, Vector2i(slots, maxi(tileset.block_count, 1))
+	)
+	_tiles_textures[tileset.number] = texture
+	return texture
+
+
+## A one-block stand-in for the void fill's block sampler, which its own quad
+## never reads: every pixel of that quad is outside the map it declares.
+func _one_block_texture() -> ImageTexture:
+	if not _block_textures.has("void"):
+		_block_textures["void"] = Gen2WorldMapLayer.block_texture(
+			PackedByteArray([0]), Vector2i.ONE
+		)
+	return _block_textures["void"]
+
+
+## The drawn surface in hardware pixels, which is the cartridge's own until a
+## screen asks the world for more.
+func view_pixels() -> Vector2i:
+	return _world.view_pixels if _world != null else Gen2WorldAPI.VIEW_PIXELS
+
+
+## Where the cartridge's own 160x144 screen sits inside the drawn surface. Zero
+## unless the view is larger, and always a whole tile, since everything the
+## hardware laid out on the screen -- the transition's twenty by eighteen cells
+## first -- is laid out in tiles.
+func screen_offset() -> Vector2:
+	return ((Vector2(view_pixels() - Gen2WorldAPI.VIEW_PIXELS) * 0.5)
+		/ float(Gen2Tiles.TILE_WIDTH)).floor() * float(Gen2Tiles.TILE_WIDTH)
+
+
+func _draw() -> void:
+	if _world == null or _atlas == null:
+		draw_rect(Rect2(Vector2.ZERO, Vector2(view_pixels())), _background_color, true)
 		return
 
-	var camera_pixels: Vector2 = _world.visible_origin_cells() * Gen2WorldAPI.CELL_PIXELS
-	var tile_origin := Vector2i(
-		floori(camera_pixels.x / float(Gen2Tiles.TILE_WIDTH)),
-		floori(camera_pixels.y / float(Gen2Tiles.TILE_HEIGHT)),
-	)
-	var tile_offset: Vector2 = camera_pixels - Vector2(
-		tile_origin.x * Gen2Tiles.TILE_WIDTH,
-		tile_origin.y * Gen2Tiles.TILE_HEIGHT,
-	)
-	var window_size: Vector2i = Gen2WorldAPI.VIEW_TILES + Vector2i.ONE
-	var page: PackedInt32Array = _world.tile_indices_in_window(tile_origin, window_size)
-	var hidden_tiles: Dictionary = _hidden_tree_tiles()
-	for y: int in window_size.y:
-		for x: int in window_size.x:
-			var tile: int = page[y * window_size.x + x]
-			if hidden_tiles.has(tile_origin + Vector2i(x, y)):
-				tile = Gen2WorldEffects.HEADBUTT_TREE_HIDDEN_TILE
-			if _atlas == null or tile < 0 or tile >= _world.current_tileset.tile_count:
-				continue
-			draw_texture_rect_region(
-				_atlas,
-				Rect2(
-					Vector2(x * Gen2Tiles.TILE_WIDTH, y * Gen2Tiles.TILE_HEIGHT) - tile_offset,
-					Vector2(8, 8),
-				),
-				Rect2(Vector2(tile * Gen2Tiles.TILE_WIDTH, 0), Vector2(8, 8)),
-			)
-
-	var palettes: Array = _tile_palettes()
+	var camera_pixels: Vector2 = _world.view_origin_pixels()
+	## `Cut_Headbutt_GetPixelFacing`'s tree goes away while its own sprite
+	## animation plays, which the map quad knows nothing about: the four tiles of
+	## the cell are painted over with the tileset's own blank one.
+	for cell: Vector2i in (_effects.hidden_tree_cells() if _effects != null else []):
+		var at: Vector2 = Vector2(cell * Gen2WorldAPI.CELL_PIXELS) - camera_pixels
+		for row: int in RomLayout.MAP_BLOCK_CELL_WIDTH:
+			for column: int in RomLayout.MAP_BLOCK_CELL_WIDTH:
+				draw_texture_rect_region(
+					_atlas,
+					Rect2(
+						at + Vector2(column * Gen2Tiles.TILE_WIDTH, row * Gen2Tiles.TILE_HEIGHT),
+						Vector2(Gen2Tiles.TILE_WIDTH, Gen2Tiles.TILE_HEIGHT),
+					),
+					Rect2(
+						Vector2(
+							Gen2WorldEffects.HEADBUTT_TREE_HIDDEN_TILE * Gen2Tiles.TILE_WIDTH, 0
+						),
+						Vector2(Gen2Tiles.TILE_WIDTH, Gen2Tiles.TILE_HEIGHT),
+					),
+				)
 	if not _transition_cells.is_empty():
-		_draw_transition(page, palettes, window_size)
+		_draw_transition(camera_pixels)
 	if _transition_sprites == Gen2BattleTransition.SPRITES_NONE:
 		return
 
@@ -436,16 +677,29 @@ func _draw() -> void:
 	if _actors != null and not battlers_only:
 		for sprite: Dictionary in _actors.sprites():
 			drawn.append({"actor": sprite, "row": (sprite["position_cells"] as Vector2).y})
+	## The people on the maps around this one, sorted into the same rows: a view
+	## wide enough to see the next town is wide enough to see somebody standing
+	## in it. They are the world API's read-only copies and take no part in
+	## anything: see [method Gen2WorldAPI.connected_map_objects].
+	if not battlers_only and view_pixels() != Gen2WorldAPI.VIEW_PIXELS:
+		for entry: Dictionary in _world.connected_map_objects():
+			var neighbour: Gen2WorldObject = entry["object"]
+			if not neighbour.active or neighbour.sprite == null:
+				continue
+			var offset: Vector2i = entry["offset"]
+			drawn.append({
+				"object": neighbour,
+				"offset": offset,
+				"row": float(offset.y + neighbour.cell.y),
+			})
 	drawn.sort_custom(_sort_drawn)
 	for entry: Dictionary in drawn:
 		if entry.has("actor"):
-			_draw_actor(
-				entry["actor"], camera_pixels, page, palettes, tile_origin, tile_offset,
-				window_size
-			)
+			_draw_actor(entry["actor"], camera_pixels)
 			continue
 		var object: Gen2WorldObject = entry["object"]
-		var pixel: Vector2 = Vector2(object.cell * Gen2WorldAPI.CELL_PIXELS) \
+		var offset: Vector2i = entry.get("offset", Vector2i.ZERO)
+		var pixel: Vector2 = Vector2((object.cell + offset) * Gen2WorldAPI.CELL_PIXELS) \
 			+ Vector2(object.step_offset(Gen2WorldAPI.CELL_PIXELS)) - camera_pixels \
 			+ SPRITE_LIFT
 		var texture: Texture2D = _actor_texture(
@@ -456,14 +710,16 @@ func _draw() -> void:
 		var object_jump := Vector2(0, -object.height_offset_pixels())
 		if texture != null:
 			draw_texture(texture, pixel + object_jump)
+		if offset != Vector2i.ZERO:
+			continue
 		if _in_grass(object.cell):
-			_draw_grass_over(pixel, page, palettes, tile_origin, tile_offset, window_size)
+			_draw_grass_over(pixel, camera_pixels)
 		if object.emote_visible:
 			_draw_emote(object.emote_id, pixel)
 		if not battlers_only:
 			_draw_effect_sprites(object.index, pixel)
 
-	var player: Vector2 = Vector2(_world.player_pixel_position()) + SPRITE_LIFT
+	var player: Vector2 = Vector2(_world.player_view_pixel()) + SPRITE_LIFT
 	## The jump arc is a sprite offset, not a position: the shadow and the grass
 	## the hop leaves behind stay on the ground.
 	var jump: Vector2 = Vector2(0, _world.player_jump_offset())
@@ -474,7 +730,7 @@ func _draw() -> void:
 	if player_texture != null:
 		draw_texture(player_texture, player + jump)
 		if _in_grass(_world.player_cell):
-			_draw_grass_over(player + jump, page, palettes, tile_origin, tile_offset, window_size)
+			_draw_grass_over(player + jump, camera_pixels)
 		if _world.fishing_busy():
 			_draw_fishing_rod(player + jump)
 	else:
@@ -555,10 +811,7 @@ func _actor_texture(
 ## One mod actor, drawn from the [Gen2WorldSprite] the actor layer resolved for
 ## it. Its position is in walk cells, the unit `player_position_cells()` is in,
 ## so a follower halfway through a step is drawn halfway.
-func _draw_actor(
-	sprite: Dictionary, camera_pixels: Vector2, page: PackedInt32Array, palettes: Array,
-	tile_origin: Vector2i, tile_offset: Vector2, window_size: Vector2i
-) -> void:
+func _draw_actor(sprite: Dictionary, camera_pixels: Vector2) -> void:
 	var cell_position: Vector2 = sprite["position_cells"]
 	var pixel: Vector2 = cell_position * float(Gen2WorldAPI.CELL_PIXELS) - camera_pixels \
 		+ SPRITE_LIFT
@@ -570,7 +823,7 @@ func _draw_actor(
 		return
 	draw_texture(texture, pixel)
 	if _in_grass(Vector2i(roundi(cell_position.x), roundi(cell_position.y))):
-		_draw_grass_over(pixel, page, palettes, tile_origin, tile_offset, window_size)
+		_draw_grass_over(pixel, camera_pixels)
 	## The same bubble a map object's `showemote` puts up, over an actor that
 	## asked for one. Drawn after the grass, as an object's is: `SpawnEmote` is
 	## its own OAM and stands over the tuft rather than behind it.
@@ -624,14 +877,7 @@ func _in_grass(cell: Vector2i) -> bool:
 
 ## Redraws the map over the bottom half of a sprite drawn at [param pixel], with
 ## the transparent index left out, which is what OAM_PRIO amounts to here.
-func _draw_grass_over(
-	pixel: Vector2,
-	page: PackedInt32Array,
-	palettes: Array,
-	_tile_origin: Vector2i,
-	tile_offset: Vector2,
-	window_size: Vector2i,
-) -> void:
+func _draw_grass_over(pixel: Vector2, camera_pixels: Vector2) -> void:
 	if _priority_atlas == null:
 		_build_priority_atlas()
 	if _priority_atlas == null:
@@ -640,16 +886,27 @@ func _draw_grass_over(
 		pixel + Vector2(0, Gen2Tiles.TILE_HEIGHT),
 		Vector2(Gen2WorldAPI.CELL_PIXELS, Gen2Tiles.TILE_HEIGHT),
 	)
-	for y: int in window_size.y:
-		for x: int in window_size.x:
+	## The tuft is sixteen by eight pixels, so it covers at most three tiles by
+	## two. Walking the whole page for it cost the view's every tile once per
+	## sprite standing in grass, which a window-filling view cannot afford.
+	var first := Vector2i(
+		floori((over.position.x + camera_pixels.x) / float(Gen2Tiles.TILE_WIDTH)),
+		floori((over.position.y + camera_pixels.y) / float(Gen2Tiles.TILE_HEIGHT)),
+	)
+	var last := Vector2i(
+		ceili((over.end.x + camera_pixels.x) / float(Gen2Tiles.TILE_WIDTH)),
+		ceili((over.end.y + camera_pixels.y) / float(Gen2Tiles.TILE_HEIGHT)),
+	)
+	for y: int in range(first.y, last.y + 1):
+		for x: int in range(first.x, last.x + 1):
 			var at := Rect2(
-				Vector2(x * Gen2Tiles.TILE_WIDTH, y * Gen2Tiles.TILE_HEIGHT) - tile_offset,
+				Vector2(x * Gen2Tiles.TILE_WIDTH, y * Gen2Tiles.TILE_HEIGHT) - camera_pixels,
 				Vector2(Gen2Tiles.TILE_WIDTH, Gen2Tiles.TILE_HEIGHT),
 			)
 			var covered: Rect2 = at.intersection(over)
 			if covered.size.x <= 0.0 or covered.size.y <= 0.0:
 				continue
-			var tile: int = page[y * window_size.x + x]
+			var tile: int = _drawn_tile_at(x, y)
 			if tile < 0 or tile >= _world.current_tileset.tile_count:
 				continue
 			for piece: Rect2 in _priority_pieces(covered):
@@ -665,7 +922,21 @@ func _draw_grass_over(
 	## wins the priority test where it wrote is its own tile rather than the
 	## grass. The pieces above left those cells to it.
 	if not _transition_cells.is_empty():
-		_draw_transition(page, palettes, window_size, over, true)
+		_draw_transition(camera_pixels, over, true)
+
+
+## The graphics tile drawn at a map-space tile coordinate, through the same
+## block fold the map quad's shader runs.
+func _drawn_tile_at(tile_x: int, tile_y: int) -> int:
+	if _world == null or _world.current_tileset == null:
+		return -1
+	var width: int = RomLayout.MAP_BLOCK_TILE_WIDTH
+	var block: int = _world.expanded_block_at(
+		floori(float(tile_x) / float(width)), floori(float(tile_y) / float(width))
+	)
+	return _world.current_tileset.tile_index(
+		block, posmod(tile_y, width) * width + posmod(tile_x, width)
+	)
 
 
 ## The parts of [param rect] the map still owns, split on the screen's own
@@ -691,8 +962,9 @@ func _priority_pieces(rect: Rect2) -> Array[Rect2]:
 
 ## Whether the transition has taken the screen cell [param at] falls in.
 func _transition_wrote(at: Vector2) -> bool:
-	var x: int = floori(at.x / Gen2Tiles.TILE_WIDTH)
-	var y: int = floori(at.y / Gen2Tiles.TILE_HEIGHT)
+	var screen: Vector2 = at - screen_offset()
+	var x: int = floori(screen.x / Gen2Tiles.TILE_WIDTH)
+	var y: int = floori(screen.y / Gen2Tiles.TILE_HEIGHT)
 	if x < 0 or x >= Gen2BattleTransition.COLUMNS \
 		or y < 0 or y >= Gen2BattleTransition.ROWS:
 		return false
@@ -819,20 +1091,6 @@ func _pulse_texture(
 
 func _effect_sprites() -> Array:
 	return _effects.sprites() if _effects != null else []
-
-
-## The tiles a live effect takes from the map, as a set of absolute tile
-## coordinates. See Gen2WorldEffects.hidden_tree_cells().
-func _hidden_tree_tiles() -> Dictionary:
-	var out: Dictionary = {}
-	if _effects == null:
-		return out
-	for cell: Vector2i in _effects.hidden_tree_cells():
-		var origin: Vector2i = cell * RomLayout.MAP_BLOCK_CELL_WIDTH
-		for y: int in RomLayout.MAP_BLOCK_CELL_WIDTH:
-			for x: int in RomLayout.MAP_BLOCK_CELL_WIDTH:
-				out[origin + Vector2i(x, y)] = true
-	return out
 
 
 ## Whatever [param object_index] is carrying this frame, drawn over it: the dust

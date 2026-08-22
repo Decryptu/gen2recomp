@@ -10,6 +10,19 @@ extends RefCounted
 const VIEW_CELLS: Vector2i = Vector2i(10, 9)
 const VIEW_TILES: Vector2i = VIEW_CELLS * RomLayout.MAP_BLOCK_CELL_WIDTH
 const CELL_PIXELS: int = Gen2Tiles.TILE_WIDTH * RomLayout.MAP_BLOCK_CELL_WIDTH
+## The screen the cartridge draws, in pixels: 160x144.
+const VIEW_PIXELS: Vector2i = VIEW_CELLS * CELL_PIXELS
+## `ChangeMap` copies a map into the middle of `wOverworldMapBlocks`, which is
+## three blocks wider than the map on every side (`home/map.asm`). That margin
+## is what a connection strip fills and what a 20x18 screen can reach at a map
+## edge; nothing past it exists on the cartridge at all.
+const BUFFER_BLOCKS: int = 3
+## How far [method map_placements] walks the connection graph, and how many maps
+## it may place. Three hops reaches the towns either side of the routes next to
+## this map, which is as much as the furthest zoom shows; the cap is what stops
+## a walk of the whole region on a map that has many ways out.
+const PLACEMENT_HOPS: int = 3
+const PLACEMENT_LIMIT: int = 24
 ## The overworld object coordinate used by the player sprite. The 20x18 screen
 ## is not symmetrically centred around a 16x16 object: the source loads four
 ## walk cells before the player on each axis (`_LoadOverworldTilemap`).
@@ -216,6 +229,19 @@ var _object_facing_overrides: Dictionary = {}
 var _object_followers: Dictionary = {}
 var _variable_sprites: Dictionary = {}
 var _block_overrides: Dictionary = {}
+## [method map_placements], built on first use and dropped with the map it is
+## measured from.
+var _map_placements: Dictionary = {}
+## [method connected_map_objects], built and dropped beside the placements.
+var _connected_objects: Array = []
+## Bumped whenever a `changeblock` or a map load moves a block byte, so a view
+## that caches the block buffer knows when to read it again.
+var block_revision: int = 0
+## The drawn surface in hardware pixels, which is [constant VIEW_PIXELS] unless
+## a view has asked for more. The extra is spread evenly around the screen the
+## cartridge would have drawn, so the player keeps the place
+## [constant PLAYER_VIEW_CELL] puts him in and only the surround grows.
+var view_pixels: Vector2i = VIEW_PIXELS
 ## A resolved but uncommitted Cut, held between cut_request() and complete_cut()
 ## the way Script_Cut holds wCutWhirlpool* across its writetext. Cleared with the
 ## block overrides, since the block it names belongs to the loaded map.
@@ -425,6 +451,9 @@ func _init(
 	inventory = Gen2WorldInventory.new(data, state)
 	state.ensure_roaming_mons(data.world_roaming_mons())
 	current_map = map
+	_map_placements = {}
+	_connected_objects = []
+	block_revision += 1
 	current_tileset = tileset
 	player_cell = _clamp_cell(start_cell)
 	# Opening a world is `StartMap`, which falls into `EnterMap`: the five-step
@@ -679,6 +708,13 @@ func visible_origin_cells() -> Vector2:
 	return player_position_cells() - _camera_lag_cells - Vector2(PLAYER_VIEW_CELL)
 
 
+## The drawn surface's top-left in world pixels, which is
+## [method visible_origin_cells] for a hardware-sized view.
+func view_origin_pixels() -> Vector2:
+	return visible_origin_cells() * float(CELL_PIXELS) \
+		- Vector2(view_pixels - VIEW_PIXELS) * 0.5
+
+
 ## The player's screen pixel, which is PLAYER_VIEW_CELL plus whatever hSCX/hSCY
 ## have not caught up with: `ScrollScreen` sits after `NextOverworldFrame` in
 ## `HandleMapBackground`, so the scroll a pass computed is written two frames
@@ -688,6 +724,13 @@ func player_pixel_position() -> Vector2i:
 	return Vector2i(
 		(player_position_cells() - visible_origin_cells()) * float(CELL_PIXELS)
 	)
+
+
+## The player's pixel inside the drawn surface, which is
+## [method player_pixel_position] plus half of whatever surround a view wider
+## than the hardware's added. The two are the same value on a 160x144 view.
+func player_view_pixel() -> Vector2i:
+	return player_pixel_position() + (view_pixels - VIEW_PIXELS) / 2
 
 
 func player_step_in_progress() -> bool:
@@ -2578,6 +2621,12 @@ func set_object_time(hour: int, time_of_day: int) -> void:
 			object.active = bool(_object_visibility_overrides[key])
 		if object.deleted:
 			object.active = false
+	## `CheckObjectTime` runs from the clock callback for whatever is on the
+	## screen, and these are on it.
+	for entry: Dictionary in _connected_objects:
+		var neighbour: Gen2WorldObject = entry["object"]
+		neighbour.active = neighbour.visible_at(object_hour, object_time_of_day) \
+			and not neighbour.flag_hidden
 
 
 func set_event_flag(flag: int, active: bool = true) -> void:
@@ -2652,6 +2701,7 @@ func change_block(block_x: int, block_y: int, block: int) -> Dictionary:
 		_block_overrides.erase(key)
 	else:
 		_block_overrides[key] = block
+	block_revision += 1
 	return {
 		"ok": true,
 		"kind": &"block_change",
@@ -2817,6 +2867,117 @@ func drawn_block_at(block_x: int, block_y: int) -> int:
 	return drawn_block_for(data, current_map, block_x, block_y, _block_overrides)
 
 
+## [method drawn_block_at] for a view wider than the hardware's own.
+##
+## Inside `wOverworldMapBlocks` this is [method drawn_block_at] byte for byte,
+## so nothing a 20x18 screen can reach changes. Past it the cartridge holds
+## nothing at all, and a view that reaches further would show border block to
+## the horizon; the connection graph places whole neighbouring maps there
+## instead ([method map_placements]), and the border block still fills what no
+## map covers.
+func expanded_block_at(block_x: int, block_y: int) -> int:
+	if current_map == null:
+		return 0
+	if in_hardware_buffer(current_map, block_x, block_y):
+		return drawn_block_at(block_x, block_y)
+	for placement: Dictionary in map_placements().values():
+		var map: Gen2WorldMap = placement["map"]
+		var origin: Vector2i = placement["origin"]
+		var local := Vector2i(block_x - origin.x, block_y - origin.y)
+		if local.x < 0 or local.y < 0 \
+			or local.x >= map.width_blocks or local.y >= map.height_blocks:
+			continue
+		var block: int = _overridden_block_at(map, local.x, local.y, _block_overrides)
+		return map.border_block if block == 0 else block
+	return current_map.border_block
+
+
+## Whether a block coordinate is one `ChangeMap` writes: the map's own blocks
+## plus the three-block margin around them.
+static func in_hardware_buffer(map: Gen2WorldMap, block_x: int, block_y: int) -> bool:
+	if map == null:
+		return false
+	return block_x >= -BUFFER_BLOCKS and block_y >= -BUFFER_BLOCKS \
+		and block_x < map.width_blocks + BUFFER_BLOCKS \
+		and block_y < map.height_blocks + BUFFER_BLOCKS
+
+
+## Every map the connection graph reaches from the current one, keyed
+## `"group:number"`, each with its origin in the current map's block
+## coordinates. The current map is not in it: it is the origin.
+##
+## Built once per map load and kept, since the graph is header data and nothing
+## a run does moves a map. Ordered nearest first, so a caller that draws them in
+## order draws the far ones under the near ones.
+func map_placements() -> Dictionary:
+	if _map_placements.is_empty() and current_map != null:
+		_map_placements = placements_around(data, current_map)
+	return _map_placements
+
+
+## [method map_placements] for a map that is not the loaded one, which is what a
+## test and the importer's own checks have.
+static func placements_around(
+	data_source: GameData, map: Gen2WorldMap, hops: int = PLACEMENT_HOPS
+) -> Dictionary:
+	var out: Dictionary = {}
+	if data_source == null or map == null:
+		return out
+	var root: String = "%d:%d" % [map.group, map.number]
+	var placed: Dictionary = {root: Vector2i.ZERO}
+	var queue: Array = [{"map": map, "origin": Vector2i.ZERO, "hops": 0}]
+	var at: int = 0
+	while at < queue.size() and out.size() < PLACEMENT_LIMIT:
+		var entry: Dictionary = queue[at]
+		at += 1
+		var source: Gen2WorldMap = entry["map"]
+		if int(entry["hops"]) >= hops:
+			continue
+		for connection: Dictionary in source.connections:
+			var target: Gen2WorldMap = data_source.world_map(
+				int(connection.get("map_group", -1)),
+				int(connection.get("map_number", -1)),
+			)
+			if target == null:
+				continue
+			var key: String = "%d:%d" % [target.group, target.number]
+			if placed.has(key):
+				continue
+			var origin: Vector2i = (entry["origin"] as Vector2i) + connection_origin_blocks(
+				source, target, connection
+			)
+			placed[key] = origin
+			out[key] = {"map": target, "origin": origin}
+			queue.append({"map": target, "origin": origin, "hops": int(entry["hops"]) + 1})
+	return out
+
+
+## Where [param target] sits, in [param source]'s block coordinates, for a
+## connection running [param direction] out of [param source].
+##
+## The four cases are `_connected_drawn_block_at`'s own arithmetic read the
+## other way round: it takes a padding block to a cell of the target, and this
+## takes the target's own origin to a block of the source. Both come from
+## `FillMapConnections`' pointer sums, and having them in one place is what
+## keeps a strip and the map behind it from disagreeing by a block.
+static func connection_origin_blocks(
+	source: Gen2WorldMap, target: Gen2WorldMap, connection: Dictionary
+) -> Vector2i:
+	## The macro stores the offset in cells, and every strip lookup halves it.
+	var along_x: int = -floori(float(int(connection.get("x_offset", 0))) / 2.0)
+	var along_y: int = -floori(float(int(connection.get("y_offset", 0))) / 2.0)
+	match String(connection.get("direction", "")):
+		"north":
+			return Vector2i(along_x, -target.height_blocks)
+		"south":
+			return Vector2i(along_x, source.height_blocks)
+		"west":
+			return Vector2i(-target.width_blocks, along_y)
+		"east":
+			return Vector2i(source.width_blocks, along_y)
+	return Vector2i.ZERO
+
+
 ## The same fold for a map that is not the loaded one, which is what a battle
 ## staged on a map has: [Gen2BattleWorldContext] names the map and hands over no
 ## world, deliberately, so there is no `current_map` to read.
@@ -2869,22 +3030,11 @@ static func _connected_drawn_block_at(
 		)
 		if target == null:
 			continue
-		var target_cell := Vector2i(block_x, block_y)
-		match direction:
-			"north":
-				target_cell.x += floori(float(int(connection.get("x_offset", 0))) / 2.0)
-				target_cell.y += target.height_blocks
-			"south":
-				target_cell.x += floori(float(int(connection.get("x_offset", 0))) / 2.0)
-				target_cell.y -= map.height_blocks
-			"west":
-				target_cell.x += target.width_blocks
-				target_cell.y += floori(float(int(connection.get("y_offset", 0))) / 2.0)
-			"east":
-				target_cell.x -= map.width_blocks
-				target_cell.y += floori(float(int(connection.get("y_offset", 0))) / 2.0)
-			_:
-				continue
+		## The strip's own arithmetic is [method connection_origin_blocks] read
+		## the other way round: that places the target's origin in this map's
+		## blocks, and this takes a padding block to a cell of the target.
+		var target_cell: Vector2i = Vector2i(block_x, block_y) \
+			- connection_origin_blocks(map, target, connection)
 		if target_cell.x < 0 or target_cell.y < 0 \
 			or target_cell.x >= target.width_blocks or target_cell.y >= target.height_blocks:
 			continue
@@ -5401,6 +5551,7 @@ func _apply_map(
 	## connection reaches it, so a slide never survives a map change.
 	_stand_in_place()
 	_block_overrides.clear()
+	block_revision += 1
 	_pending_cut.clear()
 	_pending_surf.clear()
 	_pending_whirlpool.clear()
@@ -5431,6 +5582,9 @@ func _apply_map(
 	# or a town puts the light out, and a cave to cave doorway does not.
 	state.clear_flash_if_outdoors(target_map.environment)
 	current_map = target_map
+	_map_placements = {}
+	_connected_objects = []
+	block_revision += 1
 	current_tileset = target_tileset
 	player_cell = _clamp_cell(target_cell)
 	# RefreshPlayerSprite calls CheckWarpFacingDown, then applies a scripted
@@ -6066,6 +6220,7 @@ func reload_current_map() -> Dictionary:
 	if current_map == null or current_tileset == null:
 		return {"ok": false, "reason": &"missing_map"}
 	_block_overrides.clear()
+	block_revision += 1
 	_pending_cut.clear()
 	_pending_surf.clear()
 	_pending_whirlpool.clear()
@@ -6088,6 +6243,68 @@ func _on_world_state_changed() -> void:
 	set_object_time(object_hour, object_time_of_day)
 
 
+## One row of a map's object events as a live object.
+##
+## `GetMonSprite`'s `.Variable` branch reads wVariableSprites and falls through
+## to `.NoBreedmon` on a zero slot, whose `ld a, WALKING_SPRITE` is 1 and so
+## `SPRITE_CHRIS` by coincidence of two constant lists
+## (engine/overworld/overworld.asm). So an object whose variable sprite no
+## script has assigned yet is drawn, occupies its cell and is talkable.
+## Copycat's House 2F is where it matters: SPRITE_COPYCAT is $fb and only the
+## Copycat's own script assigns it, so without this she could not be reached to
+## run it. An object that should not be there at all is masked by
+## [method load_object_masks], not by this fallback.
+func _object_from_event(index: int, value: Dictionary) -> Gen2WorldObject:
+	var source_sprite_number: int = int(value.get("sprite", 0))
+	var sprite_number: int = int(_variable_sprites.get(
+		source_sprite_number, source_sprite_number
+	))
+	if sprite_number >= Gen2WorldScriptRunner.VARIABLE_SPRITE_BASE:
+		sprite_number = SPRITE_CHRIS
+	var sprite: Gen2WorldSprite = null
+	var icon_number: int = Gen2WorldSprite.mon_icon_for_sprite(sprite_number)
+	if icon_number > 0:
+		sprite = data.overworld_icon(icon_number)
+	else:
+		sprite = data.overworld_sprite(sprite_number)
+	var object_event: Dictionary = value.duplicate(true)
+	object_event["sprite"] = sprite_number
+	return Gen2WorldObject.from_event(index, object_event, sprite)
+
+
+## The people standing on the maps [method map_placements] puts around this one,
+## for a view wide enough to see them.
+##
+## Deliberately not part of [member objects]: `ReadObjectEvents` fills
+## `wMapObjects` from the loaded map alone, so on the cartridge a connected
+## map's people do not exist until its own map load builds them. These take no
+## step, run no script, answer no collision and are not talked to. They stand
+## where their map's event data puts them, which is what a town seen from the
+## route next to it looks like.
+##
+## Each entry is `{"object": Gen2WorldObject, "offset": Vector2i}`, the offset
+## being the map's own origin in walk cells.
+func connected_map_objects() -> Array:
+	if not _connected_objects.is_empty() or current_map == null or data == null:
+		return _connected_objects
+	for placement: Dictionary in map_placements().values():
+		var map: Gen2WorldMap = placement["map"]
+		var offset: Vector2i = (placement["origin"] as Vector2i) \
+			* RomLayout.MAP_BLOCK_CELL_WIDTH
+		var rows: Array = map.events.get("objects", [])
+		for index: int in rows.size():
+			var object: Gen2WorldObject = _object_from_event(index, rows[index])
+			if object.sprite == null:
+				continue
+			object.flag_hidden = object.event_flag_active(state)
+			object.active = object.visible_at(object_hour, object_time_of_day) \
+				and not object.flag_hidden
+			if not object.active:
+				continue
+			_connected_objects.append({"object": object, "offset": offset})
+	return _connected_objects
+
+
 ## [param carry_presentation] keeps the live emote and movement trail of the
 ## records being replaced, for the reloads that happen inside one visit to a map
 ## rather than on the way into it. See Gen2WorldObject.carry_presentation_from().
@@ -6098,31 +6315,7 @@ func _load_objects(carry_presentation: bool = false) -> void:
 		return
 	var rows: Array = current_map.events.get("objects", [])
 	for index: int in rows.size():
-		var value: Dictionary = rows[index]
-		var source_sprite_number: int = int(value.get("sprite", 0))
-		var sprite_number: int = int(_variable_sprites.get(
-			source_sprite_number, source_sprite_number
-		))
-		## `GetMonSprite`'s `.Variable` branch reads wVariableSprites and falls
-		## through to `.NoBreedmon` on a zero slot, whose `ld a, WALKING_SPRITE`
-		## is 1 and so `SPRITE_CHRIS` by coincidence of two constant lists
-		## (engine/overworld/overworld.asm). So an object whose variable sprite
-		## no script has assigned yet is drawn, occupies its cell and is
-		## talkable. Copycat's House 2F is where it matters: SPRITE_COPYCAT is
-		## $fb and only the Copycat's own script assigns it, so without this she
-		## could not be reached to run it. An object that should not be there at
-		## all is masked by [method load_object_masks], not by this fallback.
-		if sprite_number >= Gen2WorldScriptRunner.VARIABLE_SPRITE_BASE:
-			sprite_number = SPRITE_CHRIS
-		var sprite: Gen2WorldSprite = null
-		var icon_number: int = Gen2WorldSprite.mon_icon_for_sprite(sprite_number)
-		if icon_number > 0:
-			sprite = data.overworld_icon(icon_number)
-		else:
-			sprite = data.overworld_sprite(sprite_number)
-		var object_event: Dictionary = value.duplicate(true)
-		object_event["sprite"] = sprite_number
-		var object: Gen2WorldObject = Gen2WorldObject.from_event(index, object_event, sprite)
+		var object: Gen2WorldObject = _object_from_event(index, rows[index])
 		var key: String = _object_key(current_map.group, current_map.number, index)
 		if _object_position_overrides.has(key):
 			object.cell = _object_position_overrides[key]
