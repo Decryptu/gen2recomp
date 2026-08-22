@@ -143,10 +143,34 @@ static func fade_palette(palette: PackedColorArray, order: int) -> PackedColorAr
 	return out
 
 
+## `PAL_BG_ROOF`, the one background slot whose colours are not the row's own.
+const PAL_BG_ROOF: int = 6
+
+
 static func palette_slots(environment: int, time_of_day: int) -> Array:
 	var environment_index: int = clampi(environment, 0, PALETTE_ROWS.size() - 1)
 	var time_index: int = clampi(time_of_day, 0, 3)
 	return (PALETTE_ROWS[environment_index] as Array)[time_index]
+
+
+## The two colours a map group lends `PAL_BG_ROOF`, or nothing when the map is
+## not one `_LoadMapPals` reaches the roof branch for.
+##
+## `cp NITE_F / jr c, .morn_day` is the whole test, so DARKNESS takes the nite
+## pair as well: the four rows are two, not four.
+static func roof_colors(
+	data: GameData, environment: int, time_of_day: int, map_group: int
+) -> PackedColorArray:
+	if data == null or map_group < 0:
+		return PackedColorArray()
+	if environment != ENVIRONMENT_TOWN and environment != ENVIRONMENT_ROUTE:
+		return PackedColorArray()
+	return data.roof_palette(map_group, time_of_day >= TIME_NIGHT)
+
+
+## `wEnvironment`'s TOWN and ROUTE, the two `_LoadMapPals` tests by hand.
+const ENVIRONMENT_TOWN: int = 1
+const ENVIRONMENT_ROUTE: int = 2
 
 
 ## One palette per tile of [param tileset], in tile order.
@@ -176,6 +200,16 @@ static func tile_palettes(
 		elif slot == 4 and cave_color >= 0 and base.size() >= 2:
 			palette[0] = base[clampi(cave_color, 0, 1)]
 		resolved.append(palette)
+	# `_LoadMapPals`' own tail: colours 1 and 2 of `PAL_BG_ROOF` come from the
+	# map group rather than from the time-of-day row, and only a TOWN or ROUTE
+	# map reaches the branch at all.
+	var roof: PackedColorArray = roof_colors(data, map.environment, time_of_day, map.group)
+	if roof.size() == 2 and resolved.size() > PAL_BG_ROOF:
+		var slot_palette: PackedColorArray = resolved[PAL_BG_ROOF]
+		if slot_palette.size() >= 3:
+			slot_palette[1] = roof[0]
+			slot_palette[2] = roof[1]
+			resolved[PAL_BG_ROOF] = slot_palette
 	# `FillWhiteBGColor`, which only the fade out of the map runs: every
 	# background palette takes palette 0's own colour 0, so the order that
 	# flattens a palette onto it flattens the screen onto one white.

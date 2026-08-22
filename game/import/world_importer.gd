@@ -69,6 +69,8 @@ static func import_to_cache(
 		return {"ok": false, "message": "Could not write overworld tileset data."}
 	if not RomCache.write_json(RomCache.world_palettes_path(directory), result["palettes"]):
 		return {"ok": false, "message": "Could not write overworld palette data."}
+	if not RomCache.write_json(RomCache.world_roofs_path(directory), result["roofs"]):
+		return {"ok": false, "message": "Could not write overworld roof data."}
 	if not RomCache.write_json(
 		RomCache.world_animation_assets_path(directory), result["animation_assets"]
 	):
@@ -173,6 +175,9 @@ static func read_world(
 	var animation_assets: Dictionary = _read_world_animation_assets(rom, layout)
 	if not bool(animation_assets.get("ok", false)):
 		return animation_assets
+	var roofs: Dictionary = _read_world_roofs(rom, layout)
+	if not bool(roofs.get("ok", false)):
+		return roofs
 
 	var tilesets: Array = []
 	var graphics: Dictionary = {}
@@ -235,6 +240,7 @@ static func read_world(
 		"tilesets": tilesets,
 		"graphics": graphics,
 		"palettes": palettes["groups"],
+		"roofs": roofs["roofs"],
 		"animation_assets": animation_assets["assets"],
 		"sprites": sprites["sprites"],
 		"sprite_palettes": sprites["palettes"],
@@ -831,6 +837,44 @@ static func _read_world_palettes(rom: RomFile, layout: Dictionary) -> Dictionary
 			colors.append(int(bytes[at]) | (int(bytes[at + 1]) << 8))
 		groups.append(colors)
 	return {"ok": true, "groups": groups}
+
+
+## `LoadMapGroupRoof` and `_LoadMapPals`' own roof branch, as one record.
+##
+## The tiles are a plain 2bpp run of [constant RomLayout.ROOF_COUNT] nine-tile
+## roofs, and the palette pair is read whole rather than split: `RoofPals`' row
+## is morn/day's two colours then nite's two, and which half a map takes is the
+## renderer's question rather than the importer's.
+static func _read_world_roofs(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var groups: PackedByteArray = rom.slice(
+		int(layout["map_group_roofs"]), RomLayout.MAP_GROUP_ROOF_COUNT
+	)
+	if groups.size() != RomLayout.MAP_GROUP_ROOF_COUNT:
+		return _error("The map group roof table is outside the cartridge.")
+	var tile_bytes: int = RomLayout.ROOF_COUNT * RomLayout.ROOF_TILE_BYTES
+	var raw: PackedByteArray = rom.slice(int(layout["roof_tiles"]), tile_bytes)
+	if raw.size() != tile_bytes:
+		return _error("The roof tiles are outside the cartridge.")
+	var palette_bytes: int = RomLayout.MAP_GROUP_ROOF_COUNT * RomLayout.ROOF_PALETTE_BYTES
+	var packed: PackedByteArray = rom.slice(int(layout["roof_palettes"]), palette_bytes)
+	if packed.size() != palette_bytes:
+		return _error("The roof palettes are outside the cartridge.")
+
+	var palettes: Array = []
+	for group: int in RomLayout.MAP_GROUP_ROOF_COUNT:
+		var colors: Array = []
+		for color: int in 4:
+			var at: int = group * RomLayout.ROOF_PALETTE_BYTES + color * 2
+			colors.append(int(packed[at]) | (int(packed[at + 1]) << 8))
+		palettes.append(colors)
+	var tiles: Array = []
+	for roof: int in RomLayout.ROOF_COUNT:
+		tiles.append(Array(Gen2Tiles.decode_2bpp_strip(
+			raw, roof * RomLayout.ROOF_TILE_BYTES, RomLayout.ROOF_TILES
+		)))
+	return {"ok": true, "roofs": {
+		"groups": Array(groups), "tiles": tiles, "palettes": palettes,
+	}}
 
 
 static func _read_world_animation_assets(rom: RomFile, layout: Dictionary) -> Dictionary:

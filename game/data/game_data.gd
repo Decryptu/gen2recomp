@@ -101,6 +101,7 @@ var _world_command_queues: Dictionary = {}
 var _world_tilesets: Dictionary = {}
 var _world_encounters: Dictionary = {}
 var _world_palettes: Array = []
+var _world_roofs: Dictionary = {}
 var _decoded_palettes: Dictionary = {}
 var _world_animation_assets: Dictionary = {}
 var _overworld_sprites: Array = []
@@ -999,6 +1000,88 @@ func world_palette(number: int) -> PackedColorArray:
 		out.append(Gen2Palette.from_packed(int(packed)))
 	_decoded_palettes[number] = out
 	return out
+
+
+## `MapGroupRoofs`: which of the five roof runs a map group draws, or -1 for a
+## group whose maps have no roof tiles of their own.
+func map_group_roof(map_group: int) -> int:
+	var groups: Variant = _roofs().get("groups", [])
+	if not groups is Array or map_group < 0 or map_group >= (groups as Array).size():
+		return -1
+	var value: int = int((groups as Array)[map_group])
+	return -1 if value == 0xFF else value
+
+
+## One roof run as an eight-row index strip, the shape a tileset's own tiles come
+## in, so [constant RomLayout.ROOF_TILES] tiles can be written straight over
+## `vTiles2 tile $0a`.
+func roof_tile_indices(roof: int) -> PackedByteArray:
+	var tiles: Variant = _roofs().get("tiles", [])
+	if not tiles is Array or roof < 0 or roof >= (tiles as Array).size():
+		return PackedByteArray()
+	var raw: Variant = (tiles as Array)[roof]
+	if not raw is Array:
+		return PackedByteArray()
+	var out := PackedByteArray()
+	out.resize((raw as Array).size())
+	for index: int in out.size():
+		out[index] = int((raw as Array)[index]) & 0xFF
+	return out
+
+
+## A map group's two roof colours, which stand in for colours 1 and 2 of
+## `PAL_BG_ROOF`. `_LoadMapPals` walks four bytes forward for NITE and DARKNESS,
+## so [param night] is the second pair rather than a third row.
+func roof_palette(map_group: int, night: bool) -> PackedColorArray:
+	var palettes: Variant = _roofs().get("palettes", [])
+	var out := PackedColorArray()
+	if not palettes is Array or map_group < 0 or map_group >= (palettes as Array).size():
+		return out
+	var raw: Variant = (palettes as Array)[map_group]
+	if not raw is Array or (raw as Array).size() < 4:
+		return out
+	var at: int = 2 if night else 0
+	for index: int in 2:
+		out.append(Gen2Palette.from_packed(int((raw as Array)[at + index])))
+	return out
+
+
+## `LoadMapGroupRoof`, which runs on every map load whatever the environment is:
+## a map group's nine roof tiles are copied over `vTiles2 tile $0a`, so they
+## replace whatever the tileset's own strip holds there. A group with no roof
+## (`cp -1 / ret z`) is handed its strip back unchanged.
+##
+## [param roof] is [method map_group_roof]'s answer, passed in rather than a map,
+## because the overworld's animated strip goes through here on every pass that
+## rotates a tile and the group is already resolved by then.
+func roofed_tile_indices(
+	indices: PackedByteArray, roof: int, tile_count: int
+) -> PackedByteArray:
+	if roof < 0:
+		return indices
+	var tiles: PackedByteArray = roof_tile_indices(roof)
+	var roof_width: int = RomLayout.ROOF_TILES * Gen2Tiles.TILE_WIDTH
+	var width: int = tile_count * Gen2Tiles.TILE_WIDTH
+	var left: int = RomLayout.ROOF_VRAM_TILE * Gen2Tiles.TILE_WIDTH
+	if tiles.size() < roof_width * Gen2Tiles.TILE_HEIGHT \
+		or indices.size() < width * Gen2Tiles.TILE_HEIGHT or left + roof_width > width:
+		return indices
+	var out: PackedByteArray = indices.duplicate()
+	for y: int in Gen2Tiles.TILE_HEIGHT:
+		for x: int in roof_width:
+			out[y * width + left + x] = tiles[y * roof_width + x]
+	return out
+
+
+## The strip a map is actually drawn from: its tileset's own tiles with its map
+## group's roof over them. Every static reader of a map's tiles goes through
+## this so none of them can forget the roof.
+func map_tile_indices(map: Gen2WorldMap, tileset: Gen2WorldTileset) -> PackedByteArray:
+	if map == null or tileset == null:
+		return PackedByteArray()
+	return roofed_tile_indices(
+		world_tileset_indices(tileset.number), map_group_roof(map.group), tileset.tile_count
+	)
 
 
 ## Raw 2bpp frames embedded in the cartridge's animation routines.
@@ -2618,6 +2701,12 @@ func _palettes() -> Array:
 	if _claim_section("palettes"):
 		_world_palettes = _read_section(RomCache.world_palettes_path(directory), true)
 	return _world_palettes
+
+
+func _roofs() -> Dictionary:
+	if _claim_section("roofs"):
+		_world_roofs = _read_section(RomCache.world_roofs_path(directory), false)
+	return _world_roofs
 
 
 func _animation_assets() -> Dictionary:

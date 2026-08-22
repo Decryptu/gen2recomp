@@ -25,7 +25,7 @@ static func render(
 	var blocks: Array = Gen2UnownWall.blocks(word)
 	if blocks.is_empty():
 		return null
-	var indices: PackedByteArray = data.world_tileset_indices(tileset.number)
+	var indices: PackedByteArray = data.map_tile_indices(map, tileset)
 	if indices.size() < RomLayout.TILESET_TILE_COUNT * Gen2Tiles.TILE_PIXELS:
 		return null
 	var menu: Gen2MenuPage = Gen2MenuPage.from_data(data)

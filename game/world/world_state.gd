@@ -23,6 +23,9 @@ const SCRIPT_MEMORY_CAPACITY: int = 64
 ## from the `StepHappiness` pass at zero.
 const EGG_STEP_PHASE: int = 0x80
 const PHONE_RECEIVE_DELAYS: Array[int] = [20, 10, 5, 3]
+## `StoreSwarmMapIndices`' own two arguments, `constants/script_constants.asm`.
+const SWARM_DUNSPARCE: int = 0
+const SWARM_YANMA: int = 1
 const TEMPORARY_MAP_RELOAD_FLAGS: Array[int] = [0, 1, 2, 3, 4, 5, 6, 7]
 ## Crystal maps STATUSFLAGS_HALL_OF_FAME_F through the source engine flag
 ## table to ENGINE_CREDITS_SKIP, and the Goldenrod bargain merchant uses the
@@ -180,7 +183,13 @@ var _contest_mon: Dictionary = {}
 ## `wBugContestSecondPartySpecies`: the byte `ContestDropOffMons` moves out of
 ## the way so the party is one Pokemon long, and `ContestReturnMons` puts back.
 var _contest_second_party_species: int = 0
-var _swarm_map: Vector2i = Vector2i(-1, -1)
+## `wDunsparceMapGroup`/`wDunsparceMapNumber` and `wYanmaMapGroup`/
+## `wYanmaMapNumber`: Crystal's two swarms are independent, each with its own
+## `wSwarmFlags` bit, and `_SwarmWildmonCheck` tries Dunsparce before Yanma.
+## Gold and Silver hold one `wSwarmMapGroup` and their own
+## `StoreSwarmMapIndices` takes no kind, so only [constant SWARM_DUNSPARCE] is
+## ever written on those two.
+var _swarm_maps: Array[Vector2i] = [Vector2i(-1, -1), Vector2i(-1, -1)]
 var _fishing_swarm_species: int = 0
 var _roaming_mons: Array = []
 var _seen_species: Dictionary = {}
@@ -271,7 +280,7 @@ func _init(
 		if bool(initial_phone_contacts[raw_contact]) and _phone_contacts.size() < PHONE_CONTACT_CAPACITY:
 			_phone_contacts[int(raw_contact)] = true
 	_repel_steps = maxi(0, initial_repel_steps)
-	_swarm_map = initial_swarm_map
+	_swarm_maps[SWARM_DUNSPARCE] = initial_swarm_map
 	_fishing_swarm_species = initial_fishing_swarm_species if initial_fishing_swarm_species in [0, 0xD3, 0xDF] else 0
 	_roaming_mons = _copy_roaming_mons(initial_roaming_mons)
 	for raw_species: Variant in initial_seen_species:
@@ -321,7 +330,8 @@ func to_dict() -> Dictionary:
 		"bug_contest_started": _bug_contest_started.duplicate(),
 		"contest_mon": _contest_mon.duplicate(),
 		"contest_second_party_species": _contest_second_party_species,
-		"swarm_map": [_swarm_map.x, _swarm_map.y],
+		"swarm_map": [_swarm_maps[SWARM_DUNSPARCE].x, _swarm_maps[SWARM_DUNSPARCE].y],
+		"yanma_swarm_map": [_swarm_maps[SWARM_YANMA].x, _swarm_maps[SWARM_YANMA].y],
 		"fishing_swarm_species": _fishing_swarm_species,
 		"roaming_mons": _copy_roaming_mons(_roaming_mons),
 		"seen_species": _seen_species.duplicate(),
@@ -385,6 +395,12 @@ static func from_dict(raw: Variant) -> Gen2WorldState:
 			if pc_item > 0 and pc_quantity > 0 \
 				and restored._pc_items.size() < Gen2WorldPack.MAX_PC_ITEMS:
 				restored._pc_items[pc_item] = pc_quantity
+	## Absent in a state written while there was one swarm slot. Crystal's Yanma
+	## swarm reads as inactive then, which is what a save taken before the news
+	## announced one would hold anyway.
+	restored._swarm_maps[SWARM_YANMA] = _vector_from_value(
+		source.get("yanma_swarm_map", [-1, -1])
+	)
 	restored._map_music = maxi(0, int(source.get("map_music", MUSIC_NONE)))
 	restored.set_radio_knob(int(source.get("radio_knob", Gen2WorldRadio.KNOB_MIN)))
 	restored._radio_channel = int(source.get("radio_channel", -1))
@@ -464,7 +480,7 @@ func restore_from_dict(raw: Variant) -> void:
 	_bug_contest_started = restored._bug_contest_started.duplicate()
 	_contest_mon = restored._contest_mon.duplicate()
 	_contest_second_party_species = restored._contest_second_party_species
-	_swarm_map = restored._swarm_map
+	_swarm_maps = restored._swarm_maps.duplicate()
 	_fishing_swarm_species = restored._fishing_swarm_species
 	_roaming_mons = _copy_roaming_mons(restored._roaming_mons)
 	_seen_species = restored._seen_species.duplicate()
@@ -1248,22 +1264,28 @@ static func _mon_from_value(raw: Variant) -> Gen2SaveMon:
 	return Gen2SaveMon.from_dict(raw)
 
 
-func swarm_map() -> Vector2i:
-	return _swarm_map
+func swarm_map(kind: int = SWARM_DUNSPARCE) -> Vector2i:
+	return _swarm_maps[clampi(kind, SWARM_DUNSPARCE, SWARM_YANMA)]
 
 
-func set_swarm_map(map_id: Vector2i, active: bool = true, fishing_species: int = 0) -> void:
+func set_swarm_map(
+	map_id: Vector2i, active: bool = true, fishing_species: int = 0,
+	kind: int = SWARM_DUNSPARCE,
+) -> void:
+	var slot: int = clampi(kind, SWARM_DUNSPARCE, SWARM_YANMA)
 	var next_map: Vector2i = map_id if active else Vector2i(-1, -1)
 	var next_species: int = fishing_species if fishing_species in [0, 0xD3, 0xDF] else 0
-	if _swarm_map == next_map and _fishing_swarm_species == next_species:
+	if _swarm_maps[slot] == next_map and _fishing_swarm_species == next_species:
 		return
-	_swarm_map = next_map
+	_swarm_maps[slot] = next_map
 	_fishing_swarm_species = next_species
 	changed.emit()
 
 
+## `_SwarmWildmonCheck` tries Dunsparce and then Yanma, so two swarms stand at
+## once and whichever names this map answers.
 func swarm_active_on(map_group: int, map_number: int) -> bool:
-	return _swarm_map == Vector2i(map_group, map_number)
+	return _swarm_maps.has(Vector2i(map_group, map_number))
 
 
 func fishing_swarm_species() -> int:
@@ -1532,7 +1554,7 @@ func apply_changes(
 	var swarm_change: Variant = runtime_changes.get("swarm", null)
 	if swarm_change != null and not swarm_change is Dictionary:
 		return {"ok": false, "reason": &"invalid_swarm"}
-	var next_swarm_map: Vector2i = _swarm_map
+	var next_swarm_maps: Array[Vector2i] = _swarm_maps.duplicate()
 	var next_fishing_swarm_species: int = _fishing_swarm_species
 	if swarm_change is Dictionary:
 		var swarm: Dictionary = swarm_change
@@ -1544,7 +1566,12 @@ func apply_changes(
 		var swarm_species: int = int(swarm.get("fishing_species", 0))
 		if swarm_species not in [0, 0xD3, 0xDF]:
 			return {"ok": false, "reason": &"invalid_fishing_swarm_species"}
-		next_swarm_map = Vector2i(swarm_group, swarm_number) if swarm_active else Vector2i(-1, -1)
+		var swarm_kind: int = int(swarm.get("kind", SWARM_DUNSPARCE))
+		if swarm_kind != SWARM_DUNSPARCE and swarm_kind != SWARM_YANMA:
+			return {"ok": false, "reason": &"invalid_swarm_kind"}
+		next_swarm_maps[swarm_kind] = (
+			Vector2i(swarm_group, swarm_number) if swarm_active else Vector2i(-1, -1)
+		)
 		next_fishing_swarm_species = swarm_species
 	var next_repel_steps: int = int(runtime_changes.get("repel_steps", _repel_steps))
 	if next_repel_steps < 0:
@@ -1675,7 +1702,7 @@ func apply_changes(
 		or next_contacts != _phone_contacts or next_just_battled != _just_battled \
 		or next_seen_species != _seen_species \
 		or next_caught_species != _caught_species \
-		or next_repel_steps != _repel_steps or next_swarm_map != _swarm_map \
+		or next_repel_steps != _repel_steps or next_swarm_maps != _swarm_maps \
 		or next_fishing_swarm_species != _fishing_swarm_species \
 		or next_receive_cycle != _phone_receive_cycle \
 		or next_receive_minutes != _phone_receive_minutes \
@@ -1695,7 +1722,7 @@ func apply_changes(
 	_phone_contacts = next_contacts
 	_just_battled = next_just_battled
 	_repel_steps = next_repel_steps
-	_swarm_map = next_swarm_map
+	_swarm_maps = next_swarm_maps
 	_fishing_swarm_species = next_fishing_swarm_species
 	_phone_receive_cycle = next_receive_cycle
 	_phone_receive_minutes = next_receive_minutes

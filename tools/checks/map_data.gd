@@ -30,6 +30,12 @@ const BG_PALETTES: Array[String] = [
 	"GRAY", "RED", "GREEN", "WATER", "YELLOW", "BROWN", "ROOF", "TEXT",
 ]
 
+## `data/maps/roofs.asm`'s five `INCBIN`s in order, so the row index is the
+## `ROOF_*` value.
+const ROOF_FILES: Array[String] = [
+	"new_bark", "violet", "azalea", "olivine", "goldenrod",
+]
+
 ## `constants/hardware.inc`: `OAM_BANK1 equ 1 << B_OAM_BANK1`.
 const OAM_BANK1: int = 1 << 3
 
@@ -53,6 +59,7 @@ func _check_game() -> void:
 		return
 	_check_blocks(pin)
 	_check_tilesets(pin)
+	_check_roofs(pin)
 
 
 # --- Map block arrays -------------------------------------------------------
@@ -202,6 +209,193 @@ func _check_palette_reach(number: int, tileset: Gen2WorldTileset) -> void:
 		_report("tileset %d names tile %d, past its %d-byte palette map." % [
 			number, highest, tileset.palette_map.size()
 		])
+
+
+# --- Roofs ------------------------------------------------------------------
+
+
+## `MapGroupRoofs`, `RoofPals` and the strip `LoadMapGroupRoof` writes over.
+##
+## The two tables are compared against the pin's own text, and the strip is
+## checked from the other side: a group that names a roof must change tiles
+## $0A..$12 of every tileset it draws with, since a copy that lands somewhere
+## else or reads the wrong run is silent until someone looks at a town.
+func _check_roofs(pin: String) -> void:
+	var groups: PackedByteArray = _roof_groups(pin)
+	var palettes: Array = _roof_palettes(pin)
+	if groups.is_empty() or palettes.is_empty():
+		_report("the pin carries no roof tables.")
+		return
+	_r.check(
+		groups.size() == RomLayout.MAP_GROUP_ROOF_COUNT
+			and palettes.size() == RomLayout.MAP_GROUP_ROOF_COUNT,
+		"the pin lists %d roof groups and %d palettes, %d expected." % [
+			groups.size(), palettes.size(), RomLayout.MAP_GROUP_ROOF_COUNT,
+		],
+	)
+	var roofed: int = 0
+	for group: int in mini(groups.size(), RomLayout.MAP_GROUP_ROOF_COUNT):
+		var ours: int = _r.data.map_group_roof(group)
+		var pinned: int = -1 if groups[group] == 0xFF else int(groups[group])
+		if ours != pinned:
+			_report("map group %d draws roof %d, the pin says %d." % [group, ours, pinned])
+			continue
+		if pinned < 0:
+			continue
+		roofed += 1
+		_r.check(
+			pinned < RomLayout.ROOF_COUNT,
+			"map group %d names roof %d, past the %d the cartridge holds." % [
+				group, pinned, RomLayout.ROOF_COUNT,
+			],
+		)
+		for night: bool in [false, true]:
+			var colors: PackedColorArray = _r.data.roof_palette(group, night)
+			var expected: Array = palettes[group]
+			var at: int = 2 if night else 0
+			if colors.size() != 2:
+				_report("map group %d has %d roof colours, 2 expected." % [
+					group, colors.size(),
+				])
+				continue
+			for index: int in 2:
+				var pinned_color: Color = Gen2Palette.from_packed(int(expected[at + index]))
+				if not colors[index].is_equal_approx(pinned_color):
+					_report("map group %d colour %d (%s) is %s, the pin says %s." % [
+						group, index, "nite" if night else "morn/day",
+						colors[index], pinned_color,
+					])
+	_r.note("roof groups %d, of which %d carry one." % [groups.size(), roofed])
+	_check_roof_strips(pin)
+
+
+## Every (map group, tileset) pair the corpus really draws: the strip a map is
+## given must hold that group's own roof at tiles $0A..$12 and its tileset's own
+## tiles everywhere else.
+##
+## The roof itself is compared against the pin's `gfx/tilesets/roofs/*.png`
+## rather than against the cache, so a wrong offset or a wrong run is caught by
+## the source and not by a second reading of the same bytes. rgbgfx maps the
+## shade rather than its rank, so `$FF` is index 0 and `$00` is index 3.
+func _check_roof_strips(pin: String) -> void:
+	var seen: Dictionary = {}
+	var pairs: int = 0
+	for group: int in RomLayout.MAP_GROUP_ROOF_COUNT:
+		for number: int in RomLayout.MAP_GROUP_ROOF_COUNT * 16:
+			var map: Gen2WorldMap = _r.data.world_map(group, number)
+			if map == null:
+				continue
+			var key: String = "%d:%d" % [group, map.tileset]
+			if seen.has(key):
+				continue
+			seen[key] = true
+			var tileset: Gen2WorldTileset = _r.data.world_tileset(map.tileset)
+			if tileset == null:
+				continue
+			pairs += 1
+			_compare_roof_strip(pin, group, map, tileset)
+	_r.note("map group and tileset pairs walked: %d." % pairs)
+
+
+func _compare_roof_strip(
+	pin: String, group: int, map: Gen2WorldMap, tileset: Gen2WorldTileset
+) -> void:
+	var base: PackedByteArray = _r.data.world_tileset_indices(tileset.number)
+	var drawn: PackedByteArray = _r.data.map_tile_indices(map, tileset)
+	if drawn.size() != base.size():
+		_report("map group %d tileset %d: the drawn strip is %d bytes, %d expected." % [
+			group, tileset.number, drawn.size(), base.size(),
+		])
+		return
+	var roof: int = _r.data.map_group_roof(group)
+	var pinned: PackedByteArray = _roof_pixels(pin, roof)
+	var width: int = tileset.tile_count * Gen2Tiles.TILE_WIDTH
+	var left: int = RomLayout.ROOF_VRAM_TILE * Gen2Tiles.TILE_WIDTH
+	var roof_width: int = RomLayout.ROOF_TILES * Gen2Tiles.TILE_WIDTH
+	if roof >= 0 and pinned.size() != roof_width * Gen2Tiles.TILE_HEIGHT:
+		_report("roof %d is not in the pin, so nothing was compared." % roof)
+		return
+	for y: int in Gen2Tiles.TILE_HEIGHT:
+		for x: int in width:
+			var inside: bool = roof >= 0 and x >= left and x < left + roof_width
+			var expected: int = (
+				pinned[y * roof_width + x - left] if inside else base[y * width + x]
+			)
+			if drawn[y * width + x] == expected:
+				continue
+			_report("map group %d tileset %d: pixel %d,%d is %d, %d expected." % [
+				group, tileset.number, x, y, drawn[y * width + x], expected,
+			])
+			return
+
+
+## One roof run out of the pin's own PNG, as index values in the strip shape the
+## cache uses.
+func _roof_pixels(pin: String, roof: int) -> PackedByteArray:
+	if roof < 0 or roof >= ROOF_FILES.size():
+		return PackedByteArray()
+	return _parsed(pin, StringName("roof_%d" % roof), func() -> PackedByteArray:
+		var path: String = pin.path_join("gfx/tilesets/roofs/%s.png" % ROOF_FILES[roof])
+		var image := Image.new()
+		if image.load(path) != OK:
+			return PackedByteArray()
+		var out: PackedByteArray = PackedByteArray()
+		var width: int = RomLayout.ROOF_TILES * Gen2Tiles.TILE_WIDTH
+		out.resize(width * Gen2Tiles.TILE_HEIGHT)
+		# The sheet is a 3x3 block of tiles walked the way rgbgfx walks one, left
+		# to right and then down; the strip is one row of nine.
+		var columns: int = image.get_width() / Gen2Tiles.TILE_WIDTH
+		for tile: int in RomLayout.ROOF_TILES:
+			var at := Vector2i(tile % columns, tile / columns) * Gen2Tiles.TILE_WIDTH
+			for y: int in Gen2Tiles.TILE_HEIGHT:
+				for x: int in Gen2Tiles.TILE_WIDTH:
+					var shade: float = image.get_pixel(at.x + x, at.y + y).r
+					out[y * width + tile * Gen2Tiles.TILE_WIDTH + x] = 3 - roundi(shade * 3.0)
+		return out
+	)
+
+
+## `data/maps/roofs.asm`'s `MapGroupRoofs` table, `-1` kept as $FF.
+func _roof_groups(pin: String) -> PackedByteArray:
+	return _parsed(pin, &"roof_groups", func() -> PackedByteArray:
+		var order: Dictionary = {}
+		var out: PackedByteArray = PackedByteArray()
+		var open: bool = false
+		for line: String in _lines(pin.path_join("data/maps/roofs.asm")):
+			if line.begins_with("const ROOF_"):
+				order[line.substr("const ".length()).strip_edges()] = order.size()
+			elif line.begins_with("MapGroupRoofs:"):
+				open = true
+			elif open and line.begins_with("assert_table_length"):
+				break
+			elif open and line.begins_with("db "):
+				var value: String = line.substr("db ".length()).strip_edges()
+				out.append(0xFF if value == "-1" else int(order.get(value, 0xFF)))
+		return out
+	)
+
+
+## `gfx/tilesets/roofs.pal`, four packed colours a group. The two pins format the
+## same list differently, one `RGB` a line against two colours a line, so the
+## numbers are collected in order rather than by line.
+func _roof_palettes(pin: String) -> Array:
+	return _parsed(pin, &"roof_palettes", func() -> Array:
+		var packed: Array = []
+		for line: String in _lines(pin.path_join("gfx/tilesets/roofs.pal")):
+			if not line.begins_with("RGB "):
+				continue
+			var fields: PackedStringArray = _fields(line)
+			for index: int in range(0, fields.size() - 2, 3):
+				packed.append(
+					_number(fields[index])
+					| (_number(fields[index + 1]) << 5)
+					| (_number(fields[index + 2]) << 10)
+				)
+		var out: Array = []
+		for group: int in packed.size() / 4:
+			out.append(packed.slice(group * 4, group * 4 + 4))
+		return out
+	)
 
 
 # --- Comparison -------------------------------------------------------------

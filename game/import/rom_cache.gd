@@ -44,6 +44,7 @@ const WORLD_COMMAND_QUEUES: String = "world_command_queues.json"
 const WORLD_TILESETS: String = "world_tilesets.json"
 const WORLD_ENCOUNTERS: String = "world_encounters.json"
 const WORLD_PALETTES: String = "world_palettes.json"
+const WORLD_ROOFS: String = "world_roofs.json"
 const WORLD_ANIMATION_ASSETS: String = "world_animation_assets.json"
 const WORLD_TILES_DIR: String = "world_tiles"
 const OVERWORLD_EFFECTS: String = "overworld_effects.json"
@@ -80,7 +81,7 @@ const BYTES_KEY: String = "bytes"
 ## a dump the owner still has, so re-importing costs a few seconds and a
 ## migration would have to carry every past shape forever. Nothing but the cache
 ## is thrown away, since saves live under their own root.
-const FORMAT_VERSION: int = 81
+const FORMAT_VERSION: int = 82
 
 ## What [method state] answers. A stale cache is told from a missing one because
 ## they need different things said to whoever is looking at it: one is a
@@ -207,6 +208,10 @@ static func world_encounters_path(directory: String) -> String:
 
 static func world_palettes_path(directory: String) -> String:
 	return "%s/%s" % [directory, WORLD_PALETTES]
+
+
+static func world_roofs_path(directory: String) -> String:
+	return "%s/%s" % [directory, WORLD_ROOFS]
 
 
 static func world_animation_assets_path(directory: String) -> String:
