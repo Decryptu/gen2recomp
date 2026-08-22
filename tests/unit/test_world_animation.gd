@@ -73,6 +73,37 @@ func _write_cache() -> void:
 			{"operation": "timer_8"},
 			{"operation": "done"},
 		],
+	}, {
+		# `TilesetCaveAnim` with tiles 0 and 1 standing in for $14 and $40. Its
+		# only tick is `ScrollTileRightLeft`'s own, which is what the water
+		# palette, the flicker and both scrolls hang off.
+		"number": 3,
+		"block_count": 1,
+		"tile_count": RomLayout.TILESET_TILE_COUNT,
+		"meta": meta,
+		"collision": [],
+		"palette_map": [0],
+		"animation_commands": [
+			{"operation": "read_buffer", "tile": 0},
+			{"operation": "cave_palette"},
+			{"operation": "scroll_horizontal", "tile": -1},
+			{"operation": "cave_palette"},
+			{"operation": "write_buffer", "tile": 0},
+			{"operation": "cave_palette"},
+			{"operation": "water_palette"},
+			{"operation": "cave_palette"},
+			{"operation": "read_buffer", "tile": 1},
+			{"operation": "cave_palette"},
+			{"operation": "scroll_vertical", "tile": -1},
+			{"operation": "cave_palette"},
+			{"operation": "scroll_vertical", "tile": -1},
+			{"operation": "cave_palette"},
+			{"operation": "scroll_vertical", "tile": -1},
+			{"operation": "cave_palette"},
+			{"operation": "write_buffer", "tile": 1},
+			{"operation": "cave_palette"},
+			{"operation": "done"},
+		],
 	}])
 	RomCache.write_json(RomCache.world_maps_path(_directory), [{
 		"group": 1,
@@ -98,6 +129,17 @@ func _write_cache() -> void:
 		"collision_height": 2,
 	}, {
 		"group": 1,
+		"number": 4,
+		"tileset": 3,
+		"environment": 0,
+		"width_blocks": 1,
+		"height_blocks": 1,
+		"blocks": [0],
+		"collision": [0, 0, 0, 0],
+		"collision_width": 2,
+		"collision_height": 2,
+	}, {
+		"group": 1,
 		"number": 2,
 		"tileset": 1,
 		"environment": 0,
@@ -113,6 +155,12 @@ func _write_cache() -> void:
 	RomCache.write_indices(RomCache.world_tile_path(_directory, 0), pixels)
 	RomCache.write_indices(RomCache.world_tile_path(_directory, 1), pixels)
 	RomCache.write_indices(RomCache.world_tile_path(_directory, 2), pixels)
+	# One lit pixel in the top-left corner of tiles 0 and 1, so where the two
+	# scrolls put it is the whole reading of their direction.
+	var scrolled: PackedByteArray = pixels.duplicate()
+	scrolled[0] = 1
+	scrolled[Gen2Tiles.TILE_WIDTH] = 1
+	RomCache.write_indices(RomCache.world_tile_path(_directory, 3), scrolled)
 
 	var palettes: Array = []
 	for _group: int in RomLayout.WORLD_PALETTE_GROUP_COUNT:
@@ -303,3 +351,56 @@ func _tick_pair(animation: Gen2WorldAnimation) -> void:
 ## stride into the array.
 func _tree_frame(animation: Gen2WorldAnimation, tile: int) -> int:
 	return 0 if animation.current_indices()[tile * Gen2Tiles.TILE_WIDTH] == 1 else 1
+
+
+## `ScrollTileRightLeft` is the cave, dark cave and ice path lists' only tick:
+## none of the three carries a `StandingTileFrame8`, so a reading that leaves
+## the timer to something else stops the water palette, the flicker and this
+## tile's own reversal all at once. `ScrollTileDown` is the referenced vertical
+## routine and `ScrollTileUpDown` is not, so the second tile only ever goes down.
+func test_the_cave_list_ticks_its_timer_from_the_horizontal_scroll_alone() -> void:
+	var data: GameData = GameData.open_directory(_directory)
+	var world := Gen2WorldAPI.open(data, 1, 4, Vector2i.ZERO)
+	var animation := Gen2WorldAnimation.new()
+	animation.configure(world, Gen2WorldPalette.TIME_DARK)
+	var commands: int = data.world_tileset(3).animation_commands.size()
+
+	var across: Array[int] = []
+	var down: Array[int] = []
+	var timers: Array[int] = []
+	var flicker: Array[int] = []
+	for pass_index: int in 8:
+		for _step: int in commands:
+			animation.advance_frame()
+			flicker.append(animation.cave_palette_color())
+		timers.append(animation.timer())
+		across.append(_lit_column(animation, 0))
+		down.append(_lit_row(animation, 1))
+
+	assert_eq(timers, [1, 2, 3, 4, 5, 6, 7, 0] as Array[int])
+	# The tick is in front of the test, so the branch reads 1, 2, 3, 4 ... and
+	# `and %100` sends the four passes at 4 to 7 the other way.
+	assert_eq(across, [1, 2, 3, 2, 1, 0, 7, 0] as Array[int])
+	# Three `ScrollTileDown` a pass and no direction to choose.
+	assert_eq(down, [3, 6, 1, 4, 7, 2, 5, 0] as Array[int])
+	# `hVBlankCounter and %10`, which is two frames of each and is not the
+	# sequence's own timer: the timer moves once per nineteen frames here. The
+	# opening -1 is the frame before the list's first `cave_palette`.
+	assert_eq(flicker.slice(0, 8), [-1, 1, 1, 0, 0, 1, 1, 0] as Array[int])
+
+
+## Which column of tile [param tile]'s top row is lit, and which row of its
+## first column is, for the two scrolls above.
+func _lit_column(animation: Gen2WorldAnimation, tile: int) -> int:
+	for x: int in Gen2Tiles.TILE_WIDTH:
+		if animation.current_indices()[tile * Gen2Tiles.TILE_WIDTH + x] != 0:
+			return x
+	return -1
+
+
+func _lit_row(animation: Gen2WorldAnimation, tile: int) -> int:
+	var width: int = RomLayout.TILESET_TILE_COUNT * Gen2Tiles.TILE_WIDTH
+	for y: int in Gen2Tiles.TILE_HEIGHT:
+		if animation.current_indices()[y * width + tile * Gen2Tiles.TILE_WIDTH] != 0:
+			return y
+	return -1

@@ -37,6 +37,11 @@ var _state: Gen2WorldState = null
 ## Which engine flag table `_state` is keyed by. See Gen2WorldState.engine_flag().
 var _crystal_flags: bool = true
 var _changed: bool = false
+## `hVBlankCounter`, which VBlank increments before it reaches `AnimateTileset`
+## and which no map load resets. `FlickeringCaveEntrancePalette` reads it rather
+## than `wTileAnimationTimer`, so it is not the sequence's own timer and
+## [method configure] deliberately leaves it alone.
+var _vblank: int = 0
 ## Which tiles a run of commands rewrote, and whether a palette row moved. A
 ## renderer that keeps a texture only has to redo these tiles: the sequence
 ## touches one or two tiles per frame, and a palette change is the only thing
@@ -46,10 +51,28 @@ var _palette_changed: bool = false
 
 
 func configure(world: Gen2WorldAPI, time_of_day: int = Gen2WorldPalette.TIME_MORNING) -> void:
-	data = world.data if world != null else null
+	configure_tileset(
+		world.data if world != null else null,
+		world.current_tileset if world != null else null,
+		time_of_day,
+		world.state if world != null else null,
+	)
 	map = world.current_map if world != null else null
-	tileset = world.current_tileset if world != null else null
-	_state = world.state if world != null else null
+
+
+## The tileset half of [method configure], for a caller holding a tileset and no
+## map: `wTilesetAnim` is the whole of what the sequence reads, so a sweep over
+## the corpus and [method tile_frames]' own walk both open one this way.
+func configure_tileset(
+	source: GameData,
+	from_tileset: Gen2WorldTileset,
+	time_of_day: int = Gen2WorldPalette.TIME_MORNING,
+	state: Gen2WorldState = null,
+) -> void:
+	data = source
+	map = null
+	tileset = from_tileset
+	_state = state
 	_crystal_flags = Gen2WorldState.is_crystal_profile(data)
 	_time_of_day = clampi(time_of_day, 0, 3)
 	_command_index = 0
@@ -90,6 +113,7 @@ func reload_tileset(world: Gen2WorldAPI, time_of_day: int = Gen2WorldPalette.TIM
 func advance_frame() -> bool:
 	if _commands.is_empty() or tileset == null:
 		return false
+	_vblank = (_vblank + 1) & 0xFF
 	_changed_tiles = {}
 	_palette_changed = false
 	_changed = false
@@ -119,6 +143,11 @@ func command_index() -> int:
 	return _command_index
 
 
+## `wTileAnimationTimer`, which most commands read and three of them tick.
+func timer() -> int:
+	return _timer
+
+
 func current_indices() -> PackedByteArray:
 	return _indices
 
@@ -137,13 +166,7 @@ func tile_frames(tile: int) -> Array[PackedByteArray]:
 	if _commands.is_empty() or tileset == null or tile < 0 or tile >= tileset.tile_count:
 		return out
 	var walk: Gen2WorldAnimation = Gen2WorldAnimation.new()
-	walk.data = data
-	walk.map = map
-	walk.tileset = tileset
-	walk._time_of_day = _time_of_day
-	walk._commands = _commands
-	walk._indices = data.world_tileset_indices(tileset.number).duplicate()
-	walk._buffer.resize(TILE_BYTES)
+	walk.configure_tileset(data, tileset, _time_of_day, _state)
 	var base: PackedByteArray = walk._tile_indices(tile)
 	# Every timer mask in the command table is &7 or narrower and a pass bumps
 	# the timer at most once, so eight passes of the list is a whole cycle of
@@ -256,6 +279,12 @@ func tick() -> bool:
 		"write_buffer":
 			_set_tile_bytes(int(command.get("tile", -1)), _buffer)
 		"scroll_horizontal":
+			# `ScrollTileRightLeft` ticks `wTileAnimationTimer` itself and then
+			# reads bit 2 of it, which is the only tick the cave, dark cave and
+			# ice path lists have: none of the three carries a
+			# `StandingTileFrame8`, so the water palette, the flicker and this
+			# tile's own direction all hang off this one increment.
+			_timer = (_timer + 1) & 7
 			_scroll_horizontal()
 		"scroll_vertical":
 			_scroll_vertical()
@@ -267,7 +296,7 @@ func tick() -> bool:
 			_water_color = water_color
 		"cave_palette":
 			if _time_of_day == Gen2WorldPalette.TIME_DARK:
-				var cave_color: int = (_timer >> 1) & 1
+				var cave_color: int = 1 if (_vblank & 2) != 0 else 0
 				if cave_color != _cave_color:
 					_changed = true
 					_palette_changed = true
@@ -350,10 +379,10 @@ func _set_tile_bytes(tile: int, bytes: PackedByteArray) -> void:
 
 
 func _scroll_horizontal() -> void:
+	var direction_right: bool = (_timer & 4) == 0  # `and %100 / jr nz` is left
 	for y: int in Gen2Tiles.TILE_HEIGHT:
 		var low: int = int(_buffer[y * 2])
 		var high: int = int(_buffer[y * 2 + 1])
-		var direction_right: bool = (_timer & 4) == 0
 		if direction_right:
 			low = ((low >> 1) | ((low & 1) << 7)) & 0xFF
 			high = ((high >> 1) | ((high & 1) << 7)) & 0xFF
@@ -364,10 +393,11 @@ func _scroll_horizontal() -> void:
 		_buffer[y * 2 + 1] = high
 
 
+## `ScrollTileDown`. `ScrollTileUpDown` is unreferenced, so no list on any
+## cartridge ever scrolls a tile the other way and there is no timer in this one.
 func _scroll_vertical() -> void:
 	var copy: PackedByteArray = _buffer.duplicate()
-	var direction_down: bool = (_timer & 4) != 0
 	for y: int in Gen2Tiles.TILE_HEIGHT:
-		var source_y: int = ((y - 1) & 7) if direction_down else ((y + 1) & 7)
+		var source_y: int = (y - 1) & 7
 		_buffer[y * 2] = copy[source_y * 2]
 		_buffer[y * 2 + 1] = copy[source_y * 2 + 1]
