@@ -826,8 +826,19 @@ func _advance_held_direction() -> void:
 	if not _objects_may_move() or _world.script_input_waiting() \
 		or _world.player_step_in_progress():
 		return
-	if direction != Gen2Button.NONE:
-		move_player(Gen2Button.vector(direction))
+	## `.CheckForced` sits in front of `.GetAction` in all three of
+	## `.TranslateIntoMovement`'s branches, so a player standing on ice keeps
+	## walking with nothing held at all and a held direction is only obeyed when
+	## `.GetAction` tests it before the slide's own.
+	var held: Vector2i = Vector2i.ZERO if direction == Gen2Button.NONE \
+		else Gen2Button.vector(direction)
+	var walking: Vector2i = _world.effective_input_direction(held)
+	if walking != Vector2i.ZERO:
+		move_player(walking)
+		return
+	## A poll that commits nothing reaches `.StandInPlace`, which is what stops a
+	## slide from resuming after the player has stepped off the ice.
+	_world.note_standing_still()
 
 
 ## Whether any embedded screen is up. Every overlay is named here and nowhere
@@ -1023,6 +1034,17 @@ func _handle_button(button: int) -> bool:
 		if button == Gen2Button.A:
 			_advance_script_pause()
 		return true
+	## The d-pad first, because `DoPlayerMovement` runs in front of
+	## `CheckStandingOnIce` in `OWPlayerInput` and has already decided what a
+	## direction means while a slide is running.
+	if Gen2Button.is_direction(button):
+		move_player(_world.effective_input_direction(Gen2Button.vector(button)))
+		return true
+	## `OWPlayerInput`'s own comment: "Can't perform button actions while sliding
+	## on ice." `CheckStandingOnIce` stands in front of `CheckAPressOW` and
+	## `CheckMenuOW`, so A, START and SELECT are all refused until the run ends.
+	if _world.standing_on_ice():
+		return true
 	match button:
 		Gen2Button.A:
 			return interact()
@@ -1032,9 +1054,6 @@ func _handle_button(button: int) -> bool:
 		Gen2Button.SELECT:
 			open_select_menu()
 			return true
-	if Gen2Button.is_direction(button):
-		move_player(Gen2Button.vector(button))
-		return true
 	return false
 
 
@@ -2040,6 +2059,12 @@ func move_up() -> void:
 
 func move_down() -> void:
 	move_player(Vector2i.DOWN)
+
+
+## Whether the player is mid-slide, for `preview_world.gd`'s `ice_slide` kind,
+## which drives until the run has started rather than spending a count.
+func standing_on_ice() -> bool:
+	return _world != null and _world.standing_on_ice()
 
 
 ## The hop's own arc, for `preview_world.gd`'s `ledge` kind, which drives to the
@@ -3224,21 +3249,10 @@ func _position_for_fishing_preview() -> void:
 				if _world.collision_permission_at(cell + direction) != Gen2WorldCollision.WATER_TILE:
 					continue
 				_world.player_cell = cell
-				_world.player_facing = _facing_for_direction(direction)
+				_world.player_facing = _world.facing_for_direction(direction)
 				if _renderer != null:
 					_renderer.refresh()
 				return
-
-
-func _facing_for_direction(direction: Vector2i) -> int:
-	match direction:
-		Vector2i.UP:
-			return Gen2WorldSprite.FACING_UP
-		Vector2i.LEFT:
-			return Gen2WorldSprite.FACING_LEFT
-		Vector2i.RIGHT:
-			return Gen2WorldSprite.FACING_RIGHT
-	return Gen2WorldSprite.FACING_DOWN
 
 
 func select_fishing_rod(index: int) -> Dictionary:

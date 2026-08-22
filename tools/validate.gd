@@ -23,7 +23,8 @@ const GROUPS: Dictionary = {
 		&"field_move_prompts",
 	],
 	&"terrain": [
-		&"ledge_hops", &"side_walls", &"drawn_blocks", &"story_map_ids", &"map_data",
+		&"ledge_hops", &"ice_slides", &"side_walls", &"drawn_blocks", &"story_map_ids",
+		&"map_data",
 	],
 	&"johto": [
 		&"radio_tower", &"rising_badge", &"command_queues", &"item_balls",

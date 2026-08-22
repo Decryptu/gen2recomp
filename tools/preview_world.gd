@@ -41,6 +41,11 @@ extends SceneTree
 ## `door` (`.CheckWarp`'s carpet: the player is walked down onto an interior
 ## door's mat and photographed standing on it, which the step itself no longer
 ## warps: `crystal 24 6 ... door 6 5` is the front door of the player's house),
+## `ice_slide` (`DoPlayerMovement.CheckForced`'s run: the player is walked in
+## one direction until the step lands on ice and the frames after that are the
+## slide's own, with nothing held, as `crystal 3 61 ... ice_slide@16,8 2 40`,
+## whose first number is the direction in down, up, left, right order and whose
+## second is how many of the slide's frames to spend),
 ## `ledge` (the ledge hop at the top of its arc, walking south from the cell the
 ## two numbers name until one allows the hop: `crystal 24 4 ... ledge 5 4`),
 ## `map_name_sign` (`InitMapNameSign`'s window, raised by walking west off the
@@ -85,6 +90,11 @@ extends SceneTree
 ## map and the cell below their target. The two numbers are the cell
 ## the player stands on, which is how the grass a standing object is drawn behind
 ## is photographed.
+
+## `.forced_dpad`'s own order, which the first number indexes.
+const ICE_SLIDE_BUTTONS: Array[int] = [
+	Gen2Button.DOWN, Gen2Button.UP, Gen2Button.LEFT, Gen2Button.RIGHT,
+]
 
 const WINDOW_SIZE := Vector2i(1152, 648)
 ## What the live mode actually opens in, which a phone-shaped argument replaces.
@@ -232,7 +242,7 @@ func _build_live(data: GameData, group: int, number: int, cell: Vector2i) -> voi
 	elif cell.x >= 0 and _kind not in [
 		&"battle_transition", &"level_evolution", &"egg_hatch", &"name_rater",
 		&"move_deleter", &"move_tutor", &"day_care", &"unown_puzzle", &"slot_machine",
-		&"card_flip", &"tile_anim",
+		&"card_flip", &"tile_anim", &"ice_slide",
 	]:
 		_screen.start_cell = cell
 	## Pinned so two captures of the same map are the same picture: the seed the
@@ -465,6 +475,21 @@ func _process(_delta: float) -> bool:
 				_screen.advance_frame()
 				if _screen.player_height_offset_pixels() >= LEDGE_ARC_TOP:
 					break
+		elif _kind == &"ice_slide":
+			## `DoPlayerMovement.CheckForced`: one press starts the run and the
+			## frames after it are the slide's own, since nothing is held. The
+			## first number is the direction in `.forced_dpad` order, down, up,
+			## left, right, and the second how many frames to spend after the
+			## press; the cell goes in `ice_slide@x,y`
+			## (`crystal 3 61 ... ice_slide@11,29 3 40`).
+			var slide_button: int = ICE_SLIDE_BUTTONS[posmod(maxi(_cell.x, 0), 4)]
+			for _press: int in WARP_FRAME_CAP:
+				if _screen.standing_on_ice():
+					break
+				_screen.press_button(slide_button)
+				_screen.advance_frame()
+			for _spent: int in maxi(_cell.y, 0):
+				_screen.advance_frame()
 		elif _kind == &"map_name_sign":
 			## `MapSetupScript_Connection`'s `InitMapNameSign`: walked west off
 			## New Bark Town's edge onto Route 29, photographed while the sign
@@ -495,7 +520,7 @@ func _process(_delta: float) -> bool:
 		if _kind not in [
 			&"warp", &"door", &"map_name_sign", &"ledge", &"heal_machine",
 			&"battle_transition", &"level_evolution", &"egg_hatch", &"name_rater",
-			&"move_deleter", &"move_tutor", &"day_care",
+			&"move_deleter", &"move_tutor", &"day_care", &"ice_slide",
 		]:
 			## Those kinds drove themselves to the frame they want; every other
 			## kind stages a sprite and then spends the frames it needs.
