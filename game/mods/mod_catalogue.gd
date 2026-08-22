@@ -78,6 +78,9 @@ static func _row(
 		# otherwise, so a mod has a face while it is still only being browsed.
 		"icon": Gen2ModArt.icon_path(manifest),
 		"icon_url": String(entry.get("icon", "")),
+		# What the listing says it is for. The installed manifest is the truth
+		# when there is one; this is what the card has before then.
+		"listed_games": entry.get("games", [] as Array[StringName]),
 		"feed": feed,
 		"source_label": label,
 		"installed": manifest != null,

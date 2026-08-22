@@ -78,8 +78,8 @@ static func resolve_source(input: String) -> Dictionary:
 ## Reads a fetched feed into rows the launcher can list.
 ##
 ## Returns { ok, name, entries } where each entry has id, name, version,
-## description, download, and the optional icon and thumbnail URLs. An entry
-## missing an id or a usable download is dropped rather than failing the whole
+## description, download, games, and the optional icon and thumbnail URLs. An
+## entry missing an id or a usable download is dropped rather than failing the whole
 ## feed, because one bad row in someone else's file should not cost the player
 ## the rest of the list.
 static func parse_feed(text: String) -> Dictionary:
@@ -268,7 +268,28 @@ static func _entry_from(raw: Dictionary) -> Dictionary:
 		# rather than refused: a listing without a picture is still a listing.
 		"icon": _art_url(raw.get("icon", "")),
 		"thumbnail": _art_url(raw.get("thumbnail", "")),
+		# Which cartridges the listing claims, in the manifest's own shape, so a
+		# mod says what it is for before it is installed. Empty means every game,
+		# and a row that gives no list is one of those.
+		"games": _games(raw.get("games", []), regex),
 	}
+
+
+## The [RomRegistry] ids in a listing's `games`, deduplicated. Shape only, like
+## [method Gen2ModManifest.from_dictionary]: an id this build has never heard of
+## is kept, because a feed may list a mod for a cartridge a later launcher ships.
+## A malformed id is dropped on its own rather than costing the row, the way a
+## bad art URL is: the manifest inside the archive is what decides what runs.
+static func _games(raw: Variant, regex: RegEx) -> Array[StringName]:
+	var out: Array[StringName] = []
+	if not raw is Array:
+		return out
+	for entry: Variant in raw as Array:
+		var game: String = str(entry).strip_edges()
+		if regex.search(game) == null or out.has(StringName(game)):
+			continue
+		out.append(StringName(game))
+	return out
 
 
 static func _art_url(raw: Variant) -> String:

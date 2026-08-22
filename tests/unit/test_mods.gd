@@ -1052,6 +1052,25 @@ func test_index_feed_parses_entries_and_keeps_the_listing_order() -> void:
 	assert_eq(entries[1]["name"], "second")
 
 
+## A listing's `games` is the manifest's own field one step earlier, so a site
+## can filter and the mod page can say what a mod is for before it is installed.
+func test_index_feed_carries_the_games_a_row_declares() -> void:
+	var parsed: Dictionary = Gen2ModIndex.parse_feed(_feed([
+		{"id": "voxel", "download": "https://example.com/voxel.zip",
+		 "games": ["gold", "silver", "gold", "Bad Id", 7, "red"]},
+		{"id": "plain", "download": "https://example.com/plain.zip"},
+		{"id": "wrong", "download": "https://example.com/wrong.zip", "games": "crystal"},
+	]))
+	var entries: Array = parsed["entries"]
+	# Deduplicated, malformed ids dropped on their own, and an id this build has
+	# never heard of kept, because a feed may list a mod for a later cartridge.
+	assert_eq(entries[0]["games"], [&"gold", &"silver", &"red"] as Array[StringName])
+	# No list at all, and a list that is not a list, are both "every cartridge".
+	assert_eq(entries[1]["games"], [] as Array[StringName])
+	assert_eq(entries[2]["games"], [] as Array[StringName])
+	assert_eq(Gen2ModManifest.titles_for(entries[0]["games"]), ["Gold", "Silver", "red"] as Array[String])
+
+
 func test_index_feed_of_an_unknown_schema_is_refused_outright() -> void:
 	# A later format may reuse a field name, so this is a gate and not a hint.
 	var parsed: Dictionary = Gen2ModIndex.parse_feed(

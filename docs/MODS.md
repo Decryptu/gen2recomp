@@ -195,6 +195,7 @@ adds it, because following a source is trusting whoever publishes it.
       "name": "Voxel Preview",
       "version": "1.0.0",
       "description": "Draws the map as geometry.",
+      "games": ["gold", "silver", "crystal"],
       "download": "https://example.com/voxel_preview-1.0.0.zip",
       "icon": "https://example.com/voxel_preview/icon.png",
       "thumbnail": "https://example.com/voxel_preview/thumbnail.webp"
@@ -210,6 +211,13 @@ A row with no `id`, no usable `download`, or an id that is not a legal mod id is
 dropped, and the rest of the listing still works. `icon` and `thumbnail` are
 optional and held to the same https rule; one that is not is dropped on its own
 rather than costing the row.
+
+`games` repeats the manifest's own list of cartridge ids, so a listing says what
+a mod is for before anyone downloads it: the launcher prints it on the mod's page
+and a site can filter on it. It is optional, and a row without one means every
+cartridge, as an empty list in a manifest does. Only the shape is checked, a
+malformed id being dropped on its own; the manifest inside the archive is still
+what decides where the mod runs.
 
 Pasting `owner/repo`, the repository page, a site root or the feed file all
 resolve to the same feed, `https://<owner>.github.io/<repo>/index.json` for a
