@@ -237,6 +237,13 @@ const MONEY_WINDOW_KIND_OF: Dictionary = {
 ## opens. The map's own `setval` in front of it names which picture; the special
 ## answers `wSolvedUnownPuzzle` in wScriptVar, which the `iftrue` after the
 ## `closetext` reads. 41 on both profiles, being under `special_index`'s split.
+## `SlotMachine`, the Game Corner's own machine. The map's `setval` in front of
+## it is `wScriptVar`, which `Slots_InitBias` reads: TRUE picks `.Lucky`'s own
+## bias table, and a `random 6 / ifequal 0` in front of the two scripts is which
+## machine a player sat down at. 42 on both profiles, being under
+## `special_index`'s split, and the machine's own `wCoins` writes are the coins
+## the request answers with.
+const SPECIAL_SLOT_MACHINE: int = 42
 const SPECIAL_UNOWN_PUZZLE: int = 41
 const SPECIAL_DISPLAY_UNOWN_WORDS: int = 135
 const SPECIAL_RANDOM_UNSEEN_WILD_MON: int = 91
@@ -882,6 +889,26 @@ func complete_runtime_request(result: Dictionary) -> Dictionary:
 			)
 		if result.has("script_value"):
 			_script_value = int(result["script_value"])
+		_events.append({
+			"type": &"runtime_request_completed",
+			"kind": kind,
+			"request": request.duplicate(true),
+			"result": result.duplicate(true),
+		})
+		_pending = {}
+		return advance()
+	if kind == &"slot_machine_requested":
+		## `_SlotMachine` writes `wCoins` itself, over and over, so what comes
+		## back is the balance rather than a delta. Nothing reads `wScriptVar`
+		## after it: both maps `closetext` and `end`.
+		if not bool(result.get("ok", false)):
+			return _fail(
+				StringName(result.get("reason", &"slot_machine_failed")), result
+			)
+		var slot_coins: int = int(result.get("coins", _coins_value()))
+		if slot_coins < 0 or slot_coins > Gen2SlotMachine.MAX_COINS:
+			return _fail(&"invalid_coins", result)
+		_staged_coins = slot_coins
 		_events.append({
 			"type": &"runtime_request_completed",
 			"kind": kind,
@@ -2875,6 +2902,14 @@ func _execute_special(special: int) -> Dictionary:
 				"special": special,
 				"kind": &"toggle_decorations_visibility",
 				"defaults": true,
+			})
+		SPECIAL_SLOT_MACHINE:
+			return _stage_runtime_request(&"slot_machine_requested", {
+				"special": special,
+				## `Slots_InitBias`' own `ld a, [wScriptVar] / and a`, which is
+				## the only thing the operand decides.
+				"lucky": _script_value != 0,
+				"coins": _coins_value(),
 			})
 		SPECIAL_UNOWN_PUZZLE:
 			return _stage_runtime_request(&"unown_puzzle_requested", {

@@ -346,6 +346,10 @@ static func verify_layout(rom: RomFile) -> Dictionary:
 	if not unown_puzzle["ok"]:
 		return unown_puzzle
 
+	var slots: Dictionary = verify_slots(rom, layout)
+	if not slots["ok"]:
+		return slots
+
 	var credits: Dictionary = verify_credits(rom, layout)
 	if not credits["ok"]:
 		return credits
@@ -1554,6 +1558,42 @@ static func verify_unown_puzzle(rom: RomFile, layout: Dictionary) -> Dictionary:
 	if RomLayout.predef_palette_offset(layout, RomLayout.PREDEFPAL_UNOWN_PUZZLE) < 0:
 		return {"ok": false, "message": "No PredefPals pin for the Unown puzzle palette."}
 	return {"ok": true, "message": "Unown puzzle verified."}
+
+## `_SlotMachine`. The section walk is most of the check; what is left is the
+## three reel strips, which repeat their own first three symbols, and the seven
+## boxes, each of which has to be a `text_far` stub that decodes.
+static func verify_slots(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var entry: Dictionary = layout.get("slots", {})
+	if entry.is_empty() or int(entry.get("section", -1)) < 0:
+		return {"ok": true, "message": "No slot machine on this cartridge."}
+
+	var section: Dictionary = read_slots_section(rom, layout)
+	if section.is_empty():
+		return {"ok": false, "message": "The slot machine section does not walk."}
+
+	# "The first three positions are repeated to avoid needing to check indices
+	# when copying", which is what says the strips start where they should.
+	var strip: int = RomLayout.SLOTS_REEL_STRIP
+	var size: int = RomLayout.SLOTS_REEL_SIZE
+	for reel: int in 3:
+		var reel_bytes: PackedByteArray = section["reels"].slice(
+			reel * strip, (reel + 1) * strip
+		)
+		for symbol: int in strip - size:
+			if reel_bytes[size + symbol] != reel_bytes[symbol]:
+				return {
+					"ok": false,
+					"message": "Reel %d does not repeat its own first symbols." % [reel + 1],
+				}
+
+	for name: String in RomLayout.slots_text_names():
+		if read_oak_text(rom, layout, RomLayout.slots_text_offset(layout, name)).is_empty():
+			return {"ok": false, "message": "The slot machine's %s text is not one." % name}
+
+	if int(entry.get("palettes", -1)) < 0:
+		return {"ok": false, "message": "No pin for the slot machine's palettes."}
+	return {"ok": true, "message": "Slot machine verified."}
+
 
 ## `GoldSilverIntro`. The section walk is most of the check; what is left is the
 ## three palette runs outside it and the two metatile maps, which name their own
@@ -4092,6 +4132,8 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		"oak_ratings": _import_oak_ratings(rom, layout),
 		"pokecenter_pc": _import_pokecenter_pc(rom, layout),
 		"unown_puzzle": _import_unown_puzzle(rom, layout),
+		"slots": _import_slots(rom, layout),
+		"slots_text": _import_slots_text(rom, layout),
 		"unown_words": Array(read_unown_words(rom, layout)),
 		"unown_walls": Array(read_unown_walls(rom, layout)),
 		"credits": _import_credits(rom, layout),
@@ -5529,6 +5571,100 @@ func _import_unown_puzzle(rom: RomFile, layout: Dictionary) -> Dictionary:
 	return {"palette": palette}
 
 
+## `_SlotMachine`'s data run, walked whole from `Reel1Tilemap`.
+##
+## The three reel strips and `SlotsTilemap` are raw bytes and the three graphics
+## runs are LZ, laid out in that order with nothing between them; every entry
+## landing on its own size is what says the address is right.
+##
+## Returns {name: PackedByteArray} in `SLOTS_SECTION` order, or an empty
+## Dictionary if any entry does not.
+static func read_slots_section(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var at: int = int((layout.get("slots", {}) as Dictionary).get("section", -1))
+	if at < 0:
+		return {}
+	var lz := Gen2Lz.new()
+	var out: Dictionary = {}
+	for row: Array in RomLayout.SLOTS_SECTION:
+		var name: String = String(row[0])
+		var kind: String = String(row[1])
+		var wanted: int = int(row[2])
+		if kind == "lz":
+			wanted *= Gen2Tiles.TILE_BYTES
+			var raw: PackedByteArray = lz.decompress(rom.bytes(), at)
+			if lz.failed or raw.size() != wanted:
+				return {}
+			out[name] = raw
+			at += lz.consumed
+			## The three `.lz` files are zero-padded past the `$ff` the
+			## decompressor stops on, fifteen bytes after `Slots1LZ` and eleven
+			## after `Slots2LZ`, which is the run's own sixteen-byte alignment.
+			## A `$00` after a terminator cannot be a command, so the fill is
+			## skipped rather than modelled: every entry behind it still has to
+			## decompress to exactly its own size.
+			while rom.in_bounds(at) and rom.u8(at) == 0:
+				at += 1
+			continue
+		if not rom.in_bounds(at, wanted):
+			return {}
+		out[name] = rom.slice(at, wanted)
+		at += wanted
+	return out
+
+
+## The three graphics runs of the section above, written the way the puzzle's
+## are. `Slots2LZ` is loaded twice by `_SlotMachine`, into `vTiles0 tile $00` and
+## `vTiles2 tile $25`, so it is one strip here and a page indexes it twice.
+func _import_slots_sheets(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var section: Dictionary = read_slots_section(rom, layout)
+	if section.is_empty():
+		return {}
+	var directory: String = RomCache.directory_for(rom.id, rom.sha1)
+	var out: Dictionary = {}
+	for row: Array in RomLayout.SLOTS_SECTION:
+		if String(row[1]) != "lz":
+			continue
+		var name: String = String(row[0])
+		var tiles: int = int(row[2])
+		if not RomCache.write_indices(
+			RomCache.tile_path(directory, name),
+			Gen2Tiles.decode_2bpp_strip(section[name], 0, tiles)
+		):
+			return {}
+		out[name] = _strip_sheet_entry(tiles)
+	return out
+
+
+## The slot machine's data half: the three reel strips, `SlotsTilemap` and the
+## sixteen palettes `_CGB_SlotMachine` copies into `wBGPals1` and the eight
+## object palettes behind it.
+func _import_slots(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var section: Dictionary = read_slots_section(rom, layout)
+	var at: int = int((layout.get("slots", {}) as Dictionary).get("palettes", -1))
+	if section.is_empty() or at < 0:
+		return {}
+	var reels: Array = []
+	var strip: int = RomLayout.SLOTS_REEL_STRIP
+	for reel: int in 3:
+		reels.append(Array(section["reels"].slice(reel * strip, (reel + 1) * strip)))
+	return {
+		"reels": reels,
+		"tilemap": Array(section["tilemap"]),
+		"palettes": _packed_palette(
+			rom, at, RomLayout.SLOTS_PALETTES * RomLayout.PREDEF_PALETTE_COLORS
+		),
+	}
+
+
+## The slot machine's seven boxes, by the name `RomLayout.SLOTS_TEXT_RUNS` gives
+## each stub.
+func _import_slots_text(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var out: Dictionary = {}
+	for name: String in RomLayout.slots_text_names():
+		out[name] = read_oak_text(rom, layout, RomLayout.slots_text_offset(layout, name))
+	return out
+
+
 ## `GameFreakDittoGFX`, the one LZ run in the splash. `GameFreakPresentsInit`
 ## splits it over `vTiles0` and `vTiles1` as 128 tiles each, and the OAM sets
 ## index the result with a stride of $10, so it is kept as one strip of 256 and
@@ -5898,6 +6034,7 @@ func _import_tiles(rom: RomFile, layout: Dictionary, on_progress: Callable) -> D
 	written.merge(_import_intro_sheets(rom, layout), true)
 	written.merge(_import_gs_intro_sheets(rom, layout), true)
 	written.merge(_import_unown_puzzle_sheets(rom, layout), true)
+	written.merge(_import_slots_sheets(rom, layout), true)
 	var done: int = 0
 	for name: String in sheets:
 		var sheet: Dictionary = sheets[name]

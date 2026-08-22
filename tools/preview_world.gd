@@ -55,6 +55,9 @@ extends SceneTree
 ## `day_care` (the Day-Care's five specials, driven the same way: the first
 ## number is how many presses in and the second which routine, 0 the man,
 ## 1 the lady, 2 the man outside, 3 and 4 the two signs),
+## `slot_machine` (`special SlotMachine`, which no fixture cell reaches: the
+## first number is how many frames into the game to photograph and the second
+## the bet, 1 to 3, plus 4 for the lucky machine),
 ## `unown_puzzle` (`special UnownPuzzle`'s board, which no fixture cell reaches:
 ## the first number is how many frames in to photograph and the second which
 ## picture, 0 Kabuto, 1 Omanyte, 2 Aerodactyl and 3 Ho-Oh, or 4 to 7 for the
@@ -219,7 +222,7 @@ func _build_live(data: GameData, group: int, number: int, cell: Vector2i) -> voi
 		_screen.start_cell = _kind_cell
 	elif cell.x >= 0 and _kind not in [
 		&"battle_transition", &"level_evolution", &"egg_hatch", &"name_rater",
-		&"move_deleter", &"day_care", &"unown_puzzle",
+		&"move_deleter", &"day_care", &"unown_puzzle", &"slot_machine",
 	]:
 		_screen.start_cell = cell
 	## Pinned so two captures of the same map are the same picture: the seed the
@@ -329,6 +332,15 @@ func _process(_delta: float) -> bool:
 				if _screen.get("_unown_puzzle_host") == null:
 					break
 				_screen.advance_frame()
+		elif _kind == &"slot_machine":
+			## `special SlotMachine`, which no fixture cell reaches either. The
+			## first number is how many frames into the game to photograph and
+			## the second is the bet, 1 to 3, plus 4 for the lucky machine the
+			## Game Corner's own `random 6` picks one time in six.
+			var slots_bet: int = maxi(_cell.y, 0) % 4
+			_screen.preview_slot_machine(
+				100, maxi(_cell.y, 0) >= 4, maxi(slots_bet, 1), maxi(_cell.x, 0)
+			)
 		elif _kind == &"day_care":
 			## The Day-Care's five, driven the way the two above are. The first
 			## number is how many presses into the routine to photograph and the
