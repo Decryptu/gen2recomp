@@ -214,13 +214,6 @@ const CONFUSE_TARGET: StringName = &"confusetarget"
 ## Dream Eater behind its own rule inside [constant CHECK_HIT].
 const DRAIN_TARGET: StringName = &"draintarget"
 
-## Two to five hits for [constant Gen2MoveEffect.MULTI_HIT], exactly two for
-## [constant Gen2MoveEffect.DOUBLE_HIT] and [constant Gen2MoveEffect.TWINEEDLE]:
-## one command repeating the roll and the hit rather than a runner-repeated
-## sequence, as [constant ALL_STATS_UP] repeats a stage change five times in one
-## command.
-const MULTI_HIT: StringName = &"multihit"
-
 ## Overwrites what [constant DAMAGE_CALC] worked out with the number
 ## [constant Gen2MoveEffect.SUPER_FANG], [constant Gen2MoveEffect.STATIC_DAMAGE],
 ## [constant Gen2MoveEffect.LEVEL_DAMAGE] and [constant Gen2MoveEffect.PSYWAVE]
@@ -236,18 +229,42 @@ const OHKO: StringName = &"ohko"
 ## list rather than anything a target-facing command touches.
 const RECHARGE: StringName = &"recharge"
 
-## A two-turn move's charge. First run: lock the user in, announce, end the move.
-## Second: clear the lock and let the list run as an ordinary attack, which
-## [method Gen2Battle.move_for] makes the user's only option.
+## `BattleCommand_CheckCharge`, the first command of every two-turn list: on the
+## release turn it clears the lock and skips over [constant CHARGE], so the rest
+## of the list runs as an ordinary attack, which [method Gen2Battle.move_for]
+## makes the user's only option. On the charging turn it does nothing and the
+## list falls into `doturn` and [constant CHARGE].
 const CHARGE_MOVE: StringName = &"chargemove"
+
+## `BattleCommand_Charge`: the charging turn's own line, and the end of the move.
+## It stands behind `doturn` and in front of `usedmovetext`, so a charging turn
+## announces "made a whirlwind!" and never "used RAZOR WIND!"; Skull Bash is the
+## one that carries on, skipping to [constant END_TURN] for the Defense raise
+## behind it.
+const CHARGE: StringName = &"charge"
+
+## `endturn_command`, which ends the read cycle the way [constant END_MOVE] does.
+## Only Skull Bash's list carries one, as the marker `charge` skips forward to.
+const END_TURN: StringName = &"endturn"
+
+## `BattleCommand_StartLoop` and `BattleCommand_EndLoop`: a multi-hit move is the
+## commands between them run again, `endloop` deciding the count on its first
+## pass and rewinding to [constant CRITICAL] until it runs out.
+const START_LOOP: StringName = &"startloop"
+const END_LOOP: StringName = &"endloop"
 
 ## Rollout checks for a live chain, applies its power and advances the hit count;
 ## the first command resets a finished chain before PP and damage.
 const ROLLOUT_CHECK: StringName = &"rolloutcheck"
 const ROLLOUT_POWER: StringName = &"rolloutpower"
 
-## Starts or advances Thrash, Petal Dance and Outrage, and marks Defense Curl's
-## persistent substatus for Rollout.
+## `BattleCommand_CheckRampage`, the first command of Thrash, Petal Dance and
+## Outrage: it counts a live rampage down and, on the turn it runs out, clears
+## the lock and confuses the user unless its own Safeguard refuses.
+const CHECK_RAMPAGE: StringName = &"checkrampage"
+
+## Starts Thrash, Petal Dance and Outrage, and marks Defense Curl's persistent
+## substatus for Rollout.
 const RAMPAGE: StringName = &"rampage"
 const CURL: StringName = &"curl"
 
@@ -359,9 +376,10 @@ const THIEF: StringName = &"thief"
 ## Pursuit, which doubles the finished figure against a side that is leaving.
 const PURSUIT: StringName = &"pursuit"
 
-## Beat Up, whose own body is the `startloop`/`endloop` pair around one hit per
-## party member, as [constant MULTI_HIT]'s is around one hit per roll.
+## Beat Up: one pass of its loop, and the line behind the loop that says nothing
+## unless every member was refused.
 const BEAT_UP: StringName = &"beatup"
+const BEAT_UP_FAIL_TEXT: StringName = &"beatupfailtext"
 
 ## `BattleCommand_CheckSafeguard`, Safeguard's loud half: the four status moves
 ## carrying it end on `SafeguardProtectText`, while the six secondary effects
@@ -417,10 +435,13 @@ const CHARGE_EFFECTS: Array[int] = [
 const STAT_UP_ANIM: StringName = &"statupanim"
 const STAT_DOWN_ANIM: StringName = &"statdownanim"
 
-## The five effects `BattleCommand_MoveAnimNoSub` alternates `wBattleAnimParam`
-## for rather than clearing it. Conversion and Triple Kick are unwritten.
+## The four effects `BattleCommand_MoveAnimNoSub` alternates `wBattleAnimParam`
+## for rather than clearing it. Triple Kick is the fifth and is not one of them:
+## its `.triplekick` label is jumped to over the clear, so a kick keeps the param
+## `kickcounter` left and every kick carries the damage flash.
 const ALTERNATING_ANIM_EFFECTS: Array[int] = [
 	Gen2MoveEffect.MULTI_HIT, Gen2MoveEffect.DOUBLE_HIT, Gen2MoveEffect.TWINEEDLE,
+	Gen2MoveEffect.CONVERSION,
 ]
 
 ## Raises and lowers a stat by one stage or two, named as the cartridge names
@@ -681,8 +702,6 @@ static func run(command: StringName, turn: Gen2Turn) -> void:
 			_confuse_target(turn)
 		DRAIN_TARGET:
 			_drain_target(turn)
-		MULTI_HIT:
-			_multi_hit(turn)
 		FIXED_DAMAGE:
 			_fixed_damage(turn)
 		OHKO:
@@ -690,11 +709,21 @@ static func run(command: StringName, turn: Gen2Turn) -> void:
 		RECHARGE:
 			_recharge(turn)
 		CHARGE_MOVE:
-			_charge_move(turn)
+			_check_charge(turn)
+		CHARGE:
+			_charge(turn)
+		END_TURN:
+			turn.end()
+		START_LOOP:
+			turn.attacker().rollout_count = 0
+		END_LOOP:
+			_end_loop(turn)
 		ROLLOUT_CHECK:
 			_rollout_check(turn)
 		ROLLOUT_POWER:
 			_rollout_power(turn)
+		CHECK_RAMPAGE:
+			_check_rampage(turn)
 		RAMPAGE:
 			_rampage(turn)
 		CURL:
@@ -769,6 +798,8 @@ static func run(command: StringName, turn: Gen2Turn) -> void:
 			_pursuit(turn)
 		BEAT_UP:
 			_beat_up(turn)
+		BEAT_UP_FAIL_TEXT:
+			_beat_up_fail_text(turn)
 		CHECK_SAFEGUARD:
 			_check_safeguard(turn)
 		HEAL:
@@ -888,22 +919,42 @@ static func _rage_damage(turn: Gen2Turn) -> void:
 	turn.damage = mini(base * (turn.attacker().rage_count + 1), 0xFFFF)
 
 
-## Ordinary damage builds Rage in `_apply_damage`, where every damaging effect
-## passes. This command remains in source-shaped lists as that shared seam.
-static func _build_opponent_rage(_turn: Gen2Turn) -> void:
-	pass
+## `BattleCommand_BuildOpponentRage`: one count on the target's Rage per hit it
+## takes, and the line that says so. It stands behind `checkfaint`, which ends
+## the move when the target has fallen, so a Rage that faints does not build; a
+## substitute is not a gate, the doll spending the hit still counting.
+##
+## `inc a / ret z` is the saturation: 255 increments to 0 and is not stored.
+static func _build_opponent_rage(turn: Gen2Turn) -> void:
+	if turn.missed:
+		return
+	var defender: Gen2BattleMon = turn.defender()
+	if not Gen2Substatus.has(defender.substatus, Gen2Substatus.RAGE):
+		return
+	if defender.rage_count >= 0xFF:
+		return
+	defender.rage_count += 1
+	turn.emit(Gen2Battle.RAGE_BUILDING, {"target": turn.target})
 
 
 static func _check_future_sight(turn: Gen2Turn) -> void:
-	if turn.battle.future_sight_pending(turn.side):
-		turn.emit(Gen2Battle.MOVE_FAILED)
-		turn.end()
+	if turn.battle.future_sight_count(turn.side) != 1:
+		return
+	# The stored word is the damage, and the skip lands past `futuresight`, so
+	# the announcement, the PP and the formula are all skipped and only the
+	# spread, the roll and the hit are spent.
+	turn.damage = turn.battle.take_future_sight_damage(turn.side)
+	turn.skip_to = FUTURE_SIGHT
 
 
 ## Stores damage after DamageCalc and before DamageVariation, exactly where the
-## source copies `wCurDamage` into the side's delayed word.
+## source copies `wCurDamage` into the side's delayed word, and ends the move.
+##
+## `.failed` is a count still running: the move announces and then fails, which is
+## what a second Future Sight does.
 static func _future_sight(turn: Gen2Turn) -> void:
 	if not turn.battle.schedule_future_sight(turn.side, turn.damage):
+		turn.damage = 0
 		turn.emit(Gen2Battle.MOVE_FAILED)
 	else:
 		turn.emit(Gen2Battle.FUTURE_SIGHT_SET, {"target": turn.target})
@@ -1574,7 +1625,9 @@ static func _apply_damage(turn: Gen2Turn) -> void:
 		return
 
 	turn.dealt = defender.take_damage(turn.damage)
-	turn.emit(Gen2Battle.HIT, {
+	# `wCriticalHit` at 2 is the one-hit line rather than the critical one, which
+	# is the only thing that tells an OHKO's own hit apart from any other.
+	turn.emit(Gen2Battle.OHKO if turn.one_hit_ko else Gen2Battle.HIT, {
 		"target": turn.target,
 		"amount": turn.dealt,
 		"critical": turn.critical,
@@ -1582,11 +1635,6 @@ static func _apply_damage(turn: Gen2Turn) -> void:
 		"hp": defender.hp,
 		"max_hp": defender.max_hp(),
 	})
-	if not defender.is_fainted() \
-			and Gen2Substatus.has(defender.substatus, Gen2Substatus.RAGE) \
-			and defender.rage_count < 0xFF:
-		defender.rage_count += 1
-		turn.emit(Gen2Battle.RAGE_BUILDING, {"target": turn.target})
 	if braced:
 		turn.emit(Gen2Battle.ENDURED_HIT, {"target": turn.target})
 	if endured:
@@ -1729,7 +1777,7 @@ static func _recoil(turn: Gen2Turn) -> void:
 ## it is skipped; the attacker going down to recoil ends nothing, the cartridge
 ## testing only the opponent's HP. The commands behind it keep their own
 ## fainted-target check, since a list with no faint step can still reach one
-## through [constant MULTI_HIT].
+## through [constant BEAT_UP].
 static func _check_faint(turn: Gen2Turn) -> void:
 	_destiny_bond_takes_user(turn)
 	for side: int in [turn.target, turn.side]:
@@ -2116,64 +2164,6 @@ static func _drain_target(turn: Gen2Turn) -> void:
 	})
 
 
-## Two to five hits for [constant Gen2MoveEffect.MULTI_HIT], exactly two for
-## [constant Gen2MoveEffect.DOUBLE_HIT] and [constant Gen2MoveEffect.TWINEEDLE].
-## [constant CHECK_HIT] has already rolled the move's one accuracy check; the
-## first hit reuses [constant DAMAGE_CALC]'s numbers and every later one rerolls
-## the critical and the spread, as the cartridge's loop does. A faint ends the
-## move, which is why the "hit N times" summary needs every planned hit.
-static func _multi_hit(turn: Gen2Turn) -> void:
-	var attacker: Gen2BattleMon = turn.attacker()
-	var defender: Gen2BattleMon = turn.defender()
-	var hits: int = 2 if FIXED_TWO_HIT_EFFECTS.has(turn.effect()) else _roll_multi_hit_count(turn.rng())
-
-	var focus_energy: bool = Gen2Substatus.has(attacker.substatus, Gen2Substatus.FOCUS_ENERGY)
-	for hit: int in hits:
-		if hit > 0:
-			var result: Dictionary = Gen2Damage.calculate(
-				attacker, defender, turn.effective_move(), turn.rng(), focus_energy,
-				false, turn.battle.weather, turn.battle.screens[turn.target],
-				Gen2Substatus.has(defender.substatus, Gen2Substatus.IDENTIFIED)
-			)
-			turn.damage = int(result["damage"])
-			turn.critical = bool(result["critical"])
-			turn.effectiveness = int(result["effectiveness"])
-
-		# `lowersub` opens the source loop and `moveanimnosub` sits inside it,
-		# before `applydamage`, so every hit drops the doll and animates and only
-		# the last carries the flash. `endloop`'s `raisesub` is this command's tail.
-		_lower_sub(turn)
-		_multi_hit_anim(turn, hit == hits - 1)
-
-		# `applydamage` is inside the loop too, so each hit goes through all of it,
-		# Focus Band and Substitute included, which is why `DoSubstituteDamage`
-		# exempts this effect from stamping `EFFECT_NORMAL_HIT`.
-		_apply_damage(turn)
-
-		if defender.is_fainted():
-			_check_faint(turn)
-			turn.end()
-			return
-
-	# `BattleCommand_EndLoop` says how many hits landed, and the `raisesub`
-	# behind `endloop` follows that line rather than leading it.
-	turn.emit(Gen2Battle.HIT_TIMES, {"target": turn.target, "times": hits})
-	_raise_sub(turn)
-
-
-const FIXED_TWO_HIT_EFFECTS: Array = [Gen2MoveEffect.DOUBLE_HIT, Gen2MoveEffect.TWINEEDLE]
-
-
-## How many times a generic multi-hit move connects, by the cartridge's two-roll
-## algorithm: a first roll out of four keeps 0 or 1, or rolls again for 2 or 3, so
-## two and three hits come up three times as often as four and five.
-static func _roll_multi_hit_count(rng: RandomNumberGenerator) -> int:
-	var first: int = rng.randi_range(0, 3)
-	if first < 2:
-		return first + 2
-	return rng.randi_range(0, 3) + 2
-
-
 ## `BattleCommand_ConstantDamage`: the whole hit without the ordinary formula.
 ## [constant Gen2MoveEffect.LEVEL_DAMAGE] is the user's level,
 ## [constant Gen2MoveEffect.PSYWAVE] a roll of it,
@@ -2243,17 +2233,11 @@ static func _ohko(turn: Gen2Turn) -> void:
 		turn.end()
 		return
 
-	# `OHKOHit` is `ohko, moveanim, failuretext, applydamage`: this command owns
-	# the roll and the damage both, so the animation sits between them here.
-	_move_anim(turn)
-	turn.battle.record_damage_taken(
-		turn.target, turn.side, turn.move_number, turn.effect(), 0xFFFF
-	)
-	var dealt: int = defender.take_damage(defender.hp)
-	turn.emit(Gen2Battle.OHKO, {
-		"target": turn.target, "amount": dealt, "hp": defender.hp, "max_hp": defender.max_hp(),
-	})
-	_check_faint(turn)
+	# `ld a, $ff / ld [hli], a / ld [hl], a` over `wCurDamage`, and `wCriticalHit`
+	# marked 2, which is what `criticaltext` reads as the one-hit line. The
+	# animation, the damage and the faint are the list's own commands behind this.
+	turn.damage = 0xFFFF
+	turn.one_hit_ko = true
 
 
 ## Locks the user out of its next turn. The tail of Hyper Beam's own list,
@@ -2262,31 +2246,110 @@ static func _recharge(turn: Gen2Turn) -> void:
 	turn.attacker().substatus |= Gen2Substatus.RECHARGING
 
 
-## A two-turn move's charge, a list that ends early the first time: lock the user
-## in, announce, stop before damage. The release turn clears the lock and runs on
-## as an ordinary attack, [method Gen2Battle.move_for] forcing the charged move.
-static func _charge_move(turn: Gen2Turn) -> void:
+## `BattleCommand_CheckCharge`: the release turn clears the lock and skips over
+## [constant CHARGE], so the rest of the list is an ordinary attack. On the
+## charging turn it answers nothing and the list runs on into `doturn`.
+static func _check_charge(turn: Gen2Turn) -> void:
 	var mon: Gen2BattleMon = turn.attacker()
-	if Gen2Substatus.has(mon.substatus, Gen2Substatus.CHARGING):
-		mon.substatus &= ~Gen2Substatus.CHARGING
-		mon.substatus &= ~(Gen2Substatus.FLYING | Gen2Substatus.UNDERGROUND)
-		mon.charged_move = 0
+	if not Gen2Substatus.has(mon.substatus, Gen2Substatus.CHARGING):
 		return
+	mon.substatus &= ~Gen2Substatus.CHARGING
+	mon.substatus &= ~(Gen2Substatus.FLYING | Gen2Substatus.UNDERGROUND)
+	mon.charged_move = 0
+	turn.skip_to = CHARGE
 
-	if turn.skip_charge:
+
+## `BattleCommand_Charge`: the charging turn. It locks the user in, says its own
+## line and ends the move; Skull Bash carries on at [constant END_TURN], which is
+## where its Defense raise sits.
+##
+## A user that is asleep gets `PrintButItFailed` instead, which is Sleep Talk
+## reaching a two-turn move: the source spends `movedelay` and `raisesub` before
+## the line.
+static func _charge(turn: Gen2Turn) -> void:
+	var mon: Gen2BattleMon = turn.attacker()
+	if Gen2Status.is_asleep(mon.status):
+		_raise_sub(turn)
+		turn.emit(Gen2Battle.MOVE_FAILED)
+		turn.end()
 		return
 
 	mon.substatus |= Gen2Substatus.CHARGING
 	mon.charged_move = turn.move_number
-	if turn.effect() == Gen2MoveEffect.FLY_OR_DIG:
-		if turn.move_number == Gen2MoveEffect.FLY_MOVE:
-			mon.substatus |= Gen2Substatus.FLYING
-		elif turn.move_number == Gen2MoveEffect.DIG_MOVE:
-			mon.substatus |= Gen2Substatus.UNDERGROUND
+	if turn.move_number == Gen2MoveEffect.FLY_MOVE:
+		mon.substatus |= Gen2Substatus.FLYING
+	elif turn.move_number == Gen2MoveEffect.DIG_MOVE:
+		mon.substatus |= Gen2Substatus.UNDERGROUND
 	## `.UsedText` picks its line by move number rather than by effect, so the
 	## move travels with the event and the screen owns the wording.
 	turn.emit(Gen2Battle.CHARGING_UP, {"move": turn.move_number})
+	if turn.effect() == Gen2MoveEffect.SKULL_BASH:
+		turn.skip_to = END_TURN
+		return
 	turn.end()
+
+
+## `BattleCommand_EndLoop`. Its first pass decides how many times the commands
+## behind it run and rewinds to `critical`; every later one counts down. The
+## count lives in the same byte Rollout's does, which is why `startloop` zeroes
+## it and why a Double Kick ends a Rollout chain.
+static func _end_loop(turn: Gen2Turn) -> void:
+	var mon: Gen2BattleMon = turn.attacker()
+	if Gen2Substatus.has(mon.substatus, Gen2Substatus.IN_LOOP):
+		mon.rollout_count -= 1
+		if mon.rollout_count > 0:
+			turn.loop_back = true
+			return
+		_finish_loop(turn)
+		return
+
+	mon.substatus |= Gen2Substatus.IN_LOOP
+	var remaining: int = 0
+	match turn.effect():
+		Gen2MoveEffect.TWINEEDLE, Gen2MoveEffect.DOUBLE_HIT:
+			remaining = 1
+		Gen2MoveEffect.BEAT_UP:
+			# `.check_ot_beat_up`: a wild Pokémon has no party at all, and one
+			# member is `.only_one_beatup`, which clears the flag, says the fail
+			# line and ends the move outright, so `kingsrock` never runs.
+			# `docs/bugs_and_glitches.md`'s entry, mirrored rather than fixed.
+			var size: int = 0
+			if turn.side == Gen2Battle.PLAYER or turn.battle.is_trainer_battle:
+				size = turn.battle.party(turn.side).size()
+			if size < 2:
+				mon.substatus &= ~Gen2Substatus.IN_LOOP
+				_beat_up_fail_text(turn)
+				turn.end()
+				return
+			remaining = size - 1
+		Gen2MoveEffect.TRIPLE_KICK:
+			# `and $3` resampled until it is not zero, then decremented: one kick
+			# twice as often as two or three.
+			var roll: int = 0
+			while roll == 0:
+				roll = turn.rng().randi_range(0, 3)
+			remaining = roll - 1
+			if remaining == 0:
+				turn.loop_hits = 1
+				_finish_loop(turn)
+				return
+		_:
+			# Two rolls of four, the second only when the first is 2 or 3, so two
+			# and three hits come up three times as often as four and five.
+			var first: int = turn.rng().randi_range(0, 3)
+			remaining = (first if first < 2 else turn.rng().randi_range(0, 3)) + 1
+	mon.rollout_count = remaining
+	turn.loop_hits = remaining + 1
+	turn.loop_back = true
+
+
+## `.done_loop`: the flag off, the count said, and the counter cleared. Beat Up
+## says nothing, its own list having spoken once per member.
+static func _finish_loop(turn: Gen2Turn) -> void:
+	turn.attacker().substatus &= ~Gen2Substatus.IN_LOOP
+	if turn.effect() != Gen2MoveEffect.BEAT_UP:
+		turn.emit(Gen2Battle.HIT_TIMES, {"target": turn.target, "times": turn.loop_hits})
+	turn.loop_hits = 0
 
 
 ## A new Rollout starts a fresh count. A continuation leaves the count alone so
@@ -2342,21 +2405,33 @@ const ROLLOUT_MAX_COUNT: int = 5
 ## Thrash, Petal Dance and Outrage share the rampage flag: the first turn rolls
 ## one or two more, each continuation spends one, and the user is confused after
 ## the last of them still lands.
+static func _check_rampage(turn: Gen2Turn) -> void:
+	var mon: Gen2BattleMon = turn.attacker()
+	if not Gen2Substatus.has(mon.substatus, Gen2Substatus.RAMPAGING):
+		return
+	# `.continue_rampage` is reached whichever way this goes, and it skips past
+	# `rampage`: the lock and its count are set on the first turn only.
+	turn.skip_to = RAMPAGE
+	mon.rampage_turns -= 1
+	if mon.rampage_turns > 0:
+		return
+	mon.substatus &= ~Gen2Substatus.RAMPAGING
+	mon.rampage_move = 0
+	# The routine switches turn around its own `SafeCheckSafeguard` and back, so
+	# the Safeguard that matters is the rampaging Pokemon's own: it is the one
+	# about to be confused.
+	if _safeguard_refuses(turn, turn.side):
+		return
+	mon.confusion_turns = Gen2Substatus.roll_rampage_confusion(turn.rng())
+	mon.substatus |= Gen2Substatus.CONFUSED
+
+
+## `BattleCommand_Rampage`: the lock and its one or two more turns. A user that
+## is asleep sets nothing, which is Sleep Talk reaching Thrash.
 static func _rampage(turn: Gen2Turn) -> void:
 	var mon: Gen2BattleMon = turn.attacker()
-	if Gen2Substatus.has(mon.substatus, Gen2Substatus.RAMPAGING):
-		mon.rampage_turns -= 1
-		if mon.rampage_turns <= 0:
-			mon.substatus &= ~Gen2Substatus.RAMPAGING
-			mon.rampage_move = 0
-			# `BattleCommand_Rampage` switches turn around its own
-			# `SafeCheckSafeguard` and back, so the Safeguard that matters is the
-			# rampaging Pokémon's own: it is the one about to be confused.
-			if not _safeguard_refuses(turn, turn.side):
-				mon.confusion_turns = Gen2Substatus.roll_rampage_confusion(turn.rng())
-				mon.substatus |= Gen2Substatus.CONFUSED
+	if Gen2Status.is_asleep(mon.status):
 		return
-
 	mon.substatus |= Gen2Substatus.RAMPAGING
 	mon.rampage_move = turn.move_number
 	mon.rampage_turns = Gen2Substatus.roll_rampage_turns(turn.rng())
@@ -3191,22 +3266,18 @@ static func _pursuit(turn: Gen2Turn) -> void:
 	turn.damage = mini(turn.damage * 2, 0xFFFF)
 
 
-## `BattleCommand_BeatUp` with `startloop` and `endloop` around it: one hit per
-## party member, in order, each off that member's species base Attack and level.
-## The loop is inside this command as [method _multi_hit]'s is, `endloop` jumping
-## back to `critical` rather than the top of the list, so `checkhit` rolls once.
+## `BattleCommand_BeatUp`: one pass of the loop, which picks the party member
+## this hit is worked out from and loads the formula's two numbers off its base
+## stats. `damagecalc` never sees `damagestats`, so no item, screen, stage or
+## truncation touches either figure, and there is no `stab`, so the modifier
+## stays `EFFECTIVE` and no effectiveness is announced.
 ##
-## `damagecalc` is handed base stats and never sees `damagestats`, so no item,
-## screen, stage or truncation touches either figure, and there is no `stab`, so
-## no same-type bonus, weather or matchup: the modifier stays `EFFECTIVE` and
-## `supereffectivetext` says nothing.
-##
-## `.beatup_fail` skips a member with no health or any status and lets the loop
-## carry on, and `endloop` prints no "hit N times" line here (`.beat_up_2`).
+## A member with no health or any status takes `.beatup_fail`, which skips
+## forward to `buildopponentrage`: the hit is not spent and the loop carries on.
 static func _beat_up(turn: Gen2Turn) -> void:
+	turn.damage = 0
 	var battle: Gen2Battle = turn.battle
-	var party: Gen2Party = battle.party(turn.side)
-	var defender: Gen2BattleMon = turn.defender()
+	var mon: Gen2BattleMon = turn.attacker()
 
 	# `.wild`, which has no party to walk: `EnemyAttackDamage` gives the wild
 	# Pokémon one ordinary hit off its own real stats, and `endloop`'s
@@ -3214,64 +3285,40 @@ static func _beat_up(turn: Gen2Turn) -> void:
 	# ever set `wBeatUpHitAtLeastOnce`, so the hit lands and "But it failed!" is
 	# printed behind it anyway.
 	if turn.side == Gen2Battle.ENEMY and not battle.is_trainer_battle:
-		turn.emit(Gen2Battle.BEAT_UP_ATTACK, {"index": -1, "species": turn.attacker().species})
+		turn.emit(Gen2Battle.BEAT_UP_ATTACK, {"index": -1, "species": mon.species})
 		_damage_stats(turn)
-		_beat_up_hit(turn)
-		if defender.is_fainted():
-			_check_faint(turn)
-		else:
-			turn.emit(Gen2Battle.MOVE_FAILED)
-		turn.end()
 		return
 
-	var struck: bool = false
-	for index: int in party.size():
-		var member: Gen2BattleMon = party.at(index)
-		if not member.is_fainted() and member.status == Gen2Status.NONE:
-			struck = true
-			turn.emit(Gen2Battle.BEAT_UP_ATTACK, {
-				"index": index, "species": member.species,
-			})
-			turn.attack_stat = _base_stat(turn, member.species, "attack")
-			turn.defense_stat = _base_stat(turn, defender.species, "defense")
-			turn.level_override = member.level
-			turn.power_override = int(turn.move.get("power", 0))
-			_beat_up_hit(turn)
-			if defender.is_fainted():
-				_check_faint(turn)
-				turn.end()
-				return
+	var party: Gen2Party = battle.party(turn.side)
+	# `.next_mon` counts down from the party's own size, so the first pass is the
+	# member in slot 0 and the last is the member the count has reached 1 on.
+	var index: int = 0
+	if Gen2Substatus.has(mon.substatus, Gen2Substatus.IN_LOOP):
+		index = party.size() - mon.rollout_count
+	if index < 0 or index >= party.size():
+		turn.skip_to = BUILD_OPPONENT_RAGE
+		return
+	var member: Gen2BattleMon = party.at(index)
+	if member.is_fainted() or member.status != Gen2Status.NONE:
+		turn.skip_to = BUILD_OPPONENT_RAGE
+		return
 
-		# `.only_one_beatup`, reached on `cp 1`: the loop flag is cleared and the
-		# move ends outright, so `kingsrock` never runs.
-		# `docs/bugs_and_glitches.md`'s entry, mirrored rather than fixed.
-		if party.size() == 1:
-			if not struck:
-				turn.emit(Gen2Battle.MOVE_FAILED)
-			turn.end()
-			return
-
-	# `beatupfailtext`, which says nothing when any member landed a hit, and the
-	# `raisesub` the list puts behind it.
-	if not struck:
-		turn.emit(Gen2Battle.MOVE_FAILED)
-	_raise_sub(turn)
+	turn.beat_up_hit = true
+	turn.emit(Gen2Battle.BEAT_UP_ATTACK, {"index": index, "species": member.species})
+	turn.attack_stat = _base_stat(turn, member.species, "attack")
+	turn.defense_stat = _base_stat(turn, turn.defender().species, "defense")
+	turn.level_override = member.level
+	turn.power_override = int(turn.move.get("power", 0))
 
 
-## One pass of the loop: `critical`, `beatup`'s own numbers, `damagecalc`,
-## `damagevariation`, `moveanimnosub` and `applydamage`.
-##
-## `clearmissdamage` is structural, since the one `checkhit` sits outside the loop
-## and has already ended the move on a miss.
-static func _beat_up_hit(turn: Gen2Turn) -> void:
-	# `lowersub` is the first command of the loop body, so every member's hit
-	# drops the user's doll again.
-	_lower_sub(turn)
-	_critical(turn)
-	_damage_calc(turn)
-	_damage_variation(turn)
-	_move_anim(turn)
-	_apply_damage(turn)
+## `BattleCommand_BeatUpFailText`, which says nothing when any member landed a
+## hit. It stands behind `endloop` and in front of `kingsrock`, which is why a
+## failed Beat Up can still trigger a King's Rock flinch
+## (`docs/bugs_and_glitches.md`).
+static func _beat_up_fail_text(turn: Gen2Turn) -> void:
+	if turn.beat_up_hit:
+		return
+	turn.emit(Gen2Battle.MOVE_FAILED)
 
 
 ## A species' own base Attack or base Defense, which is what `GetBaseData` leaves
@@ -3393,7 +3440,7 @@ static func _thunder_accuracy(turn: Gen2Turn) -> void:
 ## branch first, so this answers only for the turn a charge would start.
 static func _skip_sun_charge(turn: Gen2Turn) -> void:
 	if turn.battle.weather == Gen2Weather.SUN:
-		turn.skip_charge = true
+		turn.skip_to = CHARGE
 
 
 ## `PlayFXAnimID`. Nothing is drawn here: the animation is written down as an
@@ -3441,11 +3488,24 @@ static func _play_opponent_battle_anim(turn: Gen2Turn, index: int) -> void:
 static func _move_anim(turn: Gen2Turn) -> void:
 	if turn.missed:
 		return
-	turn.battle.battle_anim_param = 0
-	_play_fx_anim(
-		turn, turn.move_number, _damage_after_anim(turn),
-		turn.move_number in [Gen2MoveEffect.FLY_MOVE, Gen2MoveEffect.DIG_MOVE]
-	)
+	var reappears: bool = turn.move_number in [Gen2MoveEffect.FLY_MOVE, Gen2MoveEffect.DIG_MOVE]
+	var effect: int = turn.effect()
+	if ALTERNATING_ANIM_EFFECTS.has(effect):
+		# `.alternate_anim`: the picture flips side per hit, and only the pass
+		# with one loop left carries the damage flash.
+		turn.battle.battle_anim_param = (turn.battle.battle_anim_param & 1) ^ 1
+		var last: bool = turn.attacker().rollout_count == 1
+		_play_fx_anim(
+			turn, turn.move_number,
+			_damage_after_anim(turn) if last else Gen2BattleAnimPlayer.AFTER_ANIM_NONE,
+			reappears
+		)
+		return
+	# `.triplekick` is jumped to over the clear, so a kick keeps the param
+	# `kickcounter` left and every kick flashes.
+	if effect != Gen2MoveEffect.TRIPLE_KICK:
+		turn.battle.battle_anim_param = 0
+	_play_fx_anim(turn, turn.move_number, _damage_after_anim(turn), reappears)
 
 
 ## `BattleCommand_LowerSub`: the user's doll dropped out of the way of whatever
@@ -3497,17 +3557,6 @@ static func _raise_sub(turn: Gen2Turn) -> void:
 		return
 	turn.battle.battle_anim_param = SUBSTITUTE_ANIM_RAISE
 	_play_fx_anim(turn, SUBSTITUTE_MOVE, Gen2BattleAnimPlayer.AFTER_ANIM_NONE)
-
-
-## `.alternate_anim`, taken by the five multi-hit effects instead of clearing the
-## param: the low bit flips and the damage flash is kept only for the hit the
-## rollout count says is the last, so a multi-hit flashes once.
-static func _multi_hit_anim(turn: Gen2Turn, last_hit: bool) -> void:
-	turn.battle.battle_anim_param = (turn.battle.battle_anim_param & 1) ^ 1
-	_play_fx_anim(
-		turn, turn.move_number,
-		_damage_after_anim(turn) if last_hit else Gen2BattleAnimPlayer.AFTER_ANIM_NONE
-	)
 
 
 ## `ANIM_ENEMY_DAMAGE` on the player's turn, `ANIM_PLAYER_DAMAGE` on the

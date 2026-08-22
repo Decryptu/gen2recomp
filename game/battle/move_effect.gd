@@ -71,12 +71,10 @@ const SKETCH_MOVE: int = 166
 const CONVERSION_2_MOVE: int = 176
 const SLEEP_TALK_MOVE: int = 214
 
-## Two to five hits, the cartridge's own weighted roll
-## ([method Gen2EffectCommands._roll_multi_hit_count]); and exactly two, always,
-## for [constant DOUBLE_HIT]. Both point at the one command,
-## [constant Gen2EffectCommands.MULTI_HIT], which tells the two apart by
-## reading the effect byte back off the turn the same way the cartridge's own
-## loop does, rather than needing two commands that differ only in a number.
+## Two to five hits, the cartridge's own weighted roll; and exactly two, always,
+## for [constant DOUBLE_HIT]. Both run one list,
+## [constant MULTI_HIT_SEQUENCE], and `endloop` tells them apart by reading the
+## effect byte back off the turn.
 const MULTI_HIT: int = 29
 const DOUBLE_HIT: int = 44
 ## Twineedle: the same two hits as [constant DOUBLE_HIT], with a chance of
@@ -371,6 +369,7 @@ const NORMAL_HIT: Array = [
 	Gen2EffectCommands.MOVE_ANIM,
 	Gen2EffectCommands.APPLY_DAMAGE,
 	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.BUILD_OPPONENT_RAGE,
 	Gen2EffectCommands.KINGS_ROCK,
 	Gen2EffectCommands.END_MOVE,
 ]
@@ -380,8 +379,8 @@ const NORMAL_HIT: Array = [
 ## two-or-three-turn lock.
 const BIDE_SEQUENCE: Array = [
 	Gen2EffectCommands.STORE_ENERGY,
-	Gen2EffectCommands.USED_MOVE_TEXT,
 	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.USED_MOVE_TEXT,
 	Gen2EffectCommands.UNLEASH_ENERGY,
 	Gen2EffectCommands.RESET_TYPE_MATCHUP,
 	Gen2EffectCommands.CHECK_HIT,
@@ -400,6 +399,7 @@ const RAGE_SEQUENCE: Array = [
 	Gen2EffectCommands.DAMAGE_STATS,
 	Gen2EffectCommands.DAMAGE_CALC,
 	Gen2EffectCommands.STAB,
+	Gen2EffectCommands.CHECK_IMMUNE,
 	Gen2EffectCommands.CHECK_HIT,
 	Gen2EffectCommands.RAGE_DAMAGE,
 	Gen2EffectCommands.DAMAGE_VARIATION,
@@ -408,6 +408,7 @@ const RAGE_SEQUENCE: Array = [
 	Gen2EffectCommands.APPLY_DAMAGE,
 	Gen2EffectCommands.CHECK_FAINT,
 	Gen2EffectCommands.BUILD_OPPONENT_RAGE,
+	Gen2EffectCommands.KINGS_ROCK,
 	Gen2EffectCommands.END_MOVE,
 ]
 
@@ -418,6 +419,12 @@ const FUTURE_SIGHT_SEQUENCE: Array = [
 	Gen2EffectCommands.DAMAGE_STATS,
 	Gen2EffectCommands.DAMAGE_CALC,
 	Gen2EffectCommands.FUTURE_SIGHT,
+	Gen2EffectCommands.DAMAGE_VARIATION,
+	Gen2EffectCommands.CHECK_HIT,
+	Gen2EffectCommands.MOVE_ANIM_NO_SUB,
+	Gen2EffectCommands.APPLY_DAMAGE,
+	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.BUILD_OPPONENT_RAGE,
 	Gen2EffectCommands.END_MOVE,
 ]
 
@@ -457,6 +464,7 @@ const COUNTER_SEQUENCE: Array = [
 	Gen2EffectCommands.MOVE_ANIM,
 	Gen2EffectCommands.APPLY_DAMAGE,
 	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.BUILD_OPPONENT_RAGE,
 	Gen2EffectCommands.KINGS_ROCK,
 	Gen2EffectCommands.END_MOVE,
 ]
@@ -468,6 +476,7 @@ const MIRROR_COAT_SEQUENCE: Array = [
 	Gen2EffectCommands.MOVE_ANIM,
 	Gen2EffectCommands.APPLY_DAMAGE,
 	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.BUILD_OPPONENT_RAGE,
 	Gen2EffectCommands.KINGS_ROCK,
 	Gen2EffectCommands.END_MOVE,
 ]
@@ -488,6 +497,7 @@ const SELFDESTRUCT_SEQUENCE: Array = [
 	Gen2EffectCommands.MOVE_ANIM_NO_SUB,
 	Gen2EffectCommands.APPLY_DAMAGE,
 	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.BUILD_OPPONENT_RAGE,
 	Gen2EffectCommands.KINGS_ROCK,
 	Gen2EffectCommands.END_MOVE,
 ]
@@ -509,6 +519,7 @@ const RECOIL_HIT_SEQUENCE: Array = [
 	Gen2EffectCommands.APPLY_DAMAGE,
 	Gen2EffectCommands.RECOIL,
 	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.BUILD_OPPONENT_RAGE,
 	Gen2EffectCommands.KINGS_ROCK,
 	Gen2EffectCommands.END_MOVE,
 ]
@@ -590,8 +601,9 @@ const RECHARGE_HIT_SEQUENCE: Array = [
 	Gen2EffectCommands.CHECK_HIT,
 	Gen2EffectCommands.MOVE_ANIM,
 	Gen2EffectCommands.APPLY_DAMAGE,
-	Gen2EffectCommands.CHECK_FAINT,
 	Gen2EffectCommands.RECHARGE,
+	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.BUILD_OPPONENT_RAGE,
 	Gen2EffectCommands.END_MOVE,
 ]
 
@@ -601,9 +613,10 @@ const RECHARGE_HIT_SEQUENCE: Array = [
 ## the second time, it clears the lock and everything after it is
 ## [constant NORMAL_HIT] again.
 const CHARGE_SEQUENCE: Array = [
-	Gen2EffectCommands.USED_MOVE_TEXT,
-	Gen2EffectCommands.DO_TURN,
 	Gen2EffectCommands.CHARGE_MOVE,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.CHARGE,
+	Gen2EffectCommands.USED_MOVE_TEXT,
 	Gen2EffectCommands.CRITICAL,
 	Gen2EffectCommands.DAMAGE_STATS,
 	Gen2EffectCommands.DAMAGE_CALC,
@@ -614,27 +627,55 @@ const CHARGE_SEQUENCE: Array = [
 	Gen2EffectCommands.MOVE_ANIM,
 	Gen2EffectCommands.APPLY_DAMAGE,
 	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.BUILD_OPPONENT_RAGE,
 	Gen2EffectCommands.KINGS_ROCK,
 	Gen2EffectCommands.END_MOVE,
 ]
+## Fly and Dig: [constant CHARGE_SEQUENCE] with the doll put back between the
+## animation and the damage, which is where `AppearUserLowerSub` brings the user
+## back down.
+const FLY_SEQUENCE: Array = [
+	Gen2EffectCommands.CHARGE_MOVE,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.CHARGE,
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.CRITICAL,
+	Gen2EffectCommands.DAMAGE_STATS,
+	Gen2EffectCommands.DAMAGE_CALC,
+	Gen2EffectCommands.STAB,
+	Gen2EffectCommands.DAMAGE_VARIATION,
+	Gen2EffectCommands.CHECK_IMMUNE,
+	Gen2EffectCommands.CHECK_HIT,
+	Gen2EffectCommands.MOVE_ANIM_NO_SUB,
+	Gen2EffectCommands.RAISE_SUB,
+	Gen2EffectCommands.APPLY_DAMAGE,
+	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.BUILD_OPPONENT_RAGE,
+	Gen2EffectCommands.KINGS_ROCK,
+	Gen2EffectCommands.END_MOVE,
+]
+
 
 ## Thrash, Petal Dance and Outrage use one shared rampage state. The first turn
 ## starts the state; later turns are forced through [method Gen2Battle.move_for]
 ## and this command counts them down. The cartridge does not clear the state on
 ## a miss, so the hit check is allowed to finish before the next turn's choice.
 const RAMPAGE_SEQUENCE: Array = [
-	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.CHECK_RAMPAGE,
 	Gen2EffectCommands.DO_TURN,
 	Gen2EffectCommands.RAMPAGE,
+	Gen2EffectCommands.USED_MOVE_TEXT,
 	Gen2EffectCommands.CHECK_HIT,
 	Gen2EffectCommands.CRITICAL,
 	Gen2EffectCommands.DAMAGE_STATS,
 	Gen2EffectCommands.DAMAGE_CALC,
 	Gen2EffectCommands.STAB,
 	Gen2EffectCommands.DAMAGE_VARIATION,
+	Gen2EffectCommands.CHECK_IMMUNE,
 	Gen2EffectCommands.MOVE_ANIM,
 	Gen2EffectCommands.APPLY_DAMAGE,
 	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.BUILD_OPPONENT_RAGE,
 	Gen2EffectCommands.KINGS_ROCK,
 	Gen2EffectCommands.END_MOVE,
 ]
@@ -644,18 +685,20 @@ const RAMPAGE_SEQUENCE: Array = [
 ## counts successful hits so the next call can select the right multiplier.
 const ROLLOUT_SEQUENCE: Array = [
 	Gen2EffectCommands.ROLLOUT_CHECK,
-	Gen2EffectCommands.USED_MOVE_TEXT,
 	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.USED_MOVE_TEXT,
 	Gen2EffectCommands.CRITICAL,
 	Gen2EffectCommands.DAMAGE_STATS,
 	Gen2EffectCommands.DAMAGE_CALC,
 	Gen2EffectCommands.STAB,
+	Gen2EffectCommands.CHECK_IMMUNE,
 	Gen2EffectCommands.CHECK_HIT,
 	Gen2EffectCommands.ROLLOUT_POWER,
 	Gen2EffectCommands.DAMAGE_VARIATION,
 	Gen2EffectCommands.MOVE_ANIM,
 	Gen2EffectCommands.APPLY_DAMAGE,
 	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.BUILD_OPPONENT_RAGE,
 	Gen2EffectCommands.KINGS_ROCK,
 	Gen2EffectCommands.END_MOVE,
 ]
@@ -682,9 +725,10 @@ const DEFENSE_CURL_SEQUENCE: Array = [
 ## the same as no flinch at all, and nothing here should assume that stays true
 ## forever.
 const SKY_ATTACK_SEQUENCE: Array = [
-	Gen2EffectCommands.USED_MOVE_TEXT,
-	Gen2EffectCommands.DO_TURN,
 	Gen2EffectCommands.CHARGE_MOVE,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.CHARGE,
+	Gen2EffectCommands.USED_MOVE_TEXT,
 	Gen2EffectCommands.CRITICAL,
 	Gen2EffectCommands.DAMAGE_STATS,
 	Gen2EffectCommands.DAMAGE_CALC,
@@ -696,6 +740,7 @@ const SKY_ATTACK_SEQUENCE: Array = [
 	Gen2EffectCommands.MOVE_ANIM,
 	Gen2EffectCommands.APPLY_DAMAGE,
 	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.BUILD_OPPONENT_RAGE,
 	Gen2EffectCommands.FLINCH_TARGET,
 	Gen2EffectCommands.KINGS_ROCK,
 	Gen2EffectCommands.END_MOVE,
@@ -705,9 +750,10 @@ const SKY_ATTACK_SEQUENCE: Array = [
 ## behind the hit landing, which is the one thing that sets it apart from
 ## [constant CHARGE_SEQUENCE].
 const SKULL_BASH_SEQUENCE: Array = [
-	Gen2EffectCommands.USED_MOVE_TEXT,
-	Gen2EffectCommands.DO_TURN,
 	Gen2EffectCommands.CHARGE_MOVE,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.CHARGE,
+	Gen2EffectCommands.USED_MOVE_TEXT,
 	Gen2EffectCommands.CRITICAL,
 	Gen2EffectCommands.DAMAGE_STATS,
 	Gen2EffectCommands.DAMAGE_CALC,
@@ -718,9 +764,11 @@ const SKULL_BASH_SEQUENCE: Array = [
 	Gen2EffectCommands.MOVE_ANIM,
 	Gen2EffectCommands.APPLY_DAMAGE,
 	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.BUILD_OPPONENT_RAGE,
+	Gen2EffectCommands.KINGS_ROCK,
+	Gen2EffectCommands.END_TURN,
 	Gen2EffectCommands.DEFENSE_UP,
 	Gen2EffectCommands.STAT_UP_MESSAGE,
-	Gen2EffectCommands.KINGS_ROCK,
 	Gen2EffectCommands.END_MOVE,
 ]
 
@@ -807,6 +855,7 @@ const TRAP_TARGET_SEQUENCE: Array = [
 	Gen2EffectCommands.MOVE_ANIM,
 	Gen2EffectCommands.APPLY_DAMAGE,
 	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.BUILD_OPPONENT_RAGE,
 	Gen2EffectCommands.TRAP_TARGET,
 	Gen2EffectCommands.END_MOVE,
 ]
@@ -942,6 +991,7 @@ const RAPID_SPIN_SEQUENCE: Array = [
 	Gen2EffectCommands.APPLY_DAMAGE,
 	Gen2EffectCommands.CLEAR_HAZARDS,
 	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.BUILD_OPPONENT_RAGE,
 	Gen2EffectCommands.KINGS_ROCK,
 	Gen2EffectCommands.END_MOVE,
 ]
@@ -1034,6 +1084,7 @@ const THIEF_SEQUENCE: Array = [
 	Gen2EffectCommands.APPLY_DAMAGE,
 	Gen2EffectCommands.THIEF,
 	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.BUILD_OPPONENT_RAGE,
 	Gen2EffectCommands.KINGS_ROCK,
 	Gen2EffectCommands.END_MOVE,
 ]
@@ -1054,14 +1105,14 @@ const PURSUIT_SEQUENCE: Array = [
 	Gen2EffectCommands.MOVE_ANIM,
 	Gen2EffectCommands.APPLY_DAMAGE,
 	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.BUILD_OPPONENT_RAGE,
 	Gen2EffectCommands.KINGS_ROCK,
 	Gen2EffectCommands.END_MOVE,
 ]
 
-## Beat Up. The `startloop`/`endloop` pair is inside
-## [constant Gen2EffectCommands.BEAT_UP], as [constant Gen2EffectCommands.MULTI_HIT]
-## already holds its own, and `endloop` jumps back to `critical` rather than to
-## the top, so `checkhit` is outside the loop and rolls once for the whole move.
+## Beat Up: one pass of the loop per party member, `endloop` jumping back to
+## `critical` rather than to the top, so `checkhit` is outside the loop and rolls
+## once for the whole move.
 ##
 ## No `damagestats` and no `stab`: the command loads the formula's two stats
 ## itself, from base stats rather than from either Pokémon's real ones, and
@@ -1070,8 +1121,20 @@ const PURSUIT_SEQUENCE: Array = [
 const BEAT_UP_SEQUENCE: Array = [
 	Gen2EffectCommands.USED_MOVE_TEXT,
 	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.START_LOOP,
+	Gen2EffectCommands.LOWER_SUB,
 	Gen2EffectCommands.CHECK_HIT,
+	Gen2EffectCommands.CRITICAL,
 	Gen2EffectCommands.BEAT_UP,
+	Gen2EffectCommands.DAMAGE_CALC,
+	Gen2EffectCommands.DAMAGE_VARIATION,
+	Gen2EffectCommands.MOVE_ANIM_NO_SUB,
+	Gen2EffectCommands.APPLY_DAMAGE,
+	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.BUILD_OPPONENT_RAGE,
+	Gen2EffectCommands.END_LOOP,
+	Gen2EffectCommands.BEAT_UP_FAIL_TEXT,
+	Gen2EffectCommands.RAISE_SUB,
 	Gen2EffectCommands.KINGS_ROCK,
 	Gen2EffectCommands.END_MOVE,
 ]
@@ -1094,6 +1157,7 @@ const THUNDER_SEQUENCE: Array = [
 	Gen2EffectCommands.MOVE_ANIM,
 	Gen2EffectCommands.APPLY_DAMAGE,
 	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.BUILD_OPPONENT_RAGE,
 	Gen2EffectCommands.PARALYZE_TARGET,
 	Gen2EffectCommands.END_MOVE,
 ]
@@ -1101,10 +1165,11 @@ const THUNDER_SEQUENCE: Array = [
 ## Solarbeam: [constant CHARGE_SEQUENCE] with the sun's own way out in front of
 ## the charge, exactly where `skipsuncharge` sits in front of `charge`.
 const SOLARBEAM_SEQUENCE: Array = [
-	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.CHARGE_MOVE,
 	Gen2EffectCommands.DO_TURN,
 	Gen2EffectCommands.SKIP_SUN_CHARGE,
-	Gen2EffectCommands.CHARGE_MOVE,
+	Gen2EffectCommands.CHARGE,
+	Gen2EffectCommands.USED_MOVE_TEXT,
 	Gen2EffectCommands.CRITICAL,
 	Gen2EffectCommands.DAMAGE_STATS,
 	Gen2EffectCommands.DAMAGE_CALC,
@@ -1115,6 +1180,7 @@ const SOLARBEAM_SEQUENCE: Array = [
 	Gen2EffectCommands.MOVE_ANIM,
 	Gen2EffectCommands.APPLY_DAMAGE,
 	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.BUILD_OPPONENT_RAGE,
 	Gen2EffectCommands.KINGS_ROCK,
 	Gen2EffectCommands.END_MOVE,
 ]
@@ -1129,41 +1195,56 @@ const MEAN_LOOK_SEQUENCE: Array = [
 	Gen2EffectCommands.END_MOVE,
 ]
 
-## [constant MULTI_HIT] and [constant DOUBLE_HIT]: the accuracy roll happens
-## once, the way the cartridge's own script checks it before the loop that
-## repeats the hit even starts, and everything from the critical roll onward
-## is [constant Gen2EffectCommands.MULTI_HIT]'s own job, hit by hit.
+## [constant MULTI_HIT] and [constant DOUBLE_HIT]. `startloop` and `endloop`
+## bracket the hit and `endloop` rewinds to `critical`, so the accuracy roll and
+## the doll are outside the loop and the damage is worked out again per hit.
+##
+## The count is rolled by `endloop` on its first pass, which is *behind* the
+## first hit's own spread: rolling it in front would take the same seed to a
+## different battle.
 const MULTI_HIT_SEQUENCE: Array = [
 	Gen2EffectCommands.USED_MOVE_TEXT,
 	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.START_LOOP,
+	Gen2EffectCommands.LOWER_SUB,
+	Gen2EffectCommands.CHECK_HIT,
 	Gen2EffectCommands.CRITICAL,
 	Gen2EffectCommands.DAMAGE_STATS,
 	Gen2EffectCommands.DAMAGE_CALC,
 	Gen2EffectCommands.STAB,
 	Gen2EffectCommands.DAMAGE_VARIATION,
 	Gen2EffectCommands.CHECK_IMMUNE,
-	Gen2EffectCommands.CHECK_HIT,
-	Gen2EffectCommands.MULTI_HIT,
+	Gen2EffectCommands.MOVE_ANIM_NO_SUB,
+	Gen2EffectCommands.APPLY_DAMAGE,
+	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.BUILD_OPPONENT_RAGE,
+	Gen2EffectCommands.END_LOOP,
+	Gen2EffectCommands.RAISE_SUB,
 	Gen2EffectCommands.KINGS_ROCK,
 	Gen2EffectCommands.END_MOVE,
 ]
 
-## Twineedle: the same two hits, with the poison roll taken once right after
-## the accuracy check, in the same slot [method Gen2MoveEffect._secondary]
-## already puts a secondary effect's roll, and applied once at the very end,
-## after both hits, rather than after either one on its own.
+## Twineedle: the same loop with the poison roll taken once, in front of the
+## first hit, and the poison itself applied once behind both.
 const TWINEEDLE_SEQUENCE: Array = [
 	Gen2EffectCommands.USED_MOVE_TEXT,
 	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.START_LOOP,
+	Gen2EffectCommands.LOWER_SUB,
+	Gen2EffectCommands.CHECK_HIT,
+	Gen2EffectCommands.EFFECT_CHANCE,
 	Gen2EffectCommands.CRITICAL,
 	Gen2EffectCommands.DAMAGE_STATS,
 	Gen2EffectCommands.DAMAGE_CALC,
 	Gen2EffectCommands.STAB,
 	Gen2EffectCommands.DAMAGE_VARIATION,
 	Gen2EffectCommands.CHECK_IMMUNE,
-	Gen2EffectCommands.CHECK_HIT,
-	Gen2EffectCommands.EFFECT_CHANCE,
-	Gen2EffectCommands.MULTI_HIT,
+	Gen2EffectCommands.MOVE_ANIM_NO_SUB,
+	Gen2EffectCommands.APPLY_DAMAGE,
+	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.BUILD_OPPONENT_RAGE,
+	Gen2EffectCommands.END_LOOP,
+	Gen2EffectCommands.RAISE_SUB,
 	Gen2EffectCommands.KINGS_ROCK,
 	Gen2EffectCommands.POISON_TARGET,
 	Gen2EffectCommands.END_MOVE,
@@ -1187,6 +1268,7 @@ const DRAIN_SEQUENCE: Array = [
 	Gen2EffectCommands.APPLY_DAMAGE,
 	Gen2EffectCommands.DRAIN_TARGET,
 	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.BUILD_OPPONENT_RAGE,
 	Gen2EffectCommands.KINGS_ROCK,
 	Gen2EffectCommands.END_MOVE,
 ]
@@ -1208,6 +1290,7 @@ const DREAM_EATER_SEQUENCE: Array = [
 	Gen2EffectCommands.APPLY_DAMAGE,
 	Gen2EffectCommands.DRAIN_TARGET,
 	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.BUILD_OPPONENT_RAGE,
 	Gen2EffectCommands.END_MOVE,
 ]
 
@@ -1229,6 +1312,7 @@ const FIXED_DAMAGE_SEQUENCE: Array = [
 	Gen2EffectCommands.MOVE_ANIM,
 	Gen2EffectCommands.APPLY_DAMAGE,
 	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.BUILD_OPPONENT_RAGE,
 	Gen2EffectCommands.KINGS_ROCK,
 	Gen2EffectCommands.END_MOVE,
 ]
@@ -1240,8 +1324,11 @@ const OHKO_SEQUENCE: Array = [
 	Gen2EffectCommands.USED_MOVE_TEXT,
 	Gen2EffectCommands.DO_TURN,
 	Gen2EffectCommands.STAB,
-	Gen2EffectCommands.CHECK_IMMUNE,
 	Gen2EffectCommands.OHKO,
+	Gen2EffectCommands.MOVE_ANIM,
+	Gen2EffectCommands.APPLY_DAMAGE,
+	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.BUILD_OPPONENT_RAGE,
 	Gen2EffectCommands.END_MOVE,
 ]
 
@@ -1264,6 +1351,7 @@ const RETURN_SEQUENCE: Array = [
 	Gen2EffectCommands.MOVE_ANIM,
 	Gen2EffectCommands.APPLY_DAMAGE,
 	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.BUILD_OPPONENT_RAGE,
 	Gen2EffectCommands.KINGS_ROCK,
 	Gen2EffectCommands.END_MOVE,
 ]
@@ -1282,6 +1370,7 @@ const FRUSTRATION_SEQUENCE: Array = [
 	Gen2EffectCommands.MOVE_ANIM,
 	Gen2EffectCommands.APPLY_DAMAGE,
 	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.BUILD_OPPONENT_RAGE,
 	Gen2EffectCommands.KINGS_ROCK,
 	Gen2EffectCommands.END_MOVE,
 ]
@@ -1304,6 +1393,7 @@ const MAGNITUDE_SEQUENCE: Array = [
 	Gen2EffectCommands.MOVE_ANIM,
 	Gen2EffectCommands.APPLY_DAMAGE,
 	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.BUILD_OPPONENT_RAGE,
 	Gen2EffectCommands.KINGS_ROCK,
 	Gen2EffectCommands.END_MOVE,
 ]
@@ -1324,6 +1414,7 @@ const HIDDEN_POWER_SEQUENCE: Array = [
 	Gen2EffectCommands.MOVE_ANIM,
 	Gen2EffectCommands.APPLY_DAMAGE,
 	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.BUILD_OPPONENT_RAGE,
 	Gen2EffectCommands.KINGS_ROCK,
 	Gen2EffectCommands.END_MOVE,
 ]
@@ -1343,6 +1434,7 @@ const PRESENT_SEQUENCE: Array = [
 	Gen2EffectCommands.DAMAGE_VARIATION,
 	Gen2EffectCommands.APPLY_DAMAGE,
 	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.BUILD_OPPONENT_RAGE,
 	Gen2EffectCommands.KINGS_ROCK,
 	Gen2EffectCommands.END_MOVE,
 ]
@@ -1359,6 +1451,7 @@ const REVERSAL_SEQUENCE: Array = [
 	Gen2EffectCommands.MOVE_ANIM,
 	Gen2EffectCommands.APPLY_DAMAGE,
 	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.BUILD_OPPONENT_RAGE,
 	Gen2EffectCommands.KINGS_ROCK,
 	Gen2EffectCommands.END_MOVE,
 ]
@@ -1379,19 +1472,19 @@ const FURY_CUTTER_SEQUENCE: Array = [
 	Gen2EffectCommands.MOVE_ANIM,
 	Gen2EffectCommands.APPLY_DAMAGE,
 	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.BUILD_OPPONENT_RAGE,
 	Gen2EffectCommands.KINGS_ROCK,
 	Gen2EffectCommands.END_MOVE,
 ]
 
-## Triple Kick, which is a loop like the multi-hit moves and unlike them in
-## rolling its own accuracy per kick and multiplying each kick by which one it
-## is. [constant Gen2EffectCommands.TRIPLE_KICK] does the multiply and
-## [constant Gen2EffectCommands.KICK_COUNTER] walks the count on.
+## Triple Kick: the multi-hit loop with the power multiplied by which kick it is.
+## [constant Gen2EffectCommands.TRIPLE_KICK] does the multiply,
+## [constant Gen2EffectCommands.KICK_COUNTER] walks the count on inside the loop,
+## and `endloop` rolls one, two or three kicks rather than two to five.
 const TRIPLE_KICK_SEQUENCE: Array = [
 	Gen2EffectCommands.USED_MOVE_TEXT,
 	Gen2EffectCommands.DO_TURN,
-	# `lowersub` opens the source's loop body and its `raisesub` sits behind
-	# `endloop`, which is where both land in a list run once per kick.
+	Gen2EffectCommands.START_LOOP,
 	Gen2EffectCommands.LOWER_SUB,
 	Gen2EffectCommands.CHECK_HIT,
 	Gen2EffectCommands.CRITICAL,
@@ -1400,10 +1493,13 @@ const TRIPLE_KICK_SEQUENCE: Array = [
 	Gen2EffectCommands.TRIPLE_KICK,
 	Gen2EffectCommands.STAB,
 	Gen2EffectCommands.DAMAGE_VARIATION,
+	Gen2EffectCommands.CHECK_IMMUNE,
 	Gen2EffectCommands.MOVE_ANIM_NO_SUB,
 	Gen2EffectCommands.APPLY_DAMAGE,
 	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.BUILD_OPPONENT_RAGE,
 	Gen2EffectCommands.KICK_COUNTER,
+	Gen2EffectCommands.END_LOOP,
 	Gen2EffectCommands.RAISE_SUB,
 	Gen2EffectCommands.KINGS_ROCK,
 	Gen2EffectCommands.END_MOVE,
@@ -1425,6 +1521,7 @@ const FALSE_SWIPE_SEQUENCE: Array = [
 	Gen2EffectCommands.MOVE_ANIM,
 	Gen2EffectCommands.APPLY_DAMAGE,
 	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.BUILD_OPPONENT_RAGE,
 	Gen2EffectCommands.KINGS_ROCK,
 	Gen2EffectCommands.END_MOVE,
 ]
@@ -1517,6 +1614,7 @@ const SNORE_SEQUENCE: Array = [
 	Gen2EffectCommands.MOVE_ANIM,
 	Gen2EffectCommands.APPLY_DAMAGE,
 	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.BUILD_OPPONENT_RAGE,
 	Gen2EffectCommands.FLINCH_TARGET,
 	Gen2EffectCommands.KINGS_ROCK,
 	Gen2EffectCommands.END_MOVE,
@@ -1538,7 +1636,7 @@ const TRI_ATTACK_SEQUENCE: Array = [
 	Gen2EffectCommands.MOVE_ANIM,
 	Gen2EffectCommands.APPLY_DAMAGE,
 	Gen2EffectCommands.CHECK_FAINT,
-	Gen2EffectCommands.EFFECT_CHANCE,
+	Gen2EffectCommands.BUILD_OPPONENT_RAGE,
 	Gen2EffectCommands.TRI_STATUS_CHANCE,
 	Gen2EffectCommands.END_MOVE,
 ]
@@ -1560,12 +1658,13 @@ const FLAME_WHEEL_SEQUENCE: Array = [
 	Gen2EffectCommands.APPLY_DAMAGE,
 	Gen2EffectCommands.DEFROST,
 	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.BUILD_OPPONENT_RAGE,
 	Gen2EffectCommands.BURN_TARGET,
 	Gen2EffectCommands.END_MOVE,
 ]
 
-## Gust and Earthquake: [constant NORMAL_HIT] with the doubling behind the spread
-## and no King's Rock, which the two lists really do leave out.
+## Gust: [constant NORMAL_HIT] with the doubling behind the spread and no King's
+## Rock, which the list really does leave out.
 const DOUBLE_DAMAGE_SEQUENCE: Array = [
 	Gen2EffectCommands.USED_MOVE_TEXT,
 	Gen2EffectCommands.DO_TURN,
@@ -1580,8 +1679,32 @@ const DOUBLE_DAMAGE_SEQUENCE: Array = [
 	Gen2EffectCommands.MOVE_ANIM,
 	Gen2EffectCommands.APPLY_DAMAGE,
 	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.BUILD_OPPONENT_RAGE,
 	Gen2EffectCommands.END_MOVE,
 ]
+## Earthquake: Gust's list with an `effectchance` and nothing behind it. It rolls
+## against a chance byte of zero and can only fail, so the whole of what it does
+## is spend one number out of the generator, which is why the two lists are not
+## one here.
+const EARTHQUAKE_SEQUENCE: Array = [
+	Gen2EffectCommands.USED_MOVE_TEXT,
+	Gen2EffectCommands.DO_TURN,
+	Gen2EffectCommands.CRITICAL,
+	Gen2EffectCommands.DAMAGE_STATS,
+	Gen2EffectCommands.DAMAGE_CALC,
+	Gen2EffectCommands.STAB,
+	Gen2EffectCommands.DAMAGE_VARIATION,
+	Gen2EffectCommands.DOUBLE_DAMAGE,
+	Gen2EffectCommands.CHECK_IMMUNE,
+	Gen2EffectCommands.CHECK_HIT,
+	Gen2EffectCommands.EFFECT_CHANCE,
+	Gen2EffectCommands.MOVE_ANIM,
+	Gen2EffectCommands.APPLY_DAMAGE,
+	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.BUILD_OPPONENT_RAGE,
+	Gen2EffectCommands.END_MOVE,
+]
+
 
 ## Twister and Stomp: the same list with the flinch chance both carry.
 const DOUBLE_DAMAGE_FLINCH_SEQUENCE: Array = [
@@ -1599,6 +1722,7 @@ const DOUBLE_DAMAGE_FLINCH_SEQUENCE: Array = [
 	Gen2EffectCommands.MOVE_ANIM,
 	Gen2EffectCommands.APPLY_DAMAGE,
 	Gen2EffectCommands.CHECK_FAINT,
+	Gen2EffectCommands.BUILD_OPPONENT_RAGE,
 	Gen2EffectCommands.FLINCH_TARGET,
 	Gen2EffectCommands.END_MOVE,
 ]
@@ -1645,6 +1769,7 @@ static func _secondary(trailing: Array) -> Array:
 		Gen2EffectCommands.MOVE_ANIM,
 		Gen2EffectCommands.APPLY_DAMAGE,
 		Gen2EffectCommands.CHECK_FAINT,
+		Gen2EffectCommands.BUILD_OPPONENT_RAGE,
 	] + trailing + [Gen2EffectCommands.END_MOVE]
 
 
@@ -1826,7 +1951,7 @@ static func _sequences() -> Dictionary:
 		RECHARGE_HIT: RECHARGE_HIT_SEQUENCE,
 		RAZOR_WIND: CHARGE_SEQUENCE,
 		SOLARBEAM: SOLARBEAM_SEQUENCE,
-		FLY_OR_DIG: CHARGE_SEQUENCE,
+		FLY_OR_DIG: FLY_SEQUENCE,
 		SKY_ATTACK: SKY_ATTACK_SEQUENCE,
 		SKULL_BASH: SKULL_BASH_SEQUENCE,
 		RAMPAGE: RAMPAGE_SEQUENCE,
@@ -1918,7 +2043,7 @@ static func _sequences() -> Dictionary:
 		FLAME_WHEEL: FLAME_WHEEL_SEQUENCE,
 		SACRED_FIRE: FLAME_WHEEL_SEQUENCE,
 		GUST: DOUBLE_DAMAGE_SEQUENCE,
-		EARTHQUAKE: DOUBLE_DAMAGE_SEQUENCE,
+		EARTHQUAKE: EARTHQUAKE_SEQUENCE,
 		TWISTER: DOUBLE_DAMAGE_FLINCH_SEQUENCE,
 		STOMP: DOUBLE_DAMAGE_FLINCH_SEQUENCE,
 		SWAGGER: SWAGGER_SEQUENCE,

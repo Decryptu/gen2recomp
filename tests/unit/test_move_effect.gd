@@ -76,10 +76,7 @@ func _run_move(
 	)
 	turn.locked = locked
 	Gen2EffectCommands.run(Gen2EffectCommands.CHECK_STATUS, turn)
-	for command: StringName in Gen2MoveEffect.sequence_for(turn.effect()):
-		if turn.ended:
-			break
-		Gen2EffectCommands.run(command, turn)
+	battle.run_move_effect(turn)
 	return turn
 
 
@@ -90,10 +87,7 @@ func _run_enemy_move(battle: Gen2Battle, move_number: int) -> Gen2Turn:
 		battle, Gen2Battle.ENEMY, 0, move_number, _data.move(move_number), []
 	)
 	Gen2EffectCommands.run(Gen2EffectCommands.CHECK_STATUS, turn)
-	for command: StringName in Gen2MoveEffect.sequence_for(turn.effect()):
-		if turn.ended:
-			break
-		Gen2EffectCommands.run(command, turn)
+	battle.run_move_effect(turn)
 	return turn
 
 
@@ -566,7 +560,7 @@ func test_a_charge_move_ends_the_turn_before_the_damage_step() -> void:
 
 func test_charge_move_locks_the_user_in_and_says_so() -> void:
 	var turn: Gen2Turn = _turn(_battle(), Fixture.SOLARBEAM)
-	Gen2EffectCommands.run(Gen2EffectCommands.CHARGE_MOVE, turn)
+	Gen2EffectCommands.run(Gen2EffectCommands.CHARGE, turn)
 	var mon: Gen2BattleMon = turn.attacker()
 	assert_true(Gen2Substatus.has(mon.substatus, Gen2Substatus.CHARGING))
 	assert_eq(mon.charged_move, Fixture.SOLARBEAM)
@@ -587,6 +581,7 @@ func test_charge_move_releases_on_the_second_call_and_lets_the_rest_run() -> voi
 	assert_false(turn.ended)
 	assert_false(Gen2Substatus.has(mon.substatus, Gen2Substatus.CHARGING))
 	assert_eq(mon.charged_move, 0)
+	assert_eq(turn.skip_to, Gen2EffectCommands.CHARGE, "the release turn skips the charge")
 
 
 func test_rollout_rampage_and_defense_curl_use_their_effect_sequences() -> void:
@@ -902,21 +897,19 @@ func test_psych_up_fails_when_the_target_has_nothing_to_copy() -> void:
 	assert_eq(turn.events.size(), 0)
 
 
-func test_multi_hit_and_double_hit_share_one_command() -> void:
+func test_multi_hit_and_double_hit_share_one_list() -> void:
 	var multi: Array = Gen2MoveEffect.sequence_for(Gen2MoveEffect.MULTI_HIT)
 	var double_hit: Array = Gen2MoveEffect.sequence_for(Gen2MoveEffect.DOUBLE_HIT)
 	assert_eq(multi, double_hit)
-	assert_true(multi.has(Gen2EffectCommands.MULTI_HIT))
-	assert_eq(
-		multi.find(Gen2EffectCommands.CHECK_HIT) + 1, multi.find(Gen2EffectCommands.MULTI_HIT),
-		"the accuracy roll happens once, right before the hits it covers"
+	assert_lt(
+		multi.find(Gen2EffectCommands.CHECK_HIT), multi.find(Gen2EffectCommands.CRITICAL),
+		"the accuracy roll is outside the loop `endloop` rewinds to `critical`"
 	)
 
 
 func test_double_hit_always_hits_exactly_twice() -> void:
-	var turn: Gen2Turn = _turn(_battle(), Fixture.DOUBLE_HIT_MOVE)
-	_run_damage_steps(turn)
-	Gen2EffectCommands.run(Gen2EffectCommands.MULTI_HIT, turn)
+	var battle: Gen2Battle = _battle()
+	var turn: Gen2Turn = _run_move(battle, Fixture.DOUBLE_HIT_MOVE)
 	assert_eq(_of_type(turn.events, Gen2Battle.HIT).size(), 2)
 	assert_eq(int(_first(turn.events, Gen2Battle.HIT_TIMES)["times"]), 2)
 
@@ -926,22 +919,18 @@ func test_multi_hit_lands_between_two_and_five_times() -> void:
 	# whatever one seed happens to land on.
 	for seed_value: int in range(1, 21):
 		_rng.seed = seed_value
-		var turn: Gen2Turn = _turn(_battle(), Fixture.MULTI_HIT_MOVE)
-		_run_damage_steps(turn)
-		Gen2EffectCommands.run(Gen2EffectCommands.MULTI_HIT, turn)
+		var turn: Gen2Turn = _run_move(_battle(), Fixture.MULTI_HIT_MOVE)
 		var hits: int = _of_type(turn.events, Gen2Battle.HIT).size()
 		assert_between(hits, 2, 5, "seed %d" % seed_value)
 		assert_eq(int(_first(turn.events, Gen2Battle.HIT_TIMES)["times"]), hits)
 
 
 func test_multi_hit_stops_and_says_nothing_once_the_target_is_down() -> void:
-	# The cartridge's own loop jumps straight past the "hit N times" line the
-	# moment a hit brings the target down, so no summary is the whole point.
+	# `checkfaint` ends the move inside the loop, so `endloop` never reaches the
+	# "hit N times" line: no summary is the whole point.
 	var battle: Gen2Battle = _battle()
 	battle.enemy.hp = 1
-	var turn: Gen2Turn = _turn(battle, Fixture.MULTI_HIT_MOVE)
-	_run_damage_steps(turn)
-	Gen2EffectCommands.run(Gen2EffectCommands.MULTI_HIT, turn)
+	var turn: Gen2Turn = _run_move(battle, Fixture.MULTI_HIT_MOVE)
 	assert_eq(_of_type(turn.events, Gen2Battle.HIT).size(), 1, "the one hit that finished it")
 	assert_eq(_first(turn.events, Gen2Battle.HIT_TIMES), {})
 	assert_true(turn.ended)
@@ -949,12 +938,7 @@ func test_multi_hit_stops_and_says_nothing_once_the_target_is_down() -> void:
 
 
 func test_twineedle_hits_twice_then_rolls_poison_once_for_both() -> void:
-	var turn: Gen2Turn = _turn(_battle(), Fixture.TWINEEDLE_MOVE)
-	_run_damage_steps(turn)
-	Gen2EffectCommands.run(Gen2EffectCommands.CHECK_HIT, turn)
-	Gen2EffectCommands.run(Gen2EffectCommands.EFFECT_CHANCE, turn)
-	Gen2EffectCommands.run(Gen2EffectCommands.MULTI_HIT, turn)
-	Gen2EffectCommands.run(Gen2EffectCommands.POISON_TARGET, turn)
+	var turn: Gen2Turn = _run_move(_battle(), Fixture.TWINEEDLE_MOVE)
 	assert_eq(_of_type(turn.events, Gen2Battle.HIT).size(), 2)
 	assert_true(
 		Gen2Status.has(turn.defender().status, Gen2Status.POISON), "the 256-chance never fails"
@@ -1089,11 +1073,15 @@ func test_psywave_stays_inside_its_own_range() -> void:
 		assert_between(turn.damage, 1, upper - 1, "seed %d" % seed_value)
 
 
-func test_ohko_has_no_ordinary_hit_or_damage_steps() -> void:
+func test_ohko_rolls_its_own_accuracy_and_leaves_the_damage_to_applydamage() -> void:
+	# `OHKOHit` carries no `checkhit`: the command calls it itself, so the three
+	# moves are the one place a locked-on flying target is still out of reach.
+	# It carries no `damagestats` or `damagecalc` either, the damage being $FFFF.
 	var sequence: Array = Gen2MoveEffect.sequence_for(Gen2MoveEffect.OHKO)
 	assert_true(sequence.has(Gen2EffectCommands.OHKO))
 	assert_false(sequence.has(Gen2EffectCommands.CHECK_HIT))
-	assert_false(sequence.has(Gen2EffectCommands.APPLY_DAMAGE))
+	assert_false(sequence.has(Gen2EffectCommands.DAMAGE_CALC))
+	assert_true(sequence.has(Gen2EffectCommands.APPLY_DAMAGE))
 
 
 func test_ohko_fails_outright_against_a_higher_level_target() -> void:
@@ -1123,8 +1111,7 @@ func test_ohko_faints_the_target_outright_when_it_connects() -> void:
 	var battle: Gen2Battle = _battle()
 	battle.player.level = 100
 	battle.enemy.level = 5
-	var turn: Gen2Turn = _turn(battle, Fixture.OHKO_MOVE)
-	Gen2EffectCommands.run(Gen2EffectCommands.OHKO, turn)
+	var turn: Gen2Turn = _run_move(battle, Fixture.OHKO_MOVE)
 	assert_eq(battle.enemy.hp, 0)
 	assert_eq(int(_first(turn.events, Gen2Battle.OHKO)["amount"]), battle.enemy.max_hp())
 	assert_eq(_first(turn.events, Gen2Battle.FAINTED)["side"], Gen2Battle.ENEMY)
@@ -2261,6 +2248,67 @@ func test_triple_kick_is_three_kicks_each_worth_one_more() -> void:
 		assert_eq(turn.damage, one_kick * (kick + 1), "kick %d" % (kick + 1))
 		Gen2EffectCommands.run(Gen2EffectCommands.KICK_COUNTER, turn)
 	assert_eq(turn.battle.battle_anim_param, 3, "and the counter walked all three")
+
+
+func test_triple_kick_lands_one_two_or_three_times() -> void:
+	# `endloop` resamples `and $3` until it is not zero and decrements, so one
+	# kick comes up as often as two and three together.
+	var seen: Dictionary = {}
+	for seed_value: int in range(1, 41):
+		_rng.seed = seed_value
+		var battle: Gen2Battle = _battle()
+		battle.enemy.hp = 30000
+		var turn: Gen2Turn = _run_move(battle, Fixture.TRIPLE_KICK, false, {"accuracy": 255})
+		var kicks: int = _of_type(turn.events, Gen2Battle.HIT).size()
+		assert_between(kicks, 1, 3, "seed %d" % seed_value)
+		assert_eq(int(_first(turn.events, Gen2Battle.HIT_TIMES)["times"]), kicks)
+		seen[kicks] = true
+	assert_gt(seen.size(), 1, "forty seeds should not all give the same count")
+
+
+## `BattleCommand_Stab` is what writes the immunity and `checkimmune` is that
+## write split out, so it can never stand in front of the `stab` it reads. And a
+## list whose `stab` comes first has to check before `checkhit` does, since that
+## step reads the same flag: the other order says "it doesn't affect" twice.
+func test_every_list_checks_immunity_behind_the_stab_that_decides_it() -> void:
+	for effect: int in range(0, 157):
+		var sequence: Array = Gen2MoveEffect.sequence_for(effect)
+		var immune: int = sequence.find(Gen2EffectCommands.CHECK_IMMUNE)
+		if immune < 0:
+			continue
+		var stab: int = sequence.find(Gen2EffectCommands.STAB)
+		var hit: int = sequence.find(Gen2EffectCommands.CHECK_HIT)
+		assert_true(stab >= 0 and stab < immune, "effect %d checks immunity before stab" % effect)
+		assert_false(
+			hit >= 0 and stab < hit and hit < immune,
+			"effect %d rolls between stab and the immunity it wrote" % effect
+		)
+
+
+func test_a_charging_turn_says_its_own_line_and_not_the_ordinary_one() -> void:
+	# `charge` stands between `doturn` and `usedmovetext`, so a charging turn
+	# never reaches "used SOLARBEAM!"; the release turn skips `charge` and does.
+	var battle: Gen2Battle = _battle()
+	var charging: Gen2Turn = _run_move(battle, Fixture.SOLARBEAM)
+	assert_eq(_first(charging.events, Gen2Battle.USED_MOVE), {})
+	assert_eq(int(_first(charging.events, Gen2Battle.CHARGING_UP)["move"]), Fixture.SOLARBEAM)
+
+	var landing: Gen2Turn = _run_move(battle, Fixture.SOLARBEAM, true)
+	assert_eq(int(_first(landing.events, Gen2Battle.USED_MOVE)["move"]), Fixture.SOLARBEAM)
+	assert_eq(_first(landing.events, Gen2Battle.CHARGING_UP), {})
+
+
+func test_a_rampage_rolls_its_length_once_and_not_again_each_turn() -> void:
+	# `checkrampage`'s `.continue_rampage` skips past `rampage`, so the counter
+	# is set on the first turn alone and counts down from there.
+	var battle: Gen2Battle = _battle()
+	battle.enemy.hp = 30000
+	battle.player.moves = [Fixture.THRASH]
+	battle.player.pp = [20]
+	_run_move(battle, Fixture.THRASH, false, {"accuracy": 255})
+	var length: int = battle.player.rampage_turns
+	_run_move(battle, Fixture.THRASH, true, {"accuracy": 255})
+	assert_eq(battle.player.rampage_turns, length - 1)
 
 
 func test_false_swipe_leaves_the_target_standing_on_one() -> void:
@@ -4407,14 +4455,12 @@ func _commands_run(battle: Gen2Battle, move_number: int) -> Array:
 	var turn: Gen2Turn = Gen2Turn.create(
 		battle, Gen2Battle.PLAYER, 0, move_number, _data.move(move_number), []
 	)
-	var ran: Array = []
 	Gen2EffectCommands.run(Gen2EffectCommands.CHECK_STATUS, turn)
-	for command: StringName in Gen2MoveEffect.sequence_for(turn.effect()):
-		if turn.ended:
-			break
-		ran.append(command)
-		Gen2EffectCommands.run(command, turn)
-	return ran
+	Gen2Battle.trace_commands = true
+	battle.command_trace.clear()
+	battle.run_move_effect(turn)
+	Gen2Battle.trace_commands = false
+	return battle.command_trace.duplicate()
 
 
 func test_damage_taken_accumulates_and_saturates_like_the_shared_source_word() -> void:
@@ -4464,6 +4510,7 @@ func test_rage_builds_when_hit_and_multiplies_its_next_attack() -> void:
 	)
 	incoming.damage = 5
 	Gen2EffectCommands.run(Gen2EffectCommands.APPLY_DAMAGE, incoming)
+	Gen2EffectCommands.run(Gen2EffectCommands.BUILD_OPPONENT_RAGE, incoming)
 	assert_eq(battle.player.rage_count, 1)
 	var scaled: Gen2Turn = _turn(battle, Fixture.RAGE)
 	scaled.damage = 7
