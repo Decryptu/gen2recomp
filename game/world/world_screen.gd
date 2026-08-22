@@ -259,11 +259,24 @@ var _interface_owned_pushed: bool = false
 func _ready() -> void:
 	# The map and cell readout and the shortcut legend are scaffolding, and they
 	# are also the two things standing between the player and a full screen on a
-	# phone. Same flag as the shortcuts they describe.
+	# phone. Same flag as the shortcuts they describe. The scene keeps them
+	# hidden, so a release build never draws the placeholder text for the frame
+	# between the node entering the tree and this line.
 	_caption.visible = Gen2DebugKeys.enabled()
 	_hint.visible = Gen2DebugKeys.enabled()
 	_data = _injected_data if _injected_data != null else _selected_runtime_data()
 	_build_world()
+
+
+## Why the overworld could not be built, on the two labels the debug readout
+## otherwise owns. Shown in every build, unlike the readout: a release that hid
+## this left the player a black screen with no reason on it. Every caller
+## returns straight after, so nothing overwrites it with the readout.
+func _show_load_failure(reason: String, detail: String) -> void:
+	_caption.text = reason
+	_hint.text = detail
+	_caption.visible = true
+	_hint.visible = true
 
 
 ## The two scaffolding labels off, for a capture that is diffed against a
@@ -315,8 +328,9 @@ func _resolve_run_seed(save: Gen2SaveData) -> int:
 
 func _build_world() -> void:
 	if _data == null:
-		_caption.text = "No imported cache"
-		_hint.text = "Import a supported cartridge first."
+		_show_load_failure(
+			"No imported cache", "Import a supported cartridge first."
+		)
 		return
 
 	var selected_save: Gen2SaveData = _injected_save if _injected_save != null else _selected_runtime_save()
@@ -326,8 +340,10 @@ func _build_world() -> void:
 	if selected_save != null and selected_save.world != null:
 		_world = Gen2WorldAPI.open_snapshot(_data, selected_save.world)
 		if _world == null:
-			_caption.text = "Saved overworld unavailable"
-			_hint.text = "The saved map or player position is not valid for this cache."
+			_show_load_failure(
+				"Saved overworld unavailable",
+				"The saved map or player position is not valid for this cache.",
+			)
 			return
 		var saved_clock: Dictionary = selected_save.world.world_clock()
 		initial_day = int(saved_clock.get("day", initial_day))
@@ -354,8 +370,10 @@ func _build_world() -> void:
 			_data, map_group, map_number, start_cell, development_state
 		)
 	if _world == null:
-		_caption.text = "Map %d/%d unavailable" % [map_group, map_number]
-		_hint.text = "Choose an imported map and starting cell in the scene settings."
+		_show_load_failure(
+			"Map %d/%d unavailable" % [map_group, map_number],
+			"Choose an imported map and starting cell in the scene settings.",
+		)
 		return
 	_refresh_party_summary()
 	var run_seed: int = _resolve_run_seed(selected_save)
@@ -3273,8 +3291,7 @@ func _walk_start_menu_to(kind: StringName) -> bool:
 
 ## Public screenshot driver for the Pokegear, reached the way a player reaches
 ## it: START and the POKEGEAR row. The picture is `Pokegear_LoadGFX`'s own card
-## list, which is the layer a debug panel used to stand behind; a card opened
-## from it is a full screen of its own and has its own cases.
+## list; a card opened from it is a full screen of its own and has its own cases.
 func preview_pokegear() -> void:
 	if _world == null or _data == null:
 		return
