@@ -138,6 +138,13 @@ func _write_cache(game_id: String = "testworld") -> void:
 	# environment including the cave branch that skips the grass test.
 	collision[10 * 16 + 6] = 0x23  # COLL_ICE
 
+	# An ice run on row 1 for DoPlayerMovement.CheckForced: (2,1) to (5,1) are
+	# ice with a wall at (6,1), so a step east from (1,1) slides the whole run
+	# and bumps the wall. Everything else on the row stays LAND_TILE.
+	for column: int in range(2, 6):
+		collision[1 * 16 + column] = 0x23  # COLL_ICE
+	collision[1 * 16 + 6] = 0x07           # wall the slide ends against
+
 	var source_events: Dictionary = {
 		"bank": 48,
 		"warps": [
@@ -6072,6 +6079,101 @@ func test_advance_forced_movement_moves_without_a_pressed_direction() -> void:
 	assert_true(bool(forced.get("ok", false)), JSON.stringify(forced))
 	assert_eq(world.player_cell, Vector2i(1, 6))
 	assert_true(world.advance_forced_movement().is_empty())
+
+
+## engine/overworld/player_movement.asm's DoPlayerMovement.CheckForced and
+## CheckStandingOnIce. A step onto ice leaves wPlayerTurningDirection set, and
+## the next poll ORs that direction back into wCurInput, so the walk carries on
+## with nothing held.
+func test_a_step_onto_ice_keeps_going_with_nothing_held() -> void:
+	var world: Gen2WorldAPI = _world(Vector2i(1, 1))
+	world.player_facing = world.facing_for_direction(Vector2i.RIGHT)
+	assert_true(bool(world.player_input_move(Vector2i.RIGHT).get("ok", false)))
+	assert_eq(world.player_cell, Vector2i(2, 1))
+	assert_true(world.standing_on_ice())
+	assert_eq(world.effective_input_direction(Vector2i.ZERO), Vector2i.RIGHT)
+
+	# The run to the wall, one poll a cell, all of it with nothing held.
+	for expected: int in [3, 4, 5]:
+		_finish_step(world)
+		var forced: Vector2i = world.effective_input_direction(Vector2i.ZERO)
+		assert_true(bool(world.player_input_move(forced).get("ok", false)))
+		assert_eq(world.player_cell, Vector2i(expected, 1))
+
+	# `.NotMoving` reaches `._WalkInPlace`, which clears the byte, so the wall
+	# ends the slide rather than the player being stuck against it.
+	_finish_step(world)
+	assert_false(bool(world.player_input_move(Vector2i.RIGHT).get("ok", false)))
+	assert_eq(world.player_cell, Vector2i(5, 1))
+	assert_false(world.standing_on_ice())
+	assert_eq(world.effective_input_direction(Vector2i.ZERO), Vector2i.ZERO)
+
+
+## Standing on ice is not enough: CheckStandingOnIce tests the turning direction
+## first, so a player who walked onto the ice and then stopped may press again.
+func test_ice_forces_nothing_once_the_player_has_stood_still() -> void:
+	var world: Gen2WorldAPI = _world(Vector2i(1, 1))
+	world.player_facing = world.facing_for_direction(Vector2i.RIGHT)
+	assert_true(bool(world.player_input_move(Vector2i.RIGHT).get("ok", false)))
+	_finish_step(world)
+	world.note_standing_still()
+	assert_false(world.standing_on_ice())
+	assert_eq(world.effective_input_direction(Vector2i.ZERO), Vector2i.ZERO)
+	assert_eq(world.effective_input_direction(Vector2i.LEFT), Vector2i.LEFT)
+
+
+## `.CheckForced` ORs its bit into wCurInput rather than replacing it, so both
+## directions are set and `.GetAction`'s own test order decides: down, up, left,
+## right. A held DOWN therefore beats a slide running right, and a held UP does
+## not beat a slide running down.
+func test_a_held_direction_beats_the_slide_only_in_getactions_order() -> void:
+	var world: Gen2WorldAPI = _world(Vector2i(1, 1))
+	world.player_facing = world.facing_for_direction(Vector2i.RIGHT)
+	assert_true(bool(world.player_input_move(Vector2i.RIGHT).get("ok", false)))
+	_finish_step(world)
+	assert_eq(world.effective_input_direction(Vector2i.DOWN), Vector2i.DOWN)
+	assert_eq(world.effective_input_direction(Vector2i.UP), Vector2i.UP)
+	assert_eq(world.effective_input_direction(Vector2i.LEFT), Vector2i.LEFT)
+	# Right against right is still right, and nothing held is the slide's own.
+	assert_eq(world.effective_input_direction(Vector2i.RIGHT), Vector2i.RIGHT)
+	assert_eq(world.effective_input_direction(Vector2i.ZERO), Vector2i.RIGHT)
+
+
+## `.CheckTurning`'s first test is wPlayerTurningDirection, so the tap-to-turn
+## only happens from a standstill. The poll right after a step still has the
+## byte set, which is what keeps a walk around a corner from spending a turn.
+func test_a_direction_pressed_straight_after_a_step_steps_rather_than_turns() -> void:
+	var world: Gen2WorldAPI = _world(Vector2i(8, 6))
+	assert_eq(world.player_input_move(Vector2i.LEFT)["kind"], &"turn")
+	_finish_step(world)
+	assert_eq(world.player_input_move(Vector2i.LEFT)["kind"], &"move")
+	_finish_step(world)
+	# Still walking: the byte is set, so UP is a step and not a turn.
+	assert_eq(world.player_input_move(Vector2i.UP)["kind"], &"move")
+	_finish_step(world)
+	# A poll that commits nothing is `.StandInPlace`, and the tap turns again.
+	world.note_standing_still()
+	assert_eq(world.player_input_move(Vector2i.RIGHT)["kind"], &"turn")
+
+
+## `RefreshPlayerSprite` clears the byte, and every warp and connection reaches
+## it, so no walk carries its turning direction into the map it arrives on.
+func test_a_warp_clears_the_turning_direction() -> void:
+	var world: Gen2WorldAPI = _world(Vector2i(5, 6))
+	world.player_facing = world.facing_for_direction(Vector2i.RIGHT)
+	assert_true(bool(world.player_input_move(Vector2i.RIGHT).get("ok", false)))
+	assert_eq(world.player_cell, Vector2i(6, 6))
+	_finish_step(world)
+	assert_true(bool(world.try_warp().get("ok", false)))
+	# The byte is zero on the far side, so a tap turns rather than steps.
+	assert_eq(world.player_input_move(Vector2i.LEFT)["kind"], &"turn")
+
+
+func _finish_step(world: Gen2WorldAPI) -> void:
+	for _pass: int in 64:
+		if not world.player_step_in_progress():
+			return
+		world.advance_player_step_pass()
 
 
 ## ObjectEventTypeArray's `.itemball` copies `db item, quantity` into

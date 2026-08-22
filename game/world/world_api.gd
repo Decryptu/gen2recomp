@@ -168,6 +168,16 @@ var world_hour: int = 6
 var world_minute: int = 0
 var dst_enabled: bool = false
 var movement_mode: StringName = MOVEMENT_WALK
+## `DOWN`, `UP`, `LEFT`, `RIGHT`: the direction constants' own order, which is
+## both `.FinishFacing`'s row order and `.GetAction`'s test order.
+const TURNING_DIRECTION_ORDER: Array[Vector2i] = [
+	Vector2i.DOWN, Vector2i.UP, Vector2i.LEFT, Vector2i.RIGHT,
+]
+## `wPlayerTurningDirection`: 0 while standing, `$80 | direction` once
+## `DoPlayerMovement.DoStep` has committed a step or a turn. Only the input path
+## writes it, which is why a scripted `applymovement` leaves it where it stands.
+## `CheckStandingOnIce`'s `cp $f0` is dead in both pins: nothing writes $F0.
+var _player_turning_direction: int = 0
 ## wPlayerState resolved through ChrisStateSprites, which is the only part of
 ## that state a renderer reads. movement_mode carries the rest; the two surfing
 ## states differ from each other here and nowhere else.
@@ -789,7 +799,7 @@ func _queue_player_step(
 
 func _face_player_toward(direction: Vector2i) -> void:
 	if direction != Vector2i.ZERO:
-		player_facing = _facing_for_direction(direction)
+		player_facing = facing_for_direction(direction)
 
 
 ## The player's half of [method Gen2WorldObject._start_next_queued_step].
@@ -4015,14 +4025,14 @@ func _apply_object_movement(event: Dictionary) -> Array:
 			## the walk ends. `queue_step` drains an entry of no frames itself.
 			var turn: Vector2i = _movement_direction(int(command.get("direction", 0)))
 			object.queue_step(Vector2i.ZERO, 0, false, turn)
-			final_facing = _facing_for_direction(turn)
+			final_facing = facing_for_direction(turn)
 			continue
 		if SCRIPTED_STEP_PASSES.has(kind):
 			var direction: Vector2i = _movement_direction(int(command.get("direction", 0)))
 			var jumping: bool = kind in JUMP_STEP_KINDS
 			var cells: int = 2 if jumping else 1
 			var destination: Vector2i = object.cell + direction * cells
-			final_facing = _facing_for_direction(direction)
+			final_facing = facing_for_direction(direction)
 			if _cell_in_bounds(destination):
 				var vacated: Vector2i = object.cell
 				object.cell = destination
@@ -4335,7 +4345,7 @@ func edge_warp_ready(direction: Vector2i) -> bool:
 		return false
 	## `ld a, [wPlayerDirection] / rrca / rrca` against wWalkingDirection: the
 	## facing has to agree with the press, which a turn from the same cell buys.
-	if _facing_for_direction(direction) != player_facing:
+	if facing_for_direction(direction) != player_facing:
 		return false
 	return not warp_at(player_cell).is_empty()
 
@@ -4519,7 +4529,8 @@ func try_connection(direction: Vector2i) -> Dictionary:
 	## other step does. `_apply_map` clears the step it inherits, so the step is
 	## begun after it; the cell it is drawn walking out of is the new map's own
 	## connection strip, which is the same picture the old map's edge was.
-	player_facing = _facing_for_direction(direction)
+	player_facing = facing_for_direction(direction)
+	_do_step(direction)
 	_start_player_step(direction, _step_frames_for_movement())
 	return {
 		"ok": true,
@@ -4917,7 +4928,7 @@ func _step_follower(follower_index: int, target_cell: Vector2i, exact: bool) -> 
 	# the leader's own command bytes.
 	if follower == null:
 		player_cell = destination
-		player_facing = _facing_for_direction(direction)
+		player_facing = facing_for_direction(direction)
 		_queue_player_step(direction, STEP_PASSES_WALK)
 		return
 	follower.cell = destination
@@ -4954,10 +4965,15 @@ func player_input_move(direction: Vector2i) -> Dictionary:
 	## `.CheckTile` overwrites the pressed direction, so a forced walk is not a
 	## turn however the facing sits; move_result owns that branch.
 	var forced: StringName = StringName(forced_movement().get("kind", &"none"))
-	if forced == &"none":
-		var pressed_facing: int = _facing_for_direction(direction)
+	## `.CheckTurning`'s own first test is `wPlayerTurningDirection`, so a turn is
+	## only ever taken from a standstill. On ice that byte stays set between
+	## steps, which is what makes a slide change direction without spending a
+	## turn on it.
+	if forced == &"none" and _player_turning_direction == 0:
+		var pressed_facing: int = facing_for_direction(direction)
 		if pressed_facing != player_facing:
 			player_facing = pressed_facing
+			_do_step(direction)
 			_start_player_step(Vector2i.ZERO, STEP_PASSES_TURN)
 			return {
 				"ok": true, "kind": &"turn", "facing": player_facing, "cell": player_cell,
@@ -4970,6 +4986,8 @@ func player_input_move(direction: Vector2i) -> Dictionary:
 	## it always is: the cell past a door carpet is the map's own wall or edge.
 	## `.StandInPlace` spends no step, so the warp is taken on the press.
 	if forced == &"none" and edge_warp_ready(direction):
+		## `.CheckWarp` calls `.StandInPlace` before it returns the warp.
+		_stand_in_place()
 		return {
 			"ok": true,
 			"kind": &"edge_warp",
@@ -4983,6 +5001,9 @@ func player_input_move(direction: Vector2i) -> Dictionary:
 
 func move_result(direction: Vector2i) -> Dictionary:
 	if phone_ring_active():
+		## `StopPlayerForEvent`, which is what an event interrupting a walk runs:
+		## it clears the turning direction, so a slide does not resume after it.
+		_stand_in_place()
 		return {"ok": false, "kind": &"move", "reason": &"phone_ring_active"}
 	if abs(direction.x) + abs(direction.y) != 1:
 		return {"ok": false, "kind": &"move", "reason": &"invalid_direction"}
@@ -5008,6 +5029,8 @@ func move_result(direction: Vector2i) -> Dictionary:
 			## `CountStep`, so the step that leaves a map costs no repel step;
 			## try_connection() owns the facing and the step's own frames.
 			return transition
+		## `.NotMoving`, which reaches `._WalkInPlace`.
+		_stand_in_place()
 		return {"ok": false, "kind": &"move", "reason": &"map_edge"}
 	if forced_walk:
 		return _forced_step(direction, destination)
@@ -5023,6 +5046,7 @@ func move_result(direction: Vector2i) -> Dictionary:
 			return hop
 		if not pushed.is_empty():
 			return pushed
+		_stand_in_place()
 		return {"ok": false, "kind": &"move", "reason": &"blocked"}
 	var from_map: Vector2i = map_id()
 	var from_cell: Vector2i = player_cell
@@ -5039,9 +5063,10 @@ func move_result(direction: Vector2i) -> Dictionary:
 	elif movement_mode == MOVEMENT_SURF:
 		kind = &"water_move"
 	player_cell = destination
-	player_facing = _facing_for_direction(direction)
+	player_facing = facing_for_direction(direction)
 	state.count_step()
 	_advance_followers(-1, from_cell)
+	_do_step(direction)
 	_start_player_step(direction, _step_frames_for_movement())
 	return {
 		"ok": true,
@@ -5051,6 +5076,49 @@ func move_result(direction: Vector2i) -> Dictionary:
 		"to_map": from_map,
 		"to_cell": player_cell,
 	}
+
+
+## `.DoStep`'s own tail: the walking direction is stored as `$80 | direction`
+## for `.CheckForced` to read back next poll. Every branch of `DoPlayerMovement`
+## that commits a step or a turn passes through here; nothing else does.
+func _do_step(direction: Vector2i) -> void:
+	_player_turning_direction = 0x80 | TURNING_DIRECTION_ORDER.find(direction)
+
+
+## `.StandInPlace` and `._WalkInPlace`, which differ only in the movement byte
+## they queue and both clear the turning direction. Reached by every poll that
+## commits nothing, so on any tile but ice the byte is zero between steps.
+func _stand_in_place() -> void:
+	_player_turning_direction = 0
+
+
+## A poll of `DoPlayerMovement` that committed nothing: `.Standing` reaches
+## `.StandInPlace`. The screen's own frame pump is where a poll with nothing
+## held happens, since a press is what reaches [method player_input_move].
+func note_standing_still() -> void:
+	_stand_in_place()
+
+
+## `CheckStandingOnIce`. `PLAYER_SKATE` is deliberately absent: no script in
+## either pin sets it, so the collision code is the whole test.
+func standing_on_ice() -> bool:
+	if _player_turning_direction == 0 or current_map == null:
+		return false
+	return Gen2WorldCollision.is_ice(collision_code_at(player_cell))
+
+
+## `.CheckForced`, then `.GetAction`. The forced bit is OR'd into `wCurInput`
+## rather than replacing it, so a held direction and the slide's own can both be
+## set and `.GetAction`'s own test order decides between them: down, up, left,
+## right. [param held] is Vector2i.ZERO when nothing is held.
+func effective_input_direction(held: Vector2i) -> Vector2i:
+	if not standing_on_ice():
+		return held
+	var forced: Vector2i = TURNING_DIRECTION_ORDER[_player_turning_direction & 3]
+	for candidate: Vector2i in TURNING_DIRECTION_ORDER:
+		if candidate == held or candidate == forced:
+			return candidate
+	return held
 
 
 ## .CheckTile for the cell the player stands on: whether the tile overrides input,
@@ -5081,7 +5149,7 @@ func advance_forced_movement() -> Dictionary:
 ## player who surfs onto a whirlpool therefore cannot walk off it, which is the
 ## cartridge's own behavior and not a gap here.
 func _forced_turn() -> Dictionary:
-	player_facing = _facing_for_direction(-_direction_for_facing(player_facing))
+	player_facing = facing_for_direction(-_direction_for_facing(player_facing))
 	return {
 		"ok": true,
 		"kind": &"forced_turn",
@@ -5099,9 +5167,10 @@ func _forced_step(direction: Vector2i, destination: Vector2i) -> Dictionary:
 	var from_map: Vector2i = map_id()
 	var from_cell: Vector2i = player_cell
 	player_cell = destination
-	player_facing = _facing_for_direction(direction)
+	player_facing = facing_for_direction(direction)
 	state.count_step()
 	_advance_followers(-1, from_cell)
+	_do_step(direction)
 	_start_player_step(direction, STEP_PASSES_WALK)
 	return {
 		"ok": true,
@@ -5207,9 +5276,10 @@ func _try_ledge_hop(direction: Vector2i) -> Dictionary:
 	var from_map: Vector2i = map_id()
 	var from_cell: Vector2i = player_cell
 	player_cell = landing
-	player_facing = _facing_for_direction(direction)
+	player_facing = facing_for_direction(direction)
 	state.count_step()
 	_advance_followers(-1, from_cell)
+	_do_step(direction)
 	_start_player_step(direction * 2, STEP_PASSES_HOP, true)
 	return {
 		"ok": true,
@@ -5260,7 +5330,7 @@ func _direction_for_facing(facing: int) -> Vector2i:
 	return Vector2i.DOWN
 
 
-func _facing_for_direction(direction: Vector2i) -> int:
+func facing_for_direction(direction: Vector2i) -> int:
 	match direction:
 		Vector2i.UP:
 			return Gen2WorldSprite.FACING_UP
@@ -5327,6 +5397,9 @@ func _apply_map(
 	from_warp: int = 0,
 ) -> void:
 	_record_escape_points(target_map, from_warp)
+	## `RefreshPlayerSprite` clears `wPlayerTurningDirection`, and every warp and
+	## connection reaches it, so a slide never survives a map change.
+	_stand_in_place()
 	_block_overrides.clear()
 	_pending_cut.clear()
 	_pending_surf.clear()

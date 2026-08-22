@@ -224,7 +224,7 @@ func _verify_warp_carpets(game_id: StringName, data: GameData) -> void:
 				world != null, "%s: map %d/%d did not open." % [game_id, map.group, map.number]
 			):
 				continue
-			world.player_facing = world._facing_for_direction(direction)
+			world.player_facing = world.facing_for_direction(direction)
 			_r.check(
 				not world.warp_pending(cell),
 				"%s: map %d/%d %s warps on the step that lands on it." % [
