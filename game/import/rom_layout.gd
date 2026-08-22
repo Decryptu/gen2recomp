@@ -550,6 +550,8 @@ const FONT_FIRST_CODE: int = 0x80
 ## in every supported cartridge, and they are the runs [Gen2Text] builds
 ## arithmetically rather than listing.
 const FONT_INK_RUNS: Array = [[0x80, 0x99], [0xA0, 0xB9], [0xF6, 0xFF]]
+## "0"'s own character code, which the digits run up from.
+const FONT_DIGIT_ZERO_CODE: int = 0xF6
 
 ## Codes with no character in [Gen2Text], whose tiles are blank. They sit between
 ## the runs above, which is what makes the pair a layout check: an offset out by
@@ -1206,6 +1208,46 @@ const SLOTS_TEXT_RUNS: Array = [
 	["slots_bet_text", SLOTS_BET_TEXT_ORDER],
 	["slots_play_again_text", SLOTS_PLAY_AGAIN_TEXT_ORDER],
 	["slots_result_text", SLOTS_RESULT_TEXT_ORDER],
+]
+
+
+## `_CardFlip`'s own art run (engine/games/card_flip.asm), as (cache name, kind,
+## tiles). `raw` is an uncompressed strip of that many tiles, `lz` a compressed
+## one. The order is the routine's own INCBIN order and the walk is what pins
+## it: `.palettes` sits nine palettes in front of `CardFlipLZ03` and
+## `CardFlipTilemap` behind `CardFlipLZ02`, so five entries landing on their own
+## sizes puts the walk on the tilemap's own independently found address.
+##
+## `off` and `on` are the two light bulbs `_CardFlip` copies over the font's own
+## "♂" and "♀", which is why `CARD_FLIP_LIGHT_OFF_TILE` is a character code.
+const CARD_FLIP_SECTION: Array[Array] = [
+	["card_flip_3", "lz", 7],
+	["card_flip_off", "raw", 1],
+	["card_flip_on", "raw", 1],
+	["card_flip_1", "lz", 62],
+	["card_flip_2", "lz", 52],
+]
+## `CardFlipTilemap`, which `CardFlip_InitTilemap` places at `hlcoord 9, 0` as
+## `lb bc, 12, 11`: twelve rows of eleven columns.
+const CARD_FLIP_TILEMAP_ROWS: int = 12
+const CARD_FLIP_TILEMAP_COLUMNS: int = 11
+const CARD_FLIP_TILEMAP_AT_COLUMN: int = 9
+const CARD_FLIP_TILEMAP_BYTES: int = CARD_FLIP_TILEMAP_ROWS * CARD_FLIP_TILEMAP_COLUMNS
+## `gfx/card_flip/card_flip.pal`, the nine `CardFlip_InitAttrPals` copies into
+## `wBGPals1`. Only the first five are ever selected by an attrmap cell; the
+## three duplicates and the red one behind them are copied all the same.
+const CARD_FLIP_PALETTES: int = 9
+## `CARDFLIP_LIGHT_OFF` and `CARDFLIP_LIGHT_ON`, which are the character codes
+## for "\u2642" and "\u2640": `_CardFlip` copies its two bulbs over those two
+## glyphs, so a lamp is a font cell and not one of the sheets.
+const CARD_FLIP_LIGHT_OFF_TILE: int = 0xEF
+const CARD_FLIP_LIGHT_ON_TILE: int = 0xF5
+## `_CardFlipPlayWithThreeCoinsText` and the seven behind it, one contiguous run
+## in `data/text/common_3.asm`. The stubs inside the routine are scattered, so
+## the run itself is what is pinned and walked.
+const CARD_FLIP_TEXT_ORDER: Array[String] = [
+	"play_with_three_coins", "not_enough_coins", "choose_a_card", "place_your_bet",
+	"play_again", "shuffled", "yeah", "darn",
 ]
 
 
@@ -2064,6 +2106,9 @@ const GOLD_SILVER: Dictionary = {
 	"slots_bet_text": 0x93630,
 	"slots_play_again_text": 0x93683,
 	"slots_result_text": 0x93730,
+	# `_CardFlip`'s run at Gold and Silver's own addresses, the same on both.
+	"card_flip": {"section": 0xE14E8, "palettes": 0xE14A0},
+	"card_flip_text": 0x198313,
 	# `GoldSilverIntro`'s art section. `Intro_WaterGFX1` is the only pinned
 	# address in it: the section is contiguous and sixteen-byte aligned, so the
 	# walk in `GS_INTRO_SECTION` reaches the other ten, and all eleven reproduce
@@ -2539,6 +2584,12 @@ const CRYSTAL: Dictionary = {
 	"slots_bet_text": 0x930C7,
 	"slots_play_again_text": 0x9311A,
 	"slots_result_text": 0x931DB,
+	# `_CardFlip`'s art run and the nine palettes `CardFlip_InitAttrPals` copies.
+	# `palettes` is `.palettes`, which `CARD_FLIP_SECTION` walks the whole run
+	# from; `card_flip_text` is `_CardFlipPlayWithThreeCoinsText`, the first of
+	# eight texts laid out together in `data/text/common_3.asm`.
+	"card_flip": {"section": 0xE0CDB, "palettes": 0xE0C93},
+	"card_flip_text": 0x1C5793,
 	# Crystal ships no `GoldSilverIntro`. Nested the way trainer_card is, so the
 	# -1s stay out of the flat offset checks.
 	"gs_intro": {

@@ -244,6 +244,11 @@ const MONEY_WINDOW_KIND_OF: Dictionary = {
 ## `special_index`'s split, and the machine's own `wCoins` writes are the coins
 ## the request answers with.
 const SPECIAL_SLOT_MACHINE: int = 42
+## `CardFlip`, the Game Corner's other machine. Both Game Corners reach it and
+## neither puts a `setval` in front of it: the routine reads no `wScriptVar` and
+## writes none, so the request carries the coins alone. 43 on both profiles,
+## being under `special_index`'s split.
+const SPECIAL_CARD_FLIP: int = 43
 const SPECIAL_UNOWN_PUZZLE: int = 41
 const SPECIAL_DISPLAY_UNOWN_WORDS: int = 135
 const SPECIAL_RANDOM_UNSEEN_WILD_MON: int = 91
@@ -897,10 +902,11 @@ func complete_runtime_request(result: Dictionary) -> Dictionary:
 		})
 		_pending = {}
 		return advance()
-	if kind == &"slot_machine_requested":
-		## `_SlotMachine` writes `wCoins` itself, over and over, so what comes
-		## back is the balance rather than a delta. Nothing reads `wScriptVar`
-		## after it: both maps `closetext` and `end`.
+	if kind == &"slot_machine_requested" or kind == &"card_flip_requested":
+		## `_SlotMachine` and `_CardFlip` both write `wCoins` themselves, over
+		## and over, so what comes back is the balance rather than a delta.
+		## Nothing reads `wScriptVar` after either: every map `closetext` and
+		## `end`.
 		if not bool(result.get("ok", false)):
 			return _fail(
 				StringName(result.get("reason", &"slot_machine_failed")), result
@@ -2909,6 +2915,11 @@ func _execute_special(special: int) -> Dictionary:
 				## `Slots_InitBias`' own `ld a, [wScriptVar] / and a`, which is
 				## the only thing the operand decides.
 				"lucky": _script_value != 0,
+				"coins": _coins_value(),
+			})
+		SPECIAL_CARD_FLIP:
+			return _stage_runtime_request(&"card_flip_requested", {
+				"special": special,
 				"coins": _coins_value(),
 			})
 		SPECIAL_UNOWN_PUZZLE:

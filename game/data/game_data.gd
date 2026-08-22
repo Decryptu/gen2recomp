@@ -77,6 +77,8 @@ var _intro_movie: Dictionary = {}
 var _unown_puzzle: Dictionary = {}
 var _slots: Dictionary = {}
 var _slots_text: Dictionary = {}
+var _card_flip: Dictionary = {}
+var _card_flip_text: Dictionary = {}
 var _gs_intro: Dictionary = {}
 var _menu_text: Dictionary = {}
 var _mart_text: Dictionary = {}
@@ -193,6 +195,10 @@ static func open_directory(path: String) -> GameData:
 	data._slots = slots if slots is Dictionary else {}
 	var raw_slots_text: Variant = manifest.get("slots_text", {})
 	data._slots_text = raw_slots_text if raw_slots_text is Dictionary else {}
+	var card_flip: Variant = manifest.get("card_flip", {})
+	data._card_flip = card_flip if card_flip is Dictionary else {}
+	var raw_card_flip_text: Variant = manifest.get("card_flip_text", {})
+	data._card_flip_text = raw_card_flip_text if raw_card_flip_text is Dictionary else {}
 	var gs_intro: Variant = manifest.get("gs_intro", {})
 	data._gs_intro = gs_intro if gs_intro is Dictionary else {}
 	var raw_menu_text: Variant = manifest.get("menu_text", {})
@@ -1799,6 +1805,49 @@ func slots_palette(index: int) -> PackedColorArray:
 ## `RomLayout.SLOTS_TEXT_RUNS` gives it.
 func slots_text(name: String) -> String:
 	return String(_slots_text.get(name, ""))
+
+
+## Whether the cache carries `_CardFlip`'s art, which is what the special is
+## refused on rather than opening an empty table.
+func has_card_flip() -> bool:
+	return not (_card_flip.get("palettes", []) as Array).is_empty()
+
+
+## One of `_CardFlip`'s five tile strips, by the name
+## `RomLayout.CARD_FLIP_SECTION` gives it.
+func card_flip_indices(name: String) -> PackedByteArray:
+	return tile_indices(name)
+
+
+## `CardFlipTilemap`, the eleven-wide picture `CardFlip_InitTilemap` places at
+## column nine.
+func card_flip_tilemap() -> PackedByteArray:
+	var out := PackedByteArray()
+	for code: Variant in _card_flip.get("tilemap", []) as Array:
+		out.append(int(code))
+	return out
+
+
+## One of `gfx/card_flip/card_flip.pal`'s nine, all of them background palettes:
+## `CardFlip_InitAttrPals` copies the run into `wBGPals1` and writes no object
+## palette at all, which is why every sprite here is drawn through `wOBP0`.
+func card_flip_palette(index: int) -> PackedColorArray:
+	var stored: Variant = _card_flip.get("palettes", [])
+	var colors := PackedColorArray()
+	if not stored is Array or index < 0:
+		return colors
+	var first: int = index * RomLayout.PREDEF_PALETTE_COLORS
+	if first + RomLayout.PREDEF_PALETTE_COLORS > (stored as Array).size():
+		return colors
+	for offset: int in RomLayout.PREDEF_PALETTE_COLORS:
+		colors.append(Gen2Palette.from_packed(int((stored as Array)[first + offset])))
+	return colors
+
+
+## One of the card flip's eight boxes, by the name
+## `RomLayout.CARD_FLIP_TEXT_ORDER` gives it.
+func card_flip_text(name: String) -> String:
+	return String(_card_flip_text.get(name, ""))
 
 
 ## `CreditsPalettes` for one scene: three palettes on Crystal (the banner, the

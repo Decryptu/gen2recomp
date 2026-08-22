@@ -99,6 +99,7 @@ static func build(game_id: StringName = GAME_ID) -> GameData:
 	_write_unown_words(manifest)
 	_write_unown_puzzle(directory, manifest)
 	_write_slots(directory, manifest)
+	_write_card_flip(directory, manifest)
 	_write_credits(directory, manifest, crystal_commands)
 	_write_name_input_chars(directory)
 	_write_intro_text(directory, crystal_commands)
@@ -603,6 +604,50 @@ static func _write_slots(directory: String, manifest: Dictionary) -> void:
 		"ran_out_of_coins": "Darn… Ran out of\ncoins…",
 		"play_again": "Play again?", "lined_up": "lined up!\nWon @ coins!",
 		"darn": "Darn!",
+	}
+
+
+## `_CardFlip`'s five strips, its board and its nine palettes, written the way
+## the slot machine's are: the strips are runs of the right length rather than
+## the cartridge's picture, and the board is the cartridge's own tilemap shape,
+## since the lamp column is what the screen writes into.
+static func _write_card_flip(directory: String, manifest: Dictionary) -> void:
+	var sheets: Dictionary = manifest.get("tiles", {})
+	var fill: int = 1
+	for row: Array in RomLayout.CARD_FLIP_SECTION:
+		var name: String = String(row[0])
+		var tile_count: int = int(row[2])
+		var indices: PackedByteArray = PackedByteArray()
+		indices.resize(tile_count * Gen2Tiles.TILE_PIXELS)
+		indices.fill(fill % 4)
+		fill += 1
+		RomCache.write_indices(RomCache.tile_path(directory, name), indices)
+		sheets[name] = {
+			"width": tile_count * Gen2Tiles.TILE_WIDTH,
+			"height": Gen2Tiles.TILE_HEIGHT,
+			"tiles": tile_count,
+			"first_code": 0,
+			"bits": 2,
+		}
+	manifest["tiles"] = sheets
+	var board: Array = []
+	for row: int in RomLayout.CARD_FLIP_TILEMAP_ROWS:
+		for column: int in RomLayout.CARD_FLIP_TILEMAP_COLUMNS:
+			board.append(
+				RomLayout.CARD_FLIP_LIGHT_OFF_TILE if column == 0 else column + row
+			)
+	var palettes: Array = []
+	for slot: int in RomLayout.CARD_FLIP_PALETTES * RomLayout.PREDEF_PALETTE_COLORS:
+		palettes.append([0x7FFF, 0x2E98, 0x2DB2, 0x0000][slot % 4])
+	manifest["card_flip"] = {"tilemap": board, "palettes": palettes}
+	manifest["card_flip_text"] = {
+		"play_with_three_coins": "Play with three\ncoins?",
+		"not_enough_coins": "Not enough coins…",
+		"choose_a_card": "Choose a card.",
+		"place_your_bet": "Place your bet.",
+		"play_again": "Want to play\nagain?",
+		"shuffled": "The cards have\nbeen shuffled.",
+		"yeah": "Yeah!", "darn": "Darn…",
 	}
 
 
