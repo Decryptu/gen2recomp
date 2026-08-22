@@ -35,6 +35,10 @@ Inspired by [gen1recomp](https://github.com/bryanthaboi/gen1recomp).
 >   service overlay (marts, Kurt's errand, phone dispatch, music and cries).
 >   Everything the overworld times is a hardware frame count spent by one clock,
 >   so a seed, an input log and a frame number reproduce a walk exactly.
+> - **A screen that fills the window.** The map is drawn past the Game Boy's
+>   160x144 to whatever shape the window is, with the connected maps around it
+>   drawn seamlessly and no black bars. Zoom out far enough and a region is on
+>   screen at once. See [Screen fill](#screen-fill).
 > - **Saves.** Three slots, `.sav` import, and a 14-box PC with 20 slots a box.
 >   Every party transaction commits through a validated candidate save.
 > - **Mods.** A mod under `user://mods/` can add or rebalance content, register
@@ -174,6 +178,30 @@ arrange them separately for upright and sideways. Three quick taps brings them
 back. The screen fills whatever window or device it is given, in either
 orientation.
 
+### Screen fill
+
+A window is not the Game Boy's 10:9, and the black bars around a framed screen
+are room the overworld can draw into. Settings > Application > Screen offers
+two answers:
+
+| Screen | What it draws |
+|---|---|
+| Fill (default) | The map covers the whole window at any shape, and the maps connected to this one are drawn around it |
+| Framed | The 160x144 screen at a whole scale, centred, with black bars, as the hardware had |
+
+Everything laid out on the screen -- text boxes, menus, the start menu, the
+cursor -- stays inside the 160x144 rectangle in the middle of it, exactly where
+the cartridge put it. Only the surround grows.
+
+While walking, `+` and `-` zoom, `0` returns to the fitting scale, and the mouse
+wheel does the same. Zooming out past one screen pixel per map pixel is a survey
+of the region: the connection graph places the maps around this one and the map
+header's own border block fills what no map covers. The maps around you are a
+picture. Their people stand where their map puts them and nothing else about
+them runs: no scripts, no walking, no wild encounters, no collision. Only the map
+you are on is live, exactly as on the cartridge, where a connected map is three
+blocks of scenery copied into the buffer and nothing more.
+
 Development shortcuts are debug-build only, along with the map and cell readout:
 
 | Scene | Keys |
@@ -182,6 +210,9 @@ Development shortcuts are debug-build only, along with the map and cell readout:
 | `game/render/text_viewer.tscn` | Space advances, `F` cycles borders, `C` shows every glyph |
 | `game/battle/battle_screen.tscn` | `T` turn, A advances, `Y` switch, `R` run, `[`/`]` matchup, `G`/`H` damage; in wild battles B opens the ball selector |
 | `game/world/world_screen.tscn` | `F` fishes with an owned rod, `1`/`2`/`3` pick a rod, `P` opens the phone, `V` cycles views, F5 writes a snapshot |
+
+Zoom is not one of these: `+`, `-` and `0` are player controls and work in a
+release export.
 
 A release export offers the eight buttons and nothing else. The method behind
 each shortcut stays public, which is how `tools/preview_*.gd` drives them.

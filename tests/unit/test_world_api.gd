@@ -7492,3 +7492,98 @@ func test_take_hidden_item_refuses_while_a_script_is_running() -> void:
 	assert_eq(world.interact().size(), 1, "The faced record is waiting on its box.")
 	assert_true(world.take_hidden_item(Vector2i(2, 5)).is_empty())
 	assert_false(world.event_flag_active(35))
+
+
+## SCREEN FILL: the connection graph places whole maps around this one, in the
+## same block coordinates `FillMapConnections` writes its strip in.
+func test_the_connection_graph_places_the_neighbour_at_its_own_edge() -> void:
+	var world: Gen2WorldAPI = _world()
+	var placements: Dictionary = world.map_placements()
+	assert_eq(placements.size(), 1)
+	assert_true(placements.has("1:2"))
+	assert_eq(
+		placements["1:2"]["origin"],
+		Vector2i(world.current_map.width_blocks, 0),
+		"an east connection starts where this map ends",
+	)
+	assert_eq((placements["1:2"]["map"] as Gen2WorldMap).number, 2)
+
+
+## Inside `wOverworldMapBlocks` the expansion is the cartridge's own fold, so a
+## 20x18 screen sees exactly what it always saw.
+func test_expanded_blocks_are_the_hardware_buffer_inside_it() -> void:
+	var world: Gen2WorldAPI = _world()
+	var map: Gen2WorldMap = world.current_map
+	for block_y: int in range(-Gen2WorldAPI.BUFFER_BLOCKS, map.height_blocks + Gen2WorldAPI.BUFFER_BLOCKS):
+		for block_x: int in range(-Gen2WorldAPI.BUFFER_BLOCKS, map.width_blocks + Gen2WorldAPI.BUFFER_BLOCKS):
+			assert_eq(
+				world.expanded_block_at(block_x, block_y),
+				world.drawn_block_at(block_x, block_y),
+				"(%d,%d)" % [block_x, block_y],
+			)
+
+
+## Past it, the neighbour answers with its own blocks rather than the border
+## block the cartridge's buffer holds there.
+func test_expanded_blocks_read_the_placed_neighbour_past_the_buffer() -> void:
+	var world: Gen2WorldAPI = _world()
+	var map: Gen2WorldMap = world.current_map
+	var neighbour: Gen2WorldMap = world.data.world_map(1, 2)
+	var past: int = map.width_blocks + Gen2WorldAPI.BUFFER_BLOCKS
+	assert_lt(past, map.width_blocks + neighbour.width_blocks, "the strip stops short of the map")
+	for block_x: int in range(past, map.width_blocks + neighbour.width_blocks):
+		assert_eq(
+			world.expanded_block_at(block_x, 2),
+			Gen2WorldAPI.drawn_block_for(world.data, neighbour, block_x - map.width_blocks, 2),
+			"block %d" % block_x,
+		)
+	assert_eq(
+		world.expanded_block_at(map.width_blocks + neighbour.width_blocks + 4, 2),
+		map.border_block,
+		"past every placed map the border block fills the void",
+	)
+
+
+## A wider view is the same screen with more around it: the player keeps the
+## place PLAYER_VIEW_CELL puts him in and only the surround grows.
+func test_a_wider_view_keeps_the_player_where_the_hardware_put_him() -> void:
+	var world: Gen2WorldAPI = _world()
+	var framed: Vector2 = world.view_origin_pixels()
+	assert_eq(framed, world.visible_origin_cells() * float(Gen2WorldAPI.CELL_PIXELS))
+	world.view_pixels = Gen2WorldAPI.VIEW_PIXELS + Vector2i(320, 64)
+	assert_eq(world.view_origin_pixels(), framed - Vector2(160, 32))
+	assert_eq(
+		Vector2(world.player_position_cells()) * float(Gen2WorldAPI.CELL_PIXELS)
+			- world.view_origin_pixels(),
+		Vector2(world.player_pixel_position()) + Vector2(160, 32),
+		"the player moved by exactly half the extra surround",
+	)
+	assert_eq(
+		world.player_view_pixel(), world.player_pixel_position() + Vector2i(160, 32),
+		"and the sprite is drawn there",
+	)
+
+
+## The people on a connected map are drawn and nothing else: they are not in the
+## object table, so no collision, script or interaction can reach them.
+func test_connected_map_objects_are_drawn_but_not_in_the_object_table() -> void:
+	var data: GameData = GameData.open_directory(_directory)
+	data.world_map(1, 2).events["objects"] = [{
+		"sprite": Gen2WorldAPI.SPRITE_CHRIS, "x": 5, "y": 4, "movement": 0,
+		"x_radius": 0, "y_radius": 0, "hour_1": -1, "hour_2": -1, "palette": 0,
+		"object_type": 0, "sight_range": 0, "script": 0, "event_flag": 0,
+	}]
+	var world := Gen2WorldAPI.open(data, 1, 1, Vector2i(8, 6))
+	var neighbours: Array = world.connected_map_objects()
+	assert_eq(neighbours.size(), 1)
+	var entry: Dictionary = neighbours[0]
+	var object: Gen2WorldObject = entry["object"]
+	assert_eq(
+		entry["offset"],
+		Vector2i(world.current_map.width_blocks * RomLayout.MAP_BLOCK_CELL_WIDTH, 0),
+	)
+	assert_false(world.objects.has(object), "not one of this map's own")
+	assert_null(
+		world.object_at(object.cell + (entry["offset"] as Vector2i)),
+		"and standing on nothing this map can walk into",
+	)

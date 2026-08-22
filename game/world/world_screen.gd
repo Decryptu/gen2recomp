@@ -361,7 +361,9 @@ func _build_world() -> void:
 	if not rods.is_empty() and not rods.has(_selected_rod):
 		_selected_rod = rods[0]
 	_animation.configure(_world, _render_time_of_day())
+	_apply_screen_fill()
 	_build_renderer()
+	_screen.view_size_changed.connect(_on_view_size_changed)
 	_screen_base_position = _screen.position
 	_audio_player = AUDIO_PLAYER_SCRIPT.new()
 	_audio_player.name = "AudioPlayer"
@@ -474,6 +476,60 @@ func _render_time_of_day() -> int:
 	return _world.map_time_of_day()
 
 
+## SCREEN FILL: the overworld is the one screen with more to show than the
+## hardware framed, so it is the one screen that grows into the window. Every
+## menu, box and cursor over it stays inside the 160x144 rectangle
+## [Gen2Screen] centres in the buffer.
+func _apply_screen_fill() -> void:
+	var options: Gen2Options = Gen2OptionsStore.current()
+	## The bars a framed screen leaves are this scene's own background, so a mask
+	## that stands in for them is painted in the same colour.
+	var background := get_node_or_null(^"Background") as Panel
+	var style := background.get_theme_stylebox(&"panel") as StyleBoxFlat \
+		if background != null else null
+	if style != null:
+		_screen.letterbox_color = style.bg_color
+	_screen.expanded = options.screen_fill
+	if _screen.expanded:
+		_screen.zoom_step = options.zoom_step
+	_on_view_size_changed(_screen.view_size())
+	_apply_interface_mask()
+
+
+## A screen that hides the map takes the whole picture with it: it is laid out
+## in 160x144 and has nothing to put in a wider buffer, so the surround becomes
+## the letterbox rather than the map behind it. The start menu is not one of
+## these -- it is a box the map is still visible around, as on the cartridge --
+## and neither is a map fade, which fades the whole picture.
+##
+## `DoBattleTransition` is: it writes twenty by eighteen screen cells and
+## nothing wider, so a wedge pattern in a filled window would stop where the
+## cartridge's screen ended. It closes the surround for the battle that follows
+## it, which is masked for the same reason.
+func _apply_interface_mask() -> void:
+	_screen.interface_masked = _screen.expanded and (
+		_battle_transition != null
+		or _battle_host != null or _service_host != null or _party_host != null
+		or _hall_of_fame_host != null or _trainer_card_host != null
+		or _pokedex_host != null or _credits_host != null
+		or _evolution_host != null or _hatch_host != null
+		or _name_rater_host != null or _move_deleter_host != null
+		or _move_tutor_host != null or _day_care_host != null
+		or _unown_puzzle_host != null or _slot_machine_host != null
+		or _card_flip_host != null
+	)
+
+
+func _on_view_size_changed(size_pixels: Vector2i) -> void:
+	if _world == null:
+		return
+	if _world.view_pixels == size_pixels:
+		return
+	_world.view_pixels = size_pixels
+	if _renderer != null and _renderer.has_method(&"refresh"):
+		_renderer.refresh()
+
+
 func _on_native_size_changed(size_pixels: Vector2i) -> void:
 	if _renderer != null \
 		and _renderer.has_method(Gen2ModHost.RENDERER_RESIZE_METHOD):
@@ -522,6 +578,10 @@ func _process(delta: float) -> void:
 		_frame_elapsed -= Gen2WorldAnimation.FRAME_SECONDS
 		advance_frame()
 	_advance_day_cycle(delta)
+	## Every drawn frame rather than every hardware frame: above sixty a drawn
+	## frame can carry no hardware one, and a screen opened by the press that
+	## drawn frame served would show the map around it until the next.
+	_apply_interface_mask()
 
 
 ## Spends [param count] hardware frames. Public beside [method advance_frame] so
@@ -567,6 +627,9 @@ func advance_frame() -> void:
 	## `DoBattleTransition`'s own `.loop`, which owns every frame between the
 	## encounter and the battle screen.
 	_advance_battle_transition()
+	## Here as well as in [method _process]: a driver that spends frames without
+	## a clock -- a test, a preview, a replay -- never reaches the other one.
+	_apply_interface_mask()
 	## `RefreshMapSprites` runs inside the setup script and `PlaceMapNameSign`
 	## with the rest of the map's background, so a sign raised by the load this
 	## frame carried is spent from the next one.
@@ -899,6 +962,9 @@ func _unhandled_input(event: InputEvent) -> void:
 		_credits_host.release_button(released)
 		accept_event()
 		return
+	if _handle_zoom(event):
+		accept_event()
+		return
 	if event.is_pressed() and _handle_debug_key(event):
 		accept_event()
 		return
@@ -1118,6 +1184,49 @@ func _complete_unattended_request() -> Array:
 		_script_prompt = "Host unavailable: %s" % String(settled.get("reason", "unknown"))
 		return []
 	return settled.get("results", [])
+
+
+## Zoom, on the keys every map program uses for it and on the wheel.
+##
+## Only while the map itself has the screen: a text box, a menu or a script is
+## laid out against the 160x144 rectangle and moving the surface under one is
+## the player losing their place. A framed screen refuses the step, since there
+## is no more world to show and it would only shrink the picture
+## ([method Gen2Screen.step_zoom]).
+func _handle_zoom(event: InputEvent) -> bool:
+	if not _renderer_input_free() or not _screen.expanded:
+		return false
+	var delta: int = 0
+	var key := event as InputEventKey
+	if key != null and key.pressed and not key.echo:
+		match key.keycode:
+			KEY_EQUAL, KEY_PLUS, KEY_KP_ADD:
+				delta = 1
+			KEY_MINUS, KEY_KP_SUBTRACT:
+				delta = -1
+			KEY_0, KEY_KP_0:
+				_screen.reset_zoom()
+				_persist_zoom()
+				return true
+	var wheel := event as InputEventMouseButton
+	if wheel != null and wheel.pressed:
+		if wheel.button_index == MOUSE_BUTTON_WHEEL_UP:
+			delta = 1
+		elif wheel.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+			delta = -1
+	if delta == 0:
+		return false
+	_screen.step_zoom(delta)
+	_persist_zoom()
+	return true
+
+
+func _persist_zoom() -> void:
+	var options: Gen2Options = Gen2OptionsStore.current()
+	if options.zoom_step == _screen.zoom_step:
+		return
+	options.zoom_step = _screen.zoom_step
+	Gen2OptionsStore.save(options)
 
 
 ## Scaffolding that reaches parts of the world no cartridge control does: the
@@ -3361,6 +3470,7 @@ func preview_battle_transition(frames: int, trainer: bool = false) -> void:
 		false, false, trainer, false, _encounter_random,
 		_data.battle_anim_sine() if _data != null else PackedByteArray()
 	)
+	_apply_interface_mask()
 	_apply_battle_transition()
 	for _frame: int in maxi(frames, 0):
 		if _battle_transition == null:

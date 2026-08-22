@@ -21,6 +21,11 @@ extends SceneTree
 ##
 ##   ... live effects 4 4 430x932 touch
 ##
+## `zoom=<n>` and `framed` are the SCREEN FILL controls: `framed` photographs the
+## 160x144 letterbox the hardware had, and `zoom=-3` the whole-region survey:
+##
+##   ... live effects 4 4 1920x1080 zoom=-3
+##
 ## `kind` is `effects` (the emote, the dust, the rustle and the headbutt tree),
 ## `unown_wall` (`DisplayUnownWords`' box, read off a Ruins of Alph chamber's
 ## own wall pattern from the cell below it: maps 23 to 26 of group 3 say HO-OH,
@@ -192,10 +197,15 @@ func _initialize() -> void:
 			var shape: PackedStringArray = args[8].split("x")
 			if shape.size() == 2:
 				_window = Vector2i(int(shape[0]), int(shape[1]))
-		if args.size() >= 10 and args[9] == "touch":
-			var options: Gen2Options = Gen2OptionsStore.current()
-			options.touch_mode = Gen2Options.TOUCH_ALWAYS
-			Gen2InputRuntime.instance().apply_options(options)
+		for extra: String in args.slice(9):
+			if extra == "touch":
+				var options: Gen2Options = Gen2OptionsStore.current()
+				options.touch_mode = Gen2Options.TOUCH_ALWAYS
+				Gen2InputRuntime.instance().apply_options(options)
+			elif extra == "framed":
+				Gen2OptionsStore.current().screen_fill = false
+			elif extra.begins_with("zoom="):
+				Gen2OptionsStore.current().zoom_step = int(extra.trim_prefix("zoom="))
 		_build_live(
 			data, int(args[1]), int(args[2]),
 			Vector2i(int(args[6]), int(args[7])) if args.size() >= 8 else Vector2i(-1, -1),

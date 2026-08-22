@@ -193,10 +193,12 @@ func test_a_renderer_rebuilt_mid_scene_stays_below_the_live_text_box() -> void:
 	assert_true(Gen2ModHost.instance().select_view(&"gen2")["ok"])
 	_world_screen._build_renderer()
 	var viewport: SubViewport = _world_screen._screen.viewport()
+	var interface: Control = _world_screen._screen.interface_layer()
 	assert_eq(_world_screen._renderer.get_parent(), viewport, "still in the viewport")
+	assert_eq(box.get_parent(), interface, "the box is on the interface layer")
 	assert_true(
 		viewport.get_children().find(_world_screen._renderer)
-			< viewport.get_children().find(box),
+			< viewport.get_children().find(interface),
 		"and below the box rather than over it"
 	)
 	assert_eq(_world_screen._text_box, box, "the same live box node")
@@ -215,8 +217,10 @@ func test_a_battle_renderer_rebuilt_mid_scene_stays_below_the_interface() -> voi
 	_battle_screen._build_renderer()
 	var viewport: SubViewport = _battle_screen._screen.viewport()
 	var children: Array = viewport.get_children()
+	var interface: Control = _battle_screen._screen.interface_layer()
 	assert_eq(children.find(_battle_screen._renderer), 0, "the renderer is the floor")
-	assert_true(children.find(_battle_screen._box) > 0)
+	assert_eq(_battle_screen._box.get_parent(), interface)
+	assert_true(children.find(interface) > 0)
 	assert_eq(_dropped_on(viewport), 0, "the old view is off the screen, not under the new")
 
 
