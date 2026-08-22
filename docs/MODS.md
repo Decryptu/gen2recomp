@@ -38,7 +38,7 @@ user://mods/<id>/
 | `id` | Lowercase `[a-z0-9][a-z0-9_-]*`; addresses the directory and registry keys |
 | `name` | Shown to the player |
 | `version` | The mod's own version, not the host's |
-| `api_version` | Between `Gen2ModManifest.MIN_API_VERSION` and `API_VERSION`. Declare the oldest host you need: 10 for [a screen that fills the window](#a-screen-that-fills-the-window) and the maps past this one's edge, 9 for an item that names an evolution method, 8 for a stats-screen page, 7 for an actor's `interact`, `emote` and outbox and for hidden-item requests, 6 for `occupied` in the visible-encounter context, 5 for the run's rules, 4 for types, matchups, mod art and event mutators, 3 for mart rows and named axes, 2 for visible encounters, 1 for everything else |
+| `api_version` | Between `Gen2ModManifest.MIN_API_VERSION` and `API_VERSION`. Declare the oldest host you need: 11 for [the battle entrance](#the-entrance) and the battle view's other resolved fields, 10 for [a screen that fills the window](#a-screen-that-fills-the-window) and the maps past this one's edge, 9 for an item that names an evolution method, 8 for a stats-screen page, 7 for an actor's `interact`, `emote` and outbox and for hidden-item requests, 6 for `occupied` in the visible-encounter context, 5 for the run's rules, 4 for types, matchups, mod art and event mutators, 3 for mart rows and named axes, 2 for visible encounters, 1 for everything else |
 | `entry` | A `.gd` path inside the mod directory, or inside the pack when there is one |
 | `pack` | Optional `.pck` or `.zip` beside `mod.json`, holding the mod's files |
 | `description` | Optional |
@@ -841,11 +841,15 @@ a panel or a bar is drawn. A registered battle renderer is a `Node` providing:
 | `set_view(view: Dictionary)` | The screen has new plain display values to show |
 | `refresh()` | The renderer should redraw its current view |
 
-`view` carries `enemy_species`, `player_species`, `enemy_name`, `player_name`,
-`enemy_level`, `player_level`, `battle_kind`, `trainer_class`, `trainer_index`,
-`trainer_name`, `enemy_hp`, `enemy_max_hp`, `player_hp`,
-`player_max_hp`, `exp_pixels`, `raster_scx`, `raster_scy`, `player_pic_visible`,
-`bg_map`, `bg_palette_maps`, `ob_palette_maps`, `anim_sprites`, `anim_tiles` and
+`view` carries `enemy_species`, `player_species`, `enemy_unown_form`,
+`player_unown_form`, `enemy_substitute`, `player_substitute`, `enemy_name`,
+`player_name`, `enemy_level`, `player_level`, `battle_kind`, `trainer_class`,
+`trainer_index`, `trainer_name`, `enemy_hp`, `enemy_max_hp`, `player_hp`,
+`player_max_hp`, `exp_pixels`, `raster_scx`, `raster_scy`, `entrance`,
+`intro_sprites`, `grayscale`, `enemy_trainer_pic`, `player_backpic`,
+`player_backpic_palette`, `enemy_hud_visible`, `player_hud_visible`,
+`trainer_hud_balls`, `trainer_hud_border`, `bg_map`, `bg_vbank1`,
+`bg_palette_maps`, `ob_palette_maps`, `anim_sprites`, `anim_tiles` and
 `hud_visible`: plain values read out of a resolved battle event, never the
 battle engine itself, the same rule `Gen2BattleScreen`'s own setters already
 followed.
@@ -868,10 +872,7 @@ distance to look *right* into a background map 256 pixels wide against the
 screen's 160, so a larger one puts the drawn content further left and the map's
 blank columns wrap in behind it. `Gen2Raster.scroll(image, offsets, 256)` is
 that operation and is what the built-in renderer applies to each of its layers;
-a renderer that ignores the field simply draws no slide. `player_pic_visible`
-is false for exactly that stretch, because `InitBattleDisplay` places the
-player's back pic with `PlaceGraphic` only after `BattleIntroSlidingPics` has
-returned, so during the slide it is not on the map to be scrolled. `raster_scy`
+a renderer that ignores the field simply draws no slide. `raster_scy`
 is the same thing vertically, which only a battle animation ever asks for;
 `Gen2Raster.scroll_rows(image, offsets, 256)` is that operation.
 
@@ -895,6 +896,75 @@ says where each tile of the animation window came from, as
 below that base is not an animation tile at all. `hud_visible` is false for the
 length of a move animation, which is `BattleAnimClearHud` taking the panels and
 both bars off the map and `BattleAnimRestoreHuds` putting them back.
+
+### The entrance
+
+A fight does not open with two Pokémon standing on the field. Two *trainers*
+slide in from opposite sides, the opponent sends out first, the player's back
+pic walks off, and a ball puts a Pokémon where each trainer was standing. Every
+field so far says that in the terms the hardware draws it in: the slide is a
+scanline scroll (`raster_scx`), the walk off is columns going blank in `bg_map`,
+and the player mid-slide is eighteen OAM entries (`intro_sprites`). A renderer
+with no background plane has none of those three, so `entrance` is the same
+state said plainly, one entry per side:
+
+```gdscript
+view["entrance"] = {
+    "player": {
+        "kind": &"trainer",              # or &"mon", or &"none"
+        "backpic": "kris",               # "" unless kind is trainer
+        "trainer_class": 0,              # always 0 on the player's side
+        "species": 0,                    # 0 unless kind is mon
+        "offset_pixels": Vector2(142.0, 0.0),
+    },
+    "enemy": { ... the same five, with trainer_class carrying the class },
+}
+```
+
+`kind` is what the square holds, and it is the whole of what a view drawing
+`player_species` from the first frame is missing: `&"trainer"` a person,
+`&"mon"` a Pokémon, and `&"none"` the stretch between the trainer walking off
+and the ball arriving. `backpic` is what `GameData.player_backpic(kind)` and
+`player_palette(kind)` take, `trainer_class` what `GameData.trainer_pic(number)`
+and `trainer_palette(number)` take, and `species` what `species_pic()` takes, so
+whichever one is set names a picture the renderer can resolve. A wild opponent
+is never a trainer and slides in as its own front pic.
+
+`offset_pixels` is how far that picture stands from its resting square, and it
+covers both movements with one number because both are one thing: the slide
+brings a picture in from off the field and `SlideBattlePicOut` takes it off
+again. Zero is standing still, which is every frame outside an entrance. The
+player comes in from the right and leaves to the left and the opponent the other
+way, so the sign is the direction. A renderer that ignores the block draws
+exactly what it draws today.
+
+`intro_sprites` is the eighteen `{ tile, x, y }` of the player's own head and
+shoulders during the slide, drawn as OAM because those three tile rows fall in
+the band the opponent scrolls; it is empty outside the slide. `grayscale` is
+true for the same stretch, since `GetSGBLayout SCGB_BATTLE_COLORS` runs only
+once `BattleIntroSlidingPics` has returned. `enemy_trainer_pic` and
+`player_backpic` are which picture is on each square, zero and empty once a
+Pokémon has taken it, and `player_backpic_palette` is the `chris`, `kris` or
+`dude` whose colours the back pic is drawn in. `enemy_hud_visible` and
+`player_hud_visible` are the two panels one at a time, against `hud_visible`'s
+summary of both; `trainer_hud_balls` and `trainer_hud_border` are
+`BattleStart_TrainerHuds`' party balls and the frame they hang in, both empty
+once the fight has started. `enemy_substitute` and `player_substitute` say the
+doll is on the square rather than the Pokémon, which is the overworld
+substitute sprite rather than any species pic; `enemy_unown_form` and
+`player_unown_form` are one-based letters for Unown and nothing for every other
+species, and a non-zero one means `GameData.unown_pic(form - 1, back)` in place
+of `species_pic(number, back)`. `bg_vbank1` is `wAttrmap` bit
+3 over the screen, the VRAM bank each cell's tile number is read from, which
+only the enemy's own pic animation ever sets.
+
+`entrance` and the twelve fields named in this section are `api_version` 11.
+Before it they were pushed and undeclared, and one more was declared and never
+true: `player_pic_visible` was a literal `true` in every view, because the
+premise behind it is wrong. `CopyBackpic` puts the player's back pic on the
+tilemap before `InitBattleDisplay` reaches the slide, so it is on the map
+throughout. The field is gone; `entrance` is what answers the question it was
+asked for.
 
 The two HP values and `exp_pixels` are the *drawn* ones, not the committed ones:
 a hit drains the bar over roughly a second the way the cartridge does, an award

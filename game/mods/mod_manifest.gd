@@ -40,7 +40,7 @@ const FILENAME: String = "mod.json"
 ## An optional `icon` or `thumbnail` is deliberately NOT a contract change: a
 ## host that has never heard of either ignores the field, so a mod that ships
 ## art still installs on an older launcher and simply has no face there.
-const API_VERSION: int = 10
+const API_VERSION: int = 11
 ## The oldest contract this host still answers. See [constant API_VERSION].
 const MIN_API_VERSION: int = 1
 ## Ids address directories and registry keys, so they stay to a plain lowercase
