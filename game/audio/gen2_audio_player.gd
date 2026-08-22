@@ -215,6 +215,13 @@ func low_health_alarm() -> bool:
 	return (_engine.low_health_alarm & (1 << Gen2SoundEngine.DANGER_ON_BIT)) != 0
 
 
+## Whether any music channel is on, which is what a host that keeps a piece up
+## for as long as its screen is up checks each frame. Separate from
+## [method audio_status] because that builds a dictionary.
+func music_playing() -> bool:
+	return _engine.music_channels_active()
+
+
 ## `_CheckSFX`, which is what `waitsfx` and the battle screen wait on.
 func effect_playing() -> bool:
 	return _engine.sfx_active()
@@ -299,8 +306,18 @@ func _start_stream() -> void:
 ## clock, not the renderer's: a long game frame is caught up here rather than
 ## slowing the music down.
 func _service_timeline() -> void:
-	if _player == null or not _player.playing:
+	if _player == null:
 		return
+	if not _player.playing:
+		# A stopped output under a driver whose channels are still on is silence
+		# over live music, which is what a host that stopped its stream and then
+		# asked for the same piece again used to leave behind. The output
+		# follows the driver rather than the other way round.
+		if not _engine.any_channel_active():
+			return
+		_start_stream()
+		if not _player.playing:
+			return
 	if _playback == null:
 		_playback = _player.get_stream_playback() as AudioStreamGeneratorPlayback
 		if _playback == null:

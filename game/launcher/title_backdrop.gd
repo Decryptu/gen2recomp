@@ -16,9 +16,6 @@ const MAX_STEPS_PER_TICK: int = 4
 ## The backdrop plays under an interface rather than as the game, so it takes
 ## half of whatever the app block's music volume is.
 const VOLUME_SCALE: float = 0.5
-## How often the loop is checked. The title piece loops on the driver's own
-## `loopchannel`, so this only has to catch a cache whose piece ends.
-const LOOP_CHECK_FRAMES: int = 60
 
 var _data: GameData = null
 var _page: Gen2TitlePage = null
@@ -27,7 +24,6 @@ var _sine: Gen2BattleAnimData = null
 var _texture: ImageTexture = null
 var _elapsed: float = 0.0
 var _audio: Gen2AudioPlayer = null
-var _loop_countdown: int = LOOP_CHECK_FRAMES
 
 
 func _ready() -> void:
@@ -110,7 +106,6 @@ func _start_music() -> void:
 		_audio = Gen2AudioPlayer.new()
 		_audio.volume_scale = VOLUME_SCALE
 		add_child(_audio)
-	_loop_countdown = LOOP_CHECK_FRAMES
 	# A second request for the piece already playing is continued rather than
 	# restarted, so returning to the shelf does not start the tune over.
 	_audio.play_record(record, &"music", _audio_assets())
@@ -122,18 +117,15 @@ func _stop_music() -> void:
 	_audio.stop_all()
 
 
-## The loop. The piece carries its own `loopchannel 0`, so the driver repeats it
-## without help; this only covers the case of it running out, which is what a
-## cache holding a piece with no loop would do.
+## The music is a property of the backdrop being up, checked on the frames the
+## backdrop draws rather than started by whichever event happened to bring it
+## back. Nothing then depends on a page, a sheet or a selection emitting the
+## signal that reaches [method show_game]: while there is a picture there is a
+## piece playing, and a piece that ends is started again on the next frame.
 func _hold_music() -> void:
-	if _audio == null:
+	if _audio != null and _audio.music_playing():
 		return
-	_loop_countdown -= 1
-	if _loop_countdown > 0:
-		return
-	_loop_countdown = LOOP_CHECK_FRAMES
-	if not bool(_audio.audio_status().get("music_active", false)):
-		_start_music()
+	_start_music()
 
 
 ## The two blobs [Gen2SoundEngine] reads outside a record, the same pair the

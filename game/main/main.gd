@@ -52,6 +52,10 @@ func _build() -> void:
 	_shelf.play_requested.connect(_launch_game)
 	_shelf.manage_requested.connect(_open_manage_sheet)
 	_shelf.selection_changed.connect(_on_cartridge_selected)
+	# The backdrop follows the shelf being on screen rather than the dock being
+	# pressed, so a sheet, a restored page or anything else that reveals the
+	# shelf without a page signal brings the picture and its music back too.
+	_shelf.visibility_changed.connect(_refresh_backdrop)
 	_shell.add_page(&"shelf", "Play", &"shelf", _shelf)
 
 	_mods = Gen2ModsPage.create(_palette, self)
@@ -125,6 +129,8 @@ func _on_page_selected(_id: StringName) -> void:
 ## The selected cartridge's artwork, and only once that cartridge is imported: an
 ## empty bay would otherwise advertise a game the player cannot start.
 func _refresh_backdrop() -> void:
+	if not is_instance_valid(_shelf) or not is_instance_valid(_shell):
+		return
 	var game_id: StringName = _shelf.selected_id()
 	var seated: Gen2Cartridge = _shelf.cartridge(game_id)
 	var showing: bool = (

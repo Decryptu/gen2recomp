@@ -175,6 +175,46 @@ func test_the_title_backdrop_plays_the_title_music_and_stops_with_the_picture() 
 	assert_false(bool(audio.audio_status()["music_active"]), "and it stops with it")
 
 
+## Leaving the shelf and coming back is the whole cycle: the picture and the
+## music both come back with the page, without the player touching the list.
+func test_the_backdrop_music_comes_back_with_the_shelf() -> void:
+	if GameData.open_any() == null:
+		pass_test("No imported cache on this machine.")
+		return
+	await _open_launcher()
+	var shell: Gen2LauncherShell = _launcher.get("_shell")
+	var backdrop: Gen2LauncherTitleBackdrop = _launcher.get("_title_backdrop")
+	if backdrop.get_child_count() == 0:
+		pass_test("No cartridge is seated on this machine.")
+		return
+	assert_true(_music_active(backdrop), "the shelf started it")
+
+	shell.select(&"settings")
+	await get_tree().process_frame
+	assert_false(_music_active(backdrop), "another page stops it")
+
+	shell.select(&"shelf")
+	await get_tree().process_frame
+	assert_true(_music_active(backdrop), "and coming back starts it again")
+
+	# The picture being up is the whole condition: a piece stopped underneath is
+	# started again on the next frame the backdrop draws, whatever stopped it.
+	for child: Node in backdrop.get_children():
+		if child is Gen2AudioPlayer:
+			(child as Gen2AudioPlayer).stop_all()
+	assert_false(_music_active(backdrop))
+	await get_tree().process_frame
+	await get_tree().process_frame
+	assert_true(_music_active(backdrop), "the backdrop holds its own music")
+
+
+func _music_active(backdrop: Gen2LauncherTitleBackdrop) -> bool:
+	for child: Node in backdrop.get_children():
+		if child is Gen2AudioPlayer:
+			return bool((child as Gen2AudioPlayer).audio_status()["music_active"])
+	return false
+
+
 func _write_probe_mod_zip() -> void:
 	var packer := ZIPPacker.new()
 	assert_eq(packer.open(_mod_archive), OK)
