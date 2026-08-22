@@ -228,6 +228,11 @@ var _object_position_overrides: Dictionary = {}
 var _object_facing_overrides: Dictionary = {}
 var _object_followers: Dictionary = {}
 var _variable_sprites: Dictionary = {}
+## `LoadMapObjects` runs `MAPCALLBACK_OBJECTS` and then `LoadObjectMasks`, so a
+## map load owes its masks once the callbacks it queued have run and not before:
+## the flag one of them writes is read by the other. Raised by every map load and
+## spent by [method run_event_queue] when the queue drains.
+var _object_masks_pending: bool = false
 var _block_overrides: Dictionary = {}
 ## [method map_placements], built on first use and dropped with the map it is
 ## measured from.
@@ -3288,11 +3293,52 @@ func dispatch_map_entry() -> Array:
 ## the player's bedroom on a new game, each drawn as the `SPRITE_CHRIS` its
 ## unassigned variable sprite falls back to.
 func load_object_masks() -> void:
+	_object_masks_pending = false
+	_toggle_decorations_visibility()
 	for object: Gen2WorldObject in objects:
 		object.flag_hidden = object.event_flag_active(state)
 	## `LoadObjectMasks` writes one mask byte an object out of `GetObjectTimeMask`
 	## and `CheckObjectFlag` together, which is what this already is.
 	set_object_time(object_hour, object_time_of_day)
+
+
+## `ToggleDecorationsVisibility`, `PlayersHouse2F`'s own `MAPCALLBACK_NEWMAP`.
+## It reads the four decoration slots and, for one the player does not own,
+## takes `.hide`: `EventFlagAction SET_FLAG` on that object's event flag, which
+## is what [method load_object_masks] then masks it out on. Run in front of that
+## walk, which is the order `HandleNewMap` and `LoadMapObjects` stand in.
+##
+## Without it the console, both dolls and the big doll stand in the player's
+## bedroom from a new game, each drawn as the `SPRITE_CHRIS` that
+## `GetMonSprite`'s `.Variable` falls back to for an unassigned variable sprite.
+##
+## `ToggleDecorationVisibility`'s other branch, the decoration the player does
+## own, has nothing behind it here: the PC's DECORATION row is deliberately not
+## offered (see [Gen2WorldPC]), so no reachable state owns one, and the sprite it
+## would need is `DECOATTR_SPRITE` out of a `data/decorations/attributes.asm`
+## this cache does not carry. The flag is left alone rather than cleared, so a
+## later importer can add the other half without moving this one.
+##
+## The four rows are named by their `SPRITE_VARS` index rather than by their flag
+## numbers, and the flag comes off the object's own event, so the two cannot
+## drift. Only these four: `SPRITE_COPYCAT` is a variable sprite no script
+## assigns until her own runs, and she is drawn on purpose so she can be reached.
+const DECORATION_VARIABLE_SPRITES: Array[int] = [0xF0, 0xF1, 0xF2, 0xF3]
+
+
+func _toggle_decorations_visibility() -> void:
+	if current_map == null or state == null:
+		return
+	var events: Array = current_map.events.get("objects", [])
+	for index: int in mini(objects.size(), events.size()):
+		var event: Variant = events[index]
+		if not event is Dictionary:
+			continue
+		if int((event as Dictionary).get("sprite", 0)) not in DECORATION_VARIABLE_SPRITES:
+			continue
+		var flag: int = int((event as Dictionary).get("event_flag", -1))
+		if flag >= 0:
+			state.set_event_flag(flag, true)
 
 
 ## Starts the first active scripted object in the cell the player is facing.
@@ -3436,6 +3482,8 @@ func run_event_queue(acknowledge: bool = false, choice: int = -1) -> Array:
 					_queue_map_scene()
 					if not _script_queue.is_empty():
 						continue
+				if _object_masks_pending:
+					load_object_masks()
 				break
 			var request: Dictionary = _script_queue.pop_front()
 			_active_script = Gen2WorldScriptRunner.begin(
@@ -5625,6 +5673,7 @@ func _apply_map(
 	_queue_map_callbacks(-1)
 	_map_entry_scene_pending = true
 	_map_entry_scene_ran = false
+	_object_masks_pending = true
 
 
 ## `.SaveDigWarp` and `.SetSpawn`, both of which run on a map change and both of

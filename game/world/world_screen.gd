@@ -1549,6 +1549,11 @@ func _finish_whiteout() -> void:
 	## `wLandmarkSignTimer` for every event but a connection and a facing change.
 	_zero_map_name_sign_timer()
 	_script_prompt = ""
+	## `newloadmap MAPSETUP_WARP` is the whole map load, so the spawn's own
+	## callbacks run and `LoadMapObjects` masks on what they wrote. Without the
+	## drain the four bedroom decorations stood there, since nothing had reached
+	## `ToggleDecorationsVisibility` on the map the player woke up on.
+	_show_script_results(_world.run_event_queue(false))
 	_refresh_after_escape()
 
 

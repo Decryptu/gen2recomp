@@ -2705,6 +2705,48 @@ func test_a_map_entry_masks_on_the_flags_its_own_callbacks_wrote() -> void:
 	assert_eq(world.visible_objects().size(), 1)
 
 
+## `ToggleDecorationsVisibility`, `PlayersHouse2F`'s `MAPCALLBACK_NEWMAP`: a
+## decoration the player does not own takes `.hide`, which sets that object's
+## event flag, and `LoadObjectMasks` reads it on the same entry. Without it the
+## four bedroom decorations stood there drawn as `SPRITE_CHRIS`, which is what
+## `GetMonSprite`'s `.Variable` falls back to for an unassigned variable sprite.
+func test_an_unowned_decoration_is_hidden_by_the_map_entry_that_reads_it() -> void:
+	var world: Gen2WorldAPI = _world(Vector2i(8, 6))
+	var event: Dictionary = world.current_map.events["objects"][0]
+	event["sprite"] = Gen2WorldAPI.DECORATION_VARIABLE_SPRITES[0]
+	world.clear_event_flag(int(event["event_flag"]))
+	var _entry: Array = world.dispatch_map_entry()
+	assert_eq(world.visible_objects().size(), 0, "the entry hid it")
+	assert_true(world.state.is_event_flag_active(int(event["event_flag"])),
+		"`.hide` is EventFlagAction SET_FLAG on the object's own flag")
+
+
+## `MapSetupScript_Warp` carries `LoadMapObjects`, so every warp owes its masks
+## and not only the screen's first entry. Running them once at open left a
+## decoration standing on every map the player warped into afterwards.
+##
+## `MapSetupScript_ReloadMap` deliberately does not: it carries neither
+## `HandleNewMap` nor `LoadMapObjects`, so `reloadmapafterbattle` re-reads
+## nothing here either.
+func test_a_warp_runs_the_object_masks_the_map_it_landed_on_owes() -> void:
+	var world: Gen2WorldAPI = _world(Vector2i(7, 6))
+	var _entry: Array = world.dispatch_map_entry()
+	## Staged on the map the warp lands on, before it is walked into, so the
+	## warp's own setup is the only thing that can have hidden it.
+	var destination: Gen2WorldMap = world.data.world_map(1, 2)
+	var event: Dictionary = (world.current_map.events["objects"][0] as Dictionary).duplicate()
+	event["sprite"] = Gen2WorldAPI.DECORATION_VARIABLE_SPRITES[1]
+	destination.events["objects"] = [event]
+	world.clear_event_flag(int(event["event_flag"]))
+
+	assert_true(world.move(Vector2i.LEFT))
+	assert_true(bool(world.try_warp().get("ok", false)))
+	var _drained: Array = world.run_event_queue(false)
+	assert_true(world.state.is_event_flag_active(int(event["event_flag"])),
+		"the map it landed on owes its own masks")
+	assert_eq(world.visible_objects().size(), 0)
+
+
 func test_event_dispatch_reports_decoded_records_without_running_scripts() -> void:
 	var world: Gen2WorldAPI = _world(Vector2i(6, 6))
 	var events: Array = world.dispatch_events()
