@@ -49,6 +49,14 @@ var _last_item: int = 0
 var _staged_warp: Dictionary = {}
 var _script_value: int = 0
 var _command_count: int = 0
+## `RunScriptCommand`'s own artefact: every command executed, with the
+## `bank:address` the cartridge would have in wScriptBank:wScriptPos when it
+## ran. Collected only while `trace_commands` is on, which
+## `tools/trace_world_script.gd` turns on for every runner a world builds so a
+## walked conversation can be diffed against `.claude/oracle/overworld/
+## trace_script.py`'s reading of the same one.
+static var trace_commands: bool = false
+var command_trace: Array[Dictionary] = []
 ## `Script_sdefer`'s own `RUN_DEFERRED_SCRIPT`, which is the only thing that
 ## makes `RunSceneScript` answer `PlayerEvents` with carry: a scene script that
 ## does not set it has run and raised no player event
@@ -735,6 +743,13 @@ func advance(acknowledge: bool = false, choice: int = -1) -> Dictionary:
 		)
 		if not bool(command.get("ok", false)):
 			return _fail(StringName(command.get("reason", &"invalid_command")), command)
+		if trace_commands:
+			command_trace.append({
+				"bank": int(frame["bank"]),
+				"address": int(frame["address"]) + int(frame["offset"]),
+				"opcode": int(command["opcode"]),
+				"name": String(command["name"]),
+			})
 		frame["offset"] = int(frame["offset"]) + int(command["width"])
 		_frames[_frames.size() - 1] = frame
 		_command_count += 1
@@ -1463,6 +1478,12 @@ func _execute(command: Dictionary, frame: Dictionary) -> Dictionary:
 		Gen2WorldScript.FARWRITETEXT:
 			return _show_text(int(command["bank"]), int(command["address"]), false)
 		Gen2WorldScript.JUMPTEXTFACEPLAYER:
+			## `Script_jumptextfaceplayer` jumps to JumpTextFacePlayerScript,
+			## whose first command is `faceplayer`; `jumptext` and `farjumptext`
+			## enter the same script one command later, at JumpTextScript. The
+			## four commands after it are `opentext`, `repeattext -1, -1`,
+			## `waitbutton` and `closetext`, which is what _show_text spends.
+			_face_player()
 			return _show_text(bank, int(command["address"]), true)
 		Gen2WorldScript.REPEATTEXT:
 			if int(command["value"]) == 0xFF and int(command["value_2"]) == 0xFF:
@@ -2030,10 +2051,7 @@ func _execute_object_command(source_opcode: int, command: Dictionary) -> Diction
 			})
 			return _stage_movement_wait({"object_index": _last_talked_object_index})
 		0x6A:
-			if _last_talked_object_index >= 0:
-				_emit_object_event(&"object_face_player", {
-					"object_index": _last_talked_object_index,
-				})
+			_face_player()
 		0x6B:
 			var first_object_id: int = int(command.get("object_id", 0))
 			var first_object: int = _object_index_from_id(first_object_id)
@@ -2353,6 +2371,16 @@ func _stage_trainer_approach() -> void:
 		"distance": int(_request.get("distance", 0)),
 		"direction": _request.get("direction", Vector2i.ZERO),
 	})
+
+
+## `Script_faceplayer`, which turns the object the player is standing in front
+## of. Shared with `jumptextfaceplayer`, whose own script runs one before the
+## text.
+func _face_player() -> void:
+	if _last_talked_object_index >= 0:
+		_emit_object_event(&"object_face_player", {
+			"object_index": _last_talked_object_index,
+		})
 
 
 ## `FindThatSpecies`, and `CheckOwnMon`'s ID and OT test on top of it when
