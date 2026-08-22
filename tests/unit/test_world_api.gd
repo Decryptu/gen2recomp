@@ -2705,6 +2705,39 @@ func test_a_map_entry_masks_on_the_flags_its_own_callbacks_wrote() -> void:
 	assert_eq(world.visible_objects().size(), 1)
 
 
+## `MapSetupScript_Warp` carries `LoadMapObjects`, so every warp owes its masks
+## and not only the screen's first entry. Running them once at open is what left
+## the player's bedroom carrying its four decoration objects, drawn as the
+## `SPRITE_CHRIS` an unassigned variable sprite falls back to, on every map
+## warped into after the screen had opened.
+##
+## `MapSetupScript_ReloadMap` deliberately carries neither `HandleNewMap` nor
+## `LoadMapObjects`, so `reloadmapafterbattle` re-reads nothing.
+func test_a_warp_runs_the_object_masks_the_map_it_landed_on_owes() -> void:
+	var world: Gen2WorldAPI = _world(Vector2i(7, 6))
+	var _entry: Array = world.dispatch_map_entry()
+	## Staged on the map the warp lands on, before it is walked into, so the
+	## warp's own setup is the only thing that can have masked it.
+	var destination: Gen2WorldMap = world.data.world_map(1, 2)
+	var event: Dictionary = (world.current_map.events["objects"][0] as Dictionary).duplicate()
+	destination.events["objects"] = [event]
+	world.set_event_flag(int(event["event_flag"]))
+
+	assert_true(world.move(Vector2i.LEFT))
+	assert_true(bool(world.try_warp().get("ok", false)))
+	assert_true(world._object_masks_pending,
+		"the map load owes its masks and its callbacks have not run yet")
+
+	## `_apply_map` clears the temporary map-reload flags, so the flag is set on
+	## the map that was landed on; what is proved here is that the masks are read
+	## after the callbacks that map queued, not that a flag survives a warp.
+	world.set_event_flag(int(event["event_flag"]))
+	var _drained: Array = world.run_event_queue(false)
+	assert_false(world._object_masks_pending, "and the drain spends them")
+	assert_eq(world.visible_objects().size(), 0,
+		"the map it landed on owes its own masks")
+
+
 func test_event_dispatch_reports_decoded_records_without_running_scripts() -> void:
 	var world: Gen2WorldAPI = _world(Vector2i(6, 6))
 	var events: Array = world.dispatch_events()

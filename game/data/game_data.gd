@@ -1002,8 +1002,36 @@ func world_palette(number: int) -> PackedColorArray:
 	return out
 
 
+## The three tilesets `home/map.asm` gates `LoadMapGroupRoof` on: "These tilesets
+## support dynamic per-mapgroup roof tiles." Every other tileset owns tiles
+## $0A..$12 itself, so writing a roof over them is the map's own art destroyed.
+##
+## pokegold ships no `TilesetBattleTowerOutside` and its gate is the two Johto
+## rows alone, which is also why every tileset past index 3 sits one lower
+## there; the numbers below are each pin's own.
+const ROOF_TILESETS: Array[int] = [0x01, 0x02, 0x04]
+const ROOF_TILESETS_GOLD_SILVER: Array[int] = [0x01, 0x02]
+
+
+## The roof [param map] is drawn with, or -1 for a map that takes none. This is
+## `MapGroupRoofs` behind `home/map.asm`'s own tileset gate, and it is the one
+## question both readers of a roof ask, so neither can apply one to an indoor
+## map: the bedroom, every house, every gym and every Pokemon Center in a roofed
+## group had tiles $0A..$12 of their own art overwritten with roof shingles.
+func map_roof(map: Gen2WorldMap, tileset: Gen2WorldTileset) -> int:
+	if map == null or tileset == null:
+		return -1
+	var roofed: Array[int] = ROOF_TILESETS if Gen2WorldState.is_crystal_profile(self) \
+		else ROOF_TILESETS_GOLD_SILVER
+	if tileset.number not in roofed:
+		return -1
+	return map_group_roof(map.group)
+
+
 ## `MapGroupRoofs`: which of the five roof runs a map group draws, or -1 for a
-## group whose maps have no roof tiles of their own.
+## group whose maps have no roof tiles of their own. `_LoadMapPals` reads this
+## off `wMapGroup` alone, which is why the tileset gate is [method map_roof]'s
+## and not this one's.
 func map_group_roof(map_group: int) -> int:
 	var groups: Variant = _roofs().get("groups", [])
 	if not groups is Array or map_group < 0 or map_group >= (groups as Array).size():
@@ -1080,7 +1108,7 @@ func map_tile_indices(map: Gen2WorldMap, tileset: Gen2WorldTileset) -> PackedByt
 	if map == null or tileset == null:
 		return PackedByteArray()
 	return roofed_tile_indices(
-		world_tileset_indices(tileset.number), map_group_roof(map.group), tileset.tile_count
+		world_tileset_indices(tileset.number), map_roof(map, tileset), tileset.tile_count
 	)
 
 

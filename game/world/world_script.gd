@@ -747,8 +747,14 @@ static func command_at(
 				command["string_buffer"] = int(data[offset + 3])
 			CLEAREVENT, SETEVENT, CHECKFLAG, CLEARFLAG, SETFLAG, CHECKEVENT:
 				command["flag"] = read_u16(data, offset + 1)
-			GIVECOINS, TAKECOINS, CHECKCOINS, BLACKOUTMOD:
+			GIVECOINS, TAKECOINS, CHECKCOINS:
 				command["value"] = read_u16(data, offset + 1)
+			BLACKOUTMOD:
+				## `Script_blackoutmod` reads two script bytes into
+				## `wLastSpawnMapGroup` and `wLastSpawnMapNumber`, so its operand
+				## is a map rather than the number those two bytes spell.
+				command["map_group"] = int(data[offset + 1])
+				command["map_number"] = int(data[offset + 2])
 			WARPMOD:
 				command["warp_id"] = int(data[offset + 1])
 				command["map_group"] = int(data[offset + 2])

@@ -228,6 +228,11 @@ var _object_position_overrides: Dictionary = {}
 var _object_facing_overrides: Dictionary = {}
 var _object_followers: Dictionary = {}
 var _variable_sprites: Dictionary = {}
+## `LoadMapObjects` runs `MAPCALLBACK_OBJECTS` and then `LoadObjectMasks`, so a
+## map load owes its masks once the callbacks it queued have run and not before:
+## the flag one of them writes is read by the other. Raised by every map load and
+## spent by [method run_event_queue] when the queue drains.
+var _object_masks_pending: bool = false
 var _block_overrides: Dictionary = {}
 ## [method map_placements], built on first use and dropped with the map it is
 ## measured from.
@@ -3288,6 +3293,7 @@ func dispatch_map_entry() -> Array:
 ## the player's bedroom on a new game, each drawn as the `SPRITE_CHRIS` its
 ## unassigned variable sprite falls back to.
 func load_object_masks() -> void:
+	_object_masks_pending = false
 	for object: Gen2WorldObject in objects:
 		object.flag_hidden = object.event_flag_active(state)
 	## `LoadObjectMasks` writes one mask byte an object out of `GetObjectTimeMask`
@@ -3436,6 +3442,8 @@ func run_event_queue(acknowledge: bool = false, choice: int = -1) -> Array:
 					_queue_map_scene()
 					if not _script_queue.is_empty():
 						continue
+				if _object_masks_pending:
+					load_object_masks()
 				break
 			var request: Dictionary = _script_queue.pop_front()
 			_active_script = Gen2WorldScriptRunner.begin(
@@ -4417,6 +4425,15 @@ func _apply_result_events(result: Dictionary) -> Dictionary:
 		return result
 	for generated: Dictionary in _apply_script_object_events(result.get("events", [])):
 		result["events"].append(generated)
+	for event: Dictionary in result.get("events", []):
+		## `Script_blackoutmod`'s own two writes. `wLastSpawnMapGroup` and
+		## `wLastSpawnMapNumber` are the pair a Pokemon Center entrance sets and
+		## the pair `GetWhiteoutSpawn` reads, so the command lands on the same
+		## field rather than on a destination of its own.
+		if StringName(event.get("type", &"")) == &"blackout_destination_changed":
+			last_spawn_map = Vector2i(
+				int(event.get("map_group", 0)), int(event.get("map_number", 0))
+			)
 	return result
 
 
@@ -5616,6 +5633,7 @@ func _apply_map(
 	_queue_map_callbacks(-1)
 	_map_entry_scene_pending = true
 	_map_entry_scene_ran = false
+	_object_masks_pending = true
 
 
 ## `.SaveDigWarp` and `.SetSpawn`, both of which run on a map change and both of

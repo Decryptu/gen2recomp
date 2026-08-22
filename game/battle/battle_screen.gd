@@ -934,9 +934,10 @@ func _finish_world_catch_tutorial() -> void:
 	})
 
 
-## Public screenshot driver for the overworld battle recovery boundary. It
-## starts a real host battle using the fallback development party, then
-## completes it as a loss so the recovery message is visible without input.
+## Public screenshot driver for the overworld battle loss boundary. It starts a
+## real host battle using the fallback development party and then completes it
+## as a loss, which is the frame `LostBattle` returns on: the whiteout itself is
+## the overworld's and is photographed there.
 func preview_world_battle_loss() -> void:
 	if _world_battle_active or _data == null:
 		return
@@ -2832,12 +2833,14 @@ func _continue_after_messages() -> void:
 			# `wBattleResult` is DRAW and the party is still standing.
 			if _show_world_battle_terminal_text():
 				return
+			## `LostBattle`'s `.not_canlose` is the grayscale and a `ret`: the
+			## battle prints nothing about blacking out, because `_WhitedOutText`
+			## belongs to `Script_Whiteout` on the overworld. What is checked
+			## here is only that the party the whiteout will heal can be read.
 			if _battle.winner() != Gen2Battle.PLAYER and not _world_battle_recovery_shown:
 				if not _prepare_world_battle_recovery():
 					return
 				_world_battle_recovery_shown = true
-				show_message("Blackout! Party restored.")
-				return
 		if _save_battle_result() and _world_battle_active:
 			_finish_world_battle()
 		return
@@ -2869,12 +2872,11 @@ func sync_live_party() -> bool:
 func _save_battle_result() -> bool:
 	if _save_slot < 0 or _save_written or _battle == null:
 		return true
-	## `wPartyMon` holds the fighting copy on the cartridge, so damage taken and
-	## PP spent belong to the party whatever ended the battle: a run keeps them
-	## the same way a win does. A loss is the one exception, since the blackout
-	## puts the pre-battle party back rather than keeping the fought one.
-	if _battle.winner() != Gen2Battle.PLAYER and not _battle.has_fled():
-		return true
+	## `wPartyMon` holds the fighting copy on the cartridge, so damage taken, PP
+	## spent and experience gained belong to the party whatever ended the battle.
+	## A loss is no exception: nothing puts the pre-battle party back, and the
+	## full HP a blacked-out player walks away with is `Script_Whiteout`'s own
+	## `special HealParty` rather than a party that was never written.
 	var save: Gen2SaveData = Gen2SaveBattleAdapter.from_battle_party(
 		_data.id, _data.sha1, _save_slot, _battle.party(Gen2Battle.PLAYER), "", _source_save
 	)

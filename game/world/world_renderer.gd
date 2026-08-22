@@ -228,7 +228,7 @@ func _atlas_for(map: Gen2WorldMap, tileset: Gen2WorldTileset) -> Dictionary:
 		indices = _animation.current_indices()
 	if indices.size() < tileset.tile_count * Gen2Tiles.TILE_PIXELS:
 		return {}
-	var roof: int = _world.data.map_group_roof(map.group)
+	var roof: int = _world.data.map_roof(map, tileset)
 	indices = _world.data.roofed_tile_indices(indices, roof, tileset.tile_count)
 	var palettes: Array = _tile_palettes_for(map, tileset)
 	var image := Image.create(

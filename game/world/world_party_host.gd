@@ -207,21 +207,9 @@ static func heal_party(
 	if not bool(opened.get("ok", false)):
 		return _failure(StringName(opened["reason"]), opened.get("details", {}))
 	var candidate: Gen2SaveData = opened["candidate"]
-	var healed: int = 0
-	for mon: Gen2SaveMon in candidate.party:
-		if mon == null or mon.is_egg:
-			continue
-		var battle_mon: Gen2BattleMon = Gen2SaveBattleAdapter.to_battle_mon(world.data, mon)
-		if battle_mon == null:
-			return _failure(&"invalid_party_member", {"species": mon.species})
-		var max_hp: int = battle_mon.max_hp()
-		if mon.hp != max_hp or mon.status != Gen2Status.NONE:
-			healed += 1
-		mon.hp = max_hp
-		mon.status = Gen2Status.NONE
-		for slot: int in Gen2SaveMon.MAX_MOVES:
-			var move_number: int = int(mon.moves[slot])
-			mon.pp[slot] = int(world.data.move(move_number).get("pp", 0)) if move_number > 0 else 0
+	var healed: int = heal_party_rows(world.data, candidate)
+	if healed < 0:
+		return _failure(&"invalid_party_member", {})
 
 	var before: Gen2WorldSnapshot = world.snapshot()
 	var resumed: Array = world.complete_runtime_request({
@@ -242,6 +230,34 @@ static func heal_party(
 		"healed_members": healed,
 		"results": resumed,
 	}
+
+
+
+## `HealParty`'s own walk, without the transaction around it: full HP, no status
+## and full PP for every party member that is not an egg. Answers how many rows
+## it moved, or -1 for a row the battle adapter cannot read.
+##
+## Shared, because the whiteout heals the same party [method heal_party] does and
+## reaches it from a screen rather than from a `special`.
+static func heal_party_rows(data: GameData, save: Gen2SaveData) -> int:
+	if data == null or save == null:
+		return -1
+	var healed: int = 0
+	for mon: Gen2SaveMon in save.party:
+		if mon == null or mon.is_egg:
+			continue
+		var battle_mon: Gen2BattleMon = Gen2SaveBattleAdapter.to_battle_mon(data, mon)
+		if battle_mon == null:
+			return -1
+		var max_hp: int = battle_mon.max_hp()
+		if mon.hp != max_hp or mon.status != Gen2Status.NONE:
+			healed += 1
+		mon.hp = max_hp
+		mon.status = Gen2Status.NONE
+		for slot: int in Gen2SaveMon.MAX_MOVES:
+			var move_number: int = int(mon.moves[slot])
+			mon.pp[slot] = int(data.move(move_number).get("pp", 0)) if move_number > 0 else 0
+	return healed
 
 
 ## `Softboiled_MilkDrinkFunction`: a fifth of the user's own maximum health moved
@@ -684,6 +700,132 @@ static func apply_egg_steps(save: Gen2SaveData, times: int = 1) -> int:
 			if mon.happiness == 0:
 				return index
 	return -1
+
+
+## `CheckPlayerPartyForFitMon`: the OR of every party slot's HP word, which is
+## why it needs no egg test of its own. `GiveEgg` zeroes an egg's HP after the
+## stats are generated, so an egg contributes nothing here and a party of
+## nothing but eggs is out of useable Pokemon.
+static func party_has_fit_mon(save: Gen2SaveData) -> bool:
+	if save == null:
+		return false
+	for mon: Gen2SaveMon in save.party:
+		if mon != null and mon.hp > 0:
+			return true
+	return false
+
+
+## `DoPoisonStep`, the pass `CountStep` owes every fourth step. One HP off every
+## poisoned member that is still standing, and a member the point finishes has
+## its status cleared, which is what stops it being damaged again.
+##
+## The two flags `wPoisonStepFlagSum` collects decide what the pass costs:
+## `%10`, somebody fainted, is the only one that reaches a script, and `%01`
+## alone is the sound and nothing else. `.CheckWhitedOut` runs inside that
+## script, so the happiness penalty and the lines are charged on the faint
+## branch alone.
+##
+## Answers `{"damaged", "fainted", "sfx", "texts", "whiteout"}`; the caller owns
+## the sound, the box and the blackout behind it.
+static func apply_poison_step(data: GameData, save: Gen2SaveData) -> Dictionary:
+	var out: Dictionary = {
+		"damaged": PackedInt32Array(), "fainted": PackedInt32Array(),
+		"sfx": false, "texts": PackedStringArray(), "whiteout": false,
+	}
+	if data == null or save == null or save.party.is_empty():
+		return out
+	var damaged: PackedInt32Array = PackedInt32Array()
+	var fainted: PackedInt32Array = PackedInt32Array()
+	for index: int in save.party.size():
+		var mon: Gen2SaveMon = save.party[index] as Gen2SaveMon
+		if mon == null or not Gen2Status.has(mon.status, Gen2Status.POISON) or mon.hp <= 0:
+			continue
+		mon.hp -= 1
+		if mon.hp > 0:
+			damaged.append(index)
+			continue
+		mon.status = Gen2Status.NONE
+		fainted.append(index)
+	out["damaged"] = damaged
+	out["fainted"] = fainted
+	if fainted.is_empty():
+		out["sfx"] = not damaged.is_empty()
+		return out
+	## `.Script_MonFaintedToPoison` opens with `.PlayPoisonSFX` whatever the
+	## flags were, so a faint plays the same sound a survivor does.
+	out["sfx"] = true
+	var texts: PackedStringArray = PackedStringArray()
+	for index: int in fainted:
+		var mon: Gen2SaveMon = save.party[index] as Gen2SaveMon
+		mon.happiness = change_happiness(
+			data, mon.happiness, Gen2Battle.HAPPINESS_POISONFAINT
+		)
+		## `GetPartyNickname` reads the row's own name, which `AddPartyMon` always
+		## writes; an empty one is this port's development party and falls back
+		## the way every other screen's name does.
+		texts.append(poison_faint_text(
+			mon.nickname if not mon.nickname.is_empty()
+			else String(data.species(mon.species).get("name", ""))
+		))
+	out["texts"] = texts
+	out["whiteout"] = not party_has_fit_mon(save)
+	return out
+
+
+## `_PoisonFaintText`, whose `wStringBuffer3` is the nickname `GetPartyNickname`
+## put there.
+static func poison_faint_text(nickname: String) -> String:
+	return "%s\nfainted!" % nickname
+
+
+## `_WhitedOutText`. `<PLAYER>` is the name on the save, and the `para` is the
+## page the box turns to.
+static func whited_out_text(player_name: String) -> String:
+	return "%s is out of\nuseable #MON!%s%s whited\nout!" % [
+		player_name, Gen2TextStream.PAGE_BREAK, player_name,
+	]
+
+
+## `Script_Whiteout` past its own text: `HealParty`, `HalveMoney`,
+## `GetWhiteoutSpawn` and the `WarpToSpawnPoint` behind them, in that order.
+##
+## One routine, because every way of blacking out reaches this one script: a
+## battle lost anywhere goes through `Script_reloadmapafterbattle`, and the last
+## party member fainting to poison goes through `.Script_MonFaintedToPoison`.
+##
+## The spawn is `wLastSpawnMapGroup`/`wLastSpawnMapNumber` read back through
+## `IsSpawnPoint`, so a map `blackoutmod` named is honoured here and SPAWN_HOME
+## is what a player who has entered no Pokemon Center gets.
+static func whiteout(
+	world: Gen2WorldAPI, save: Gen2SaveData, persist: bool = true
+) -> Dictionary:
+	if world == null or world.data == null or world.state == null:
+		return _failure(&"missing_world", {})
+	var healed: int = heal_party_rows(world.data, save)
+	if healed < 0:
+		return _failure(&"invalid_party_member", {})
+	## `HalveMoney`'s `srl`/`rra` chain over the three bytes, which is a floor.
+	var before_money: int = world.state.money(0)
+	world.state.apply_changes({}, {}, {"money": {0: before_money >> 1}})
+	var spawn: int = world.whiteout_spawn()
+	var warped: Dictionary = world.warp_to_spawn(spawn)
+	if not bool(warped.get("ok", false)):
+		return _failure(StringName(warped.get("reason", &"missing_spawn")), warped)
+	if persist and save != null:
+		var written: Dictionary = Gen2SaveStore.save(save, world.data)
+		if not bool(written.get("ok", false)):
+			return _failure(&"whiteout_save_failed", {
+				"message": written.get("message", ""),
+			})
+	return {
+		"ok": true,
+		"handled": true,
+		"healed_members": healed,
+		"money_before": before_money,
+		"money_after": world.state.money(0),
+		"spawn": spawn,
+		"warp": warped,
+	}
 
 
 ## Attempts to catch one wild battle mon and consumes the ball on either result.
