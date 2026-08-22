@@ -116,6 +116,12 @@ var _window: Vector2i = WINDOW_SIZE
 ## The renderer to photograph, empty for whichever one the installation last
 ## chose. Restored after the capture so a preview never changes that choice.
 var _view: StringName = &""
+## `bare`: the debug readout off, so the capture is the screen and nothing else.
+var _bare: bool = false
+## `hour=<n>`: the clock the map is drawn on, since an outdoor map's palette is
+## `wTimeOfDay`'s and a capture diffed against a cartridge frame has to be on
+## the same one. -1 leaves the scene's own.
+var _hour: int = -1
 var _restore_view: StringName = &""
 ## Longer than a step onto a warp tile and the fade behind it, for the `warp`
 ## kind, which drives to a frame rather than spending a count.
@@ -221,6 +227,10 @@ func _initialize() -> void:
 				Gen2OptionsStore.current().zoom_step = int(extra.trim_prefix("zoom="))
 			elif extra.begins_with("view="):
 				_view = StringName(extra.trim_prefix("view="))
+			elif extra == "bare":
+				_bare = true
+			elif extra.begins_with("hour="):
+				_hour = int(extra.trim_prefix("hour="))
 		_build_live(
 			data, int(args[1]), int(args[2]),
 			Vector2i(int(args[6]), int(args[7])) if args.size() >= 8 else Vector2i(-1, -1),
@@ -259,6 +269,8 @@ func _build_live(data: GameData, group: int, number: int, cell: Vector2i) -> voi
 	_screen = packed.instantiate() as Gen2WorldScreen
 	_screen.map_group = group
 	_screen.map_number = number
+	if _hour >= 0:
+		_screen.hour = _hour
 	_cell = cell
 	## The transition reads them as a frame count and a branch rather than as a
 	## cell, so the player is left where the map puts them.
@@ -562,9 +574,9 @@ func _process(_delta: float) -> bool:
 			_screen.call(SCREEN_DRIVER % _kind)
 			if String(_kind).ends_with("_use"):
 				_screen.call(SCREEN_DRIVER % _kind)
-		else:
+		elif not _bare:
 			_screen.preview_effect_sprites(_kind)
-		if _kind not in [
+		if not _bare and _kind not in [
 			&"warp", &"door", &"map_name_sign", &"ledge", &"heal_machine",
 			&"battle", &"battle_transition", &"level_evolution", &"egg_hatch",
 			&"name_rater", &"move_deleter", &"move_tutor", &"day_care",
@@ -576,6 +588,11 @@ func _process(_delta: float) -> bool:
 				_screen.advance_frame()
 	if _frames < 18:
 		return false
+	## The map and cell readout and the shortcut legend are scaffolding drawn
+	## over the screen, so a capture meant for a pixel diff against a cartridge
+	## frame has to be taken without them.
+	if _bare:
+		_screen.hide_debug_readout()
 	RenderingServer.force_draw()
 	var image: Image = root.get_texture().get_image()
 	var error: Error = image.save_png(_output_path)

@@ -266,6 +266,15 @@ func _ready() -> void:
 	_build_world()
 
 
+## The two scaffolding labels off, for a capture that is diffed against a
+## cartridge frame pixel for pixel rather than looked at.
+func hide_debug_readout() -> void:
+	if _caption != null:
+		_caption.visible = false
+	if _hint != null:
+		_hint.visible = false
+
+
 ## Supplies a cache-backed data source before the scene enters the tree. The
 ## launcher continues to use GameRuntime; this boundary lets scene tests and
 ## development tools exercise an explicitly selected cache without mutating

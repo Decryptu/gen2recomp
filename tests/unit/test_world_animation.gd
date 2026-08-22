@@ -6,6 +6,12 @@ extends GutTest
 
 var _directory: String = ""
 
+## `constants/tileset_constants.asm`: `TILESET_JOHTO` is one of the three
+## `home/map.asm` gates `LoadMapGroupRoof` on. `TILESET_KANTO` is not, and it is
+## the outdoor counter-example: Kanto's roofs are its tileset's own art.
+const ROOFED_TILESET: int = 0x01
+const UNROOFED_TILESET: int = 0x03
+
 
 func before_each() -> void:
 	_directory = RomCache.directory_for(&"testanimation", "fedcba9876543210")
@@ -426,10 +432,13 @@ func _lit_row(animation: Gen2WorldAnimation, tile: int) -> int:
 
 ## `LoadMapGroupRoof` copies nine tiles over `vTiles2 tile $0a` and touches
 ## nothing else, and a group whose entry is -1 leaves the strip alone.
+##
+## `TILESET_JOHTO`, because `home/map.asm` gates the call on three tilesets and
+## every other one owns tiles $0A..$12 itself; see the second half of this test.
 func test_a_map_group_roof_replaces_nine_tiles_of_the_strip() -> void:
 	var data: GameData = GameData.open_directory(_directory)
-	var tileset: Gen2WorldTileset = data.world_tileset(0)
-	var base: PackedByteArray = data.world_tileset_indices(0)
+	var tileset: Gen2WorldTileset = data.world_tileset(ROOFED_TILESET)
+	var base: PackedByteArray = data.world_tileset_indices(ROOFED_TILESET)
 	var width: int = tileset.tile_count * Gen2Tiles.TILE_WIDTH
 	var left: int = RomLayout.ROOF_VRAM_TILE * Gen2Tiles.TILE_WIDTH
 	var span: int = RomLayout.ROOF_TILES * Gen2Tiles.TILE_WIDTH
@@ -439,7 +448,7 @@ func test_a_map_group_roof_replaces_nine_tiles_of_the_strip() -> void:
 	assert_eq(data.map_group_roof(2), -1)
 
 	for group: int in 2:
-		var map := Gen2WorldMap.from_cache({"group": group, "tileset": 0})
+		var map := Gen2WorldMap.from_cache({"group": group, "tileset": ROOFED_TILESET})
 		var drawn: PackedByteArray = data.map_tile_indices(map, tileset)
 		assert_eq(drawn.size(), base.size())
 		for y: int in Gen2Tiles.TILE_HEIGHT:
@@ -450,8 +459,32 @@ func test_a_map_group_roof_replaces_nine_tiles_of_the_strip() -> void:
 					"group %d pixel %d,%d" % [group, x, y],
 				)
 
-	var plain := Gen2WorldMap.from_cache({"group": 2, "tileset": 0})
+	var plain := Gen2WorldMap.from_cache({"group": 2, "tileset": ROOFED_TILESET})
 	assert_eq(data.map_tile_indices(plain, tileset), base)
+
+
+## `home/map.asm`: "These tilesets support dynamic per-mapgroup roof tiles",
+## and it names three. Every other tileset owns tiles $0A..$12 itself, so a roof
+## written over them is the map's own art destroyed: reading the group alone put
+## roof shingles through 106 Crystal maps and 98 Gold and Silver ones, every
+## house, gym and Pokemon Center in a roofed group among them.
+func test_only_the_three_gated_tilesets_take_their_map_groups_roof() -> void:
+	var data: GameData = GameData.open_directory(_directory)
+	var roofed: Gen2WorldTileset = data.world_tileset(ROOFED_TILESET)
+	var indoor: Gen2WorldTileset = data.world_tileset(UNROOFED_TILESET)
+	assert_not_null(roofed)
+	assert_not_null(indoor)
+	assert_eq(data.map_group_roof(0), 0, "the group carries a roof either way")
+
+	var outdoor_map := Gen2WorldMap.from_cache({"group": 0, "tileset": ROOFED_TILESET})
+	var indoor_map := Gen2WorldMap.from_cache({"group": 0, "tileset": UNROOFED_TILESET})
+	assert_eq(data.map_roof(outdoor_map, roofed), 0)
+	assert_eq(data.map_roof(indoor_map, indoor), -1)
+	assert_eq(
+		data.map_tile_indices(indoor_map, indoor),
+		data.world_tileset_indices(UNROOFED_TILESET),
+		"an indoor map draws its tileset's own tiles and nothing else"
+	)
 
 
 ## `_LoadMapPals`' tail: colours 1 and 2 of `PAL_BG_ROOF` come from the map

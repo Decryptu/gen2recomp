@@ -307,7 +307,19 @@ func _compare_roof_strip(
 			group, tileset.number, drawn.size(), base.size(),
 		])
 		return
-	var roof: int = _r.data.map_group_roof(group)
+	## The pin's own gate, not ours: `home/map.asm` runs `LoadMapGroupRoof` for
+	## three tilesets on Crystal and two on Gold and Silver, and every other
+	## tileset owns tiles $0A..$12 itself. Reading the group alone here is what
+	## let 106 Crystal maps and 98 Gold and Silver ones draw roof shingles over
+	## their own art while this check stayed green.
+	var gated: bool = _roof_tilesets(pin).has(tileset.number)
+	var roof: int = _r.data.map_group_roof(group) if gated else -1
+	var ours: int = _r.data.map_roof(map, tileset)
+	if ours != roof:
+		_report("map group %d tileset %d: the roof is %d, the pin's gate says %d." % [
+			group, tileset.number, ours, roof,
+		])
+		return
 	var pinned: PackedByteArray = _roof_pixels(pin, roof)
 	var width: int = tileset.tile_count * Gen2Tiles.TILE_WIDTH
 	var left: int = RomLayout.ROOF_VRAM_TILE * Gen2Tiles.TILE_WIDTH
@@ -495,6 +507,51 @@ func _label_paths(pin: String, relative: String) -> Dictionary:
 		return _includes(pin.path_join(relative))
 	)
 
+
+
+## The tilesets `home/map.asm` gates `LoadMapGroupRoof` on, read off the pin's
+## own `cp TILESET_*` run and resolved through `constants/tileset_constants.asm`,
+## so Gold and Silver's two and Crystal's three each come from their own source
+## rather than from a number kept here.
+func _roof_tilesets(pin: String) -> Array:
+	return _parsed(pin, &"roof_tilesets", func() -> Array:
+		var numbers: Dictionary = _tileset_numbers(pin)
+		var out: Array = []
+		var open: bool = false
+		for line: String in _lines(pin.path_join("home/map.asm")):
+			if line.begins_with("ld a, [wMapTileset]"):
+				open = true
+				continue
+			if not open:
+				continue
+			if line.begins_with("cp TILESET_"):
+				var name: String = line.substr("cp ".length()).strip_edges()
+				if numbers.has(name):
+					out.append(int(numbers[name]))
+				continue
+			if line.begins_with(".load_roof") or line.begins_with("jr .skip_roof"):
+				break
+		return out
+	)
+
+
+## `constants/tileset_constants.asm`'s `const TILESET_*` run. Its `const_def 1`
+## is the whole point of reading the operand: `Tileset0` carries no constant of
+## its own, so the run starts at one and counting from zero puts every tileset
+## here one low.
+func _tileset_numbers(pin: String) -> Dictionary:
+	return _parsed(pin, &"tileset_numbers", func() -> Dictionary:
+		var out: Dictionary = {}
+		var next: int = 0
+		for line: String in _lines(pin.path_join("constants/tileset_constants.asm")):
+			if line.begins_with("const_def"):
+				var operand: PackedStringArray = line.split(" ", false)
+				next = _number(operand[1]) if operand.size() > 1 else 0
+			elif line.begins_with("const TILESET_"):
+				out[line.substr("const ".length()).strip_edges()] = next
+				next += 1
+		return out
+	)
 
 ## `DEF COLL_WALL EQU $07`.
 func _collision_values(pin: String) -> Dictionary:
