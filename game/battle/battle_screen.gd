@@ -205,6 +205,12 @@ var _hud_balls: Array = []
 var _hud_border: Array = []
 ## `SlideBattlePicOut`, one entry per square still sliding off.
 var _slides: Array[Dictionary] = []
+## How far each square's picture has walked off it, in pixels along x, signed the
+## way the walk goes: the player leaves to the left and the opponent to the
+## right. Kept after the walk ends rather than dropped with the slide's entry,
+## because the picture stays off the square until the ball puts a Pokemon there;
+## that stretch is the `none` [method _entrance_side] reports.
+var _slid_pixels: Dictionary = {Gen2Battle.PLAYER: 0.0, Gen2Battle.ENEMY: 0.0}
 ## `AnimateFrontpic` over the enemy's square, or null when none is running.
 var _frontpic: Gen2PicAnimation = null
 ## `wAttrmap` bit 3, which `PokeAnim_SetVBank1` sets over that square while the
@@ -490,6 +496,10 @@ func advance_slide() -> bool:
 	slide["step"] = int(slide["step"]) + 1
 	var player_side: bool = bool(slide["player_side"])
 	Gen2BattleScreenMap.slide_step(_bg_map, player_side)
+	var side: int = Gen2Battle.PLAYER if player_side else Gen2Battle.ENEMY
+	_slid_pixels[side] = float(_slid_pixels[side]) + (
+		-float(Gen2Tiles.TILE_WIDTH) if player_side else float(Gen2Tiles.TILE_WIDTH)
+	)
 	if int(slide["step"]) >= int(Gen2BattleScreenMap.SLIDE_STEPS[player_side]):
 		_slides.remove_at(0)
 	_push_view()
@@ -1089,6 +1099,7 @@ func _init_battle_display() -> void:
 	_intro_message = ""
 	_entrance_stages = []
 	_slides = []
+	_slid_pixels = {Gen2Battle.PLAYER: 0.0, Gen2Battle.ENEMY: 0.0}
 	_frontpic = null
 	_bg_vbank1 = PackedByteArray()
 	_hud_balls = []
@@ -1353,8 +1364,10 @@ func _apply_entrance_step(what: StringName) -> void:
 			# before the ball is thrown, and the square itself is empty until
 			# `BATTLE_BG_EFFECT_ENTER_MON` stamps the map back.
 			_enemy_trainer_pic = 0
+			_slid_pixels[Gen2Battle.ENEMY] = 0.0
 		ENTRANCE_PLAYER_PIC:
 			_player_backpic = ""
+			_slid_pixels[Gen2Battle.PLAYER] = 0.0
 	_push_view()
 
 
@@ -4575,10 +4588,9 @@ func _push_view() -> void:
 		## `CopyBackpic` puts the player's back pic on the tilemap before
 		## `InitBattleDisplay` ever reaches the slide, so it is there through it
 		## and comes in with the middle band. Its top three tile rows fall in the
-		## band the enemy scrolls, which is what the eighteen sprites below are
+		## band the enemy scrolls, which is what the eighteen sprites here are
 		## for; `PlaceGraphic` afterwards is what settles the two pixels between
 		## them.
-		"player_pic_visible": true,
 		"intro_sprites": _intro.sprites() if _intro != null else [],
 		## `GetSGBLayout SCGB_BATTLE_GRAYSCALE` is called where the battle is
 		## entered and `SCGB_BATTLE_COLORS` only after `BattleIntroSlidingPics`,
@@ -4608,9 +4620,63 @@ func _push_view() -> void:
 		## Whether both panels are on the map, which is the summary of the two
 		## keys above rather than a third state.
 		"hud_visible": _hud_visible(),
+		## Who is standing on each square and how far off it they are, resolved:
+		## see [method _entrance_side].
+		"entrance": {
+			"player": _entrance_side(Gen2Battle.PLAYER),
+			"enemy": _entrance_side(Gen2Battle.ENEMY),
+		},
 	})
 	if _box != null:
 		_box.raster_scx = _box_raster_offsets()
+
+
+## What is standing on one side's square and how far it is from standing on it,
+## for a renderer that stages the fight somewhere other than a 20x18 tile page.
+##
+## Every other field describing the entrance says it in the terms the hardware
+## draws it in: the slide in is a scanline scroll, the walk off is columns going
+## blank in `bg_map`, and the player mid-slide is eighteen OAM entries. A view
+## with no background plane has none of those three and would have to rebuild
+## host state to read either movement. These three values are that state said
+## plainly.
+##
+## [code]kind[/code] is what the square holds: [code]&"trainer"[/code] a person,
+## [code]&"mon"[/code] a Pokemon, and [code]&"none"[/code] the stretch between
+## the trainer walking off and the ball putting a Pokemon there.
+## [code]offset_pixels[/code] is how far that picture is from its resting square
+## and covers both movements with one number, because both are one thing: the
+## opening slide brings a picture in and `SlideBattlePicOut` takes it off again.
+## Zero is standing still, which is every frame outside an entrance.
+func _entrance_side(side: int) -> Dictionary:
+	var player_side: bool = side == Gen2Battle.PLAYER
+	var backpic: String = _player_backpic if player_side else ""
+	var trainer_class: int = 0 if player_side else _enemy_trainer_pic
+	var species: int = _player if player_side else _enemy
+	var person: bool = not backpic.is_empty() if player_side else trainer_class > 0
+	var offset: float = 0.0
+	var kind: StringName = &"mon"
+	if _intro != null:
+		# Both squares are sliding in. A wild opponent is its own front pic
+		# rather than a trainer, and slides in exactly the same way.
+		offset = _intro.player_offset() if player_side else _intro.enemy_offset()
+		kind = &"trainer" if person else &"mon"
+	elif person:
+		offset = float(_slid_pixels[side])
+		var walked: float = float(
+			int(Gen2BattleScreenMap.SLIDE_STEPS[player_side]) * Gen2Tiles.TILE_WIDTH
+		)
+		kind = &"none" if absf(offset) >= walked else &"trainer"
+	return {
+		"kind": kind,
+		## Empty and zero on the side and in the state they do not describe: the
+		## player is named by a back pic and the opponent by a class number, and
+		## neither is on the square once a Pokemon has taken it.
+		"backpic": backpic if kind == &"trainer" else "",
+		"trainer_class": trainer_class if kind == &"trainer" else 0,
+		"species": species if kind == &"mon" else 0,
+		"offset_pixels": Vector2(offset, 0.0),
+	}
 
 
 ## The background scroll for the whole screen: the intro's own bands, or an

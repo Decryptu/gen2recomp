@@ -540,7 +540,15 @@ func test_a_battle_opens_on_the_slide_and_says_nothing_until_it_is_done() -> voi
 	## the opponent comes in from the left. Both are drawn without colour:
 	## `SCGB_BATTLE_GRAYSCALE` is set where the battle is entered and
 	## `SCGB_BATTLE_COLORS` only after the slide returns.
-	assert_true(bool(view["player_pic_visible"]), "the back pic slides in too")
+	var entering: Dictionary = view["entrance"]
+	assert_gt(
+		(entering["player"] as Dictionary)["offset_pixels"].x, 0.0,
+		"the back pic slides in too, from the right"
+	)
+	assert_lt(
+		(entering["enemy"] as Dictionary)["offset_pixels"].x, 0.0,
+		"and the opponent from the left"
+	)
 	assert_true(bool(view["grayscale"]), "and the battle has no colour yet")
 	assert_eq(
 		(view["intro_sprites"] as Array).size(),
@@ -562,7 +570,12 @@ func test_a_battle_opens_on_the_slide_and_says_nothing_until_it_is_done() -> voi
 		"the start message waited for the slide"
 	)
 	var settled: Dictionary = _battle_screen._renderer._view
-	assert_true(bool(settled["player_pic_visible"]))
+	var standing: Dictionary = settled["entrance"]
+	assert_eq(
+		(standing["player"] as Dictionary)["offset_pixels"], Vector2.ZERO,
+		"both are on their squares once the slide has returned"
+	)
+	assert_eq((standing["enemy"] as Dictionary)["offset_pixels"], Vector2.ZERO)
 	assert_false(bool(settled["grayscale"]), "`SCGB_BATTLE_COLORS` runs after the slide")
 	assert_true((settled["intro_sprites"] as Array).is_empty(), "`HideSprites`")
 	assert_true(PackedInt32Array(settled["raster_scx"]).is_empty(), "and nothing is scrolled")
@@ -645,3 +658,104 @@ func test_the_doll_is_what_a_substituted_side_draws() -> void:
 		"type": Gen2Battle.SUBSTITUTE_PIC, "side": Gen2Battle.PLAYER, "raised": false,
 	})
 	assert_eq(renderer._player_pixels, own)
+
+
+## The whole entrance as `view["entrance"]` reports it, one side at a time: who
+## is standing on each square, and how far off it they are.
+##
+## This is the field a renderer with no background plane has instead of the
+## scanline scroll and the blanking `bg_map` columns, so it is asserted as the
+## sequence a fight actually opens with rather than at one sampled frame: two
+## trainers slide in, each walks off its own square, and a Pokemon takes it.
+##
+## The two sides do not pass through the same states, and the reason is one line
+## of the source. `ShowBattleTextEnemySentOut` waits on a press, so the
+## opponent's square stands empty for as long as the player takes to read it;
+## `SendOutMonText` "ends in `done`" and prints with the ball already in the air,
+## so the player's square is never empty at the end of a frame. That also costs
+## the player's walk its last step at a frame boundary: the ninth column shifts
+## and the Pokemon is stamped in the same frame, so what a renderer is handed is
+## the eighth, which is what every other field says at that frame too.
+func test_the_entrance_says_who_is_on_each_square_and_how_far_off_it() -> void:
+	await _open_battle()
+	_battle_screen.show_trainer(Fixture.TRAINER_CLASS, 0)
+
+	var kinds: Dictionary = {"player": [], "enemy": []}
+	var lows: Dictionary = {"player": 0.0, "enemy": 0.0}
+	var highs: Dictionary = {"player": 0.0, "enemy": 0.0}
+	var guard: int = 8000
+	while (_battle_screen.frames_running() or _battle_screen.entrance_running()) \
+		and guard > 0:
+		guard -= 1
+		for who: String in kinds:
+			var side: Dictionary = (
+				_battle_screen._renderer._view["entrance"] as Dictionary
+			)[who]
+			var kind: StringName = StringName(side["kind"])
+			if (kinds[who] as Array).is_empty() or (kinds[who] as Array).back() != kind:
+				(kinds[who] as Array).append(kind)
+			var at: float = (side["offset_pixels"] as Vector2).x
+			lows[who] = minf(float(lows[who]), at)
+			highs[who] = maxf(float(highs[who]), at)
+		_battle_screen.advance_frame()
+		if _battle_screen.frames_running() or not _battle_screen.entrance_running():
+			continue
+		_battle_screen.finish()
+		_battle_screen.advance()
+	assert_gt(guard, 0, "the entrance finished")
+
+	assert_eq(
+		kinds["enemy"], [&"trainer", &"none", &"mon"],
+		"a person, then the square they left, then a Pokemon"
+	)
+	assert_eq(
+		kinds["player"], [&"trainer", &"mon"],
+		"the player's own empty square has no frame of its own"
+	)
+	# `SlideBattlePicOut` walks the player's square nine tiles to the left and
+	# the opponent's eight to the right, and the opening slide brings each in
+	# from the side it later leaves towards.
+	var step: int = Gen2Tiles.TILE_WIDTH
+	assert_eq(
+		lows["player"], -float((int(Gen2BattleScreenMap.SLIDE_STEPS[true]) - 1) * step),
+		"the player walks off to the left, all but the step it is replaced on"
+	)
+	assert_gt(float(highs["player"]), 0.0, "and slid in from the right")
+	assert_eq(
+		highs["enemy"], float(int(Gen2BattleScreenMap.SLIDE_STEPS[false]) * step),
+		"the opponent walks the whole way off, to the right"
+	)
+	assert_lt(float(lows["enemy"]), 0.0, "and slid in from the left")
+
+	# Nothing is moving once the fight has started, and both squares name the
+	# Pokemon standing on them rather than the people who brought them.
+	var fighting: Dictionary = _battle_screen._renderer._view["entrance"]
+	for who: String in ["player", "enemy"]:
+		var side: Dictionary = fighting[who]
+		assert_eq(side["offset_pixels"], Vector2.ZERO, who)
+		assert_eq(String(side["backpic"]), "", who)
+		assert_eq(int(side["trainer_class"]), 0, who)
+		assert_gt(int(side["species"]), 0, "%s: and it is a species" % who)
+
+
+## A wild opponent is never a trainer: it slides in as its own front pic and
+## stands on its square for the whole fight, while the player still arrives
+## behind a back pic that walks off.
+func test_a_wild_opponent_is_its_own_picture_from_the_first_frame() -> void:
+	await _open_battle()
+	_battle_screen.show_matchup(16, 155, 7, 9)
+
+	var enemy: Dictionary = (
+		_battle_screen._renderer._view["entrance"] as Dictionary
+	)["enemy"]
+	assert_eq(StringName(enemy["kind"]), &"mon")
+	assert_eq(int(enemy["species"]), 16)
+	assert_lt((enemy["offset_pixels"] as Vector2).x, 0.0, "and it is still sliding in")
+	assert_eq(
+		StringName((
+			(_battle_screen._renderer._view["entrance"] as Dictionary)["player"]
+			as Dictionary
+		)["kind"]),
+		&"trainer",
+		"the player is a person at the same moment",
+	)

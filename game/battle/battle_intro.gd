@@ -151,6 +151,29 @@ func offsets() -> PackedInt32Array:
 	return out
 
 
+## How far the picture standing in each band is from its resting square, along
+## x and in pixels, for a renderer with no background plane to read a scroll off.
+## Zero once the slide has returned.
+##
+## Taken from the band's own arithmetic rather than from the byte [method
+## offsets] reports, because a scroll register cannot say which way a picture is
+## travelling: the two bands come in from opposite sides, and Crystal's middle
+## runs two pixels past its square and back, so the same `$02` reads as +254 or
+## -2 depending only on when in the slide it was sampled. The unwrapped step
+## count has no such ambiguity.
+##
+## The top band carries the opponent, which is in from the left, so its
+## displacement is negative and climbs to zero. The middle carries the player,
+## in from the right, so its own falls to zero and then to the -2 Crystal
+## overshoots by before `InitBattleDisplay`'s `xor a` settles it.
+func enemy_offset() -> float:
+	return 0.0 if finished() else float(-_top_scx())
+
+
+func player_offset() -> float:
+	return 0.0 if finished() else float(MAP_WIDTH - _middle_scx())
+
+
 func _is_gold_lead() -> bool:
 	return not _crystal and _frame < GOLD_LEAD_FRAMES
 
@@ -159,17 +182,27 @@ func _is_gold_lead() -> bool:
 ## `hSCX`, which VBlank copies to `rSCX` a frame late, so their top band trails
 ## the middle by one. Crystal's two bands share a table and lag together.
 func _top_offset() -> int:
-	if _crystal:
-		return posmod(CRYSTAL_TOP_START - STEP * _frame, MAP_WIDTH)
-	var stepped: int = maxi(_frame - GOLD_LEAD_FRAMES, 0)
-	return posmod(GOLD_TOP_START - STEP * maxi(stepped - 1, 0), MAP_WIDTH)
+	return posmod(_top_scx(), MAP_WIDTH)
 
 
 ## `$72` and `$70` up by two each frame. Crystal's runs past the end of a byte
 ## and wraps, which is why it lands on 2.
 func _middle_offset() -> int:
+	return posmod(_middle_scx(), MAP_WIDTH)
+
+
+## The two bands before the hardware's own wrap, which is what [method
+## enemy_offset] and [method player_offset] need and what the byte above hides.
+func _top_scx() -> int:
 	if _crystal:
-		return posmod(CRYSTAL_MIDDLE_START + STEP * _frame, MAP_WIDTH)
+		return CRYSTAL_TOP_START - STEP * _frame
+	var stepped: int = maxi(_frame - GOLD_LEAD_FRAMES, 0)
+	return GOLD_TOP_START - STEP * maxi(stepped - 1, 0)
+
+
+func _middle_scx() -> int:
+	if _crystal:
+		return CRYSTAL_MIDDLE_START + STEP * _frame
 	if _is_gold_lead():
 		return GOLD_TOP_START
-	return posmod(GOLD_MIDDLE_START + STEP * (_frame - GOLD_LEAD_FRAMES), MAP_WIDTH)
+	return GOLD_MIDDLE_START + STEP * (_frame - GOLD_LEAD_FRAMES)

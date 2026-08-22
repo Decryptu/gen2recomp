@@ -191,39 +191,32 @@ func _draw_pics() -> void:
 			),
 			enemy_palette
 		)
-	# `InitBattleDisplay` places the player's back pic with `PlaceGraphic` only
-	# after `BattleIntroSlidingPics` has returned, so it is not on the map to be
-	# scrolled and is simply not there yet.
-	if bool(_view.get("player_pic_visible", true)):
-		var player: int = int(_view.get("player_species", 0))
-		var player_palette: PackedColorArray = _battler_palette(
-			player, Gen2BattleAnimBackground.PAL_BG_PLAYER
+	var player: int = int(_view.get("player_species", 0))
+	var player_palette: PackedColorArray = _battler_palette(
+		player, Gen2BattleAnimBackground.PAL_BG_PLAYER
+	)
+	# `GetPlayerOrMonPalettePointer`'s `and a / jp nz`: a zero species is the
+	# player standing there, and the palette is the player's own.
+	var backpic: String = String(_view.get("player_backpic", ""))
+	if not backpic.is_empty() and not bool(_view.get("grayscale", false)):
+		player_palette = _remap(
+			_data.player_palette(String(_view.get("player_backpic_palette", "chris"))),
+			_palette_map("bg_palette_maps", Gen2BattleAnimBackground.PAL_BG_PLAYER)
 		)
-		# `GetPlayerOrMonPalettePointer`'s `and a / jp nz`: a zero species is the
-		# player standing there, and the palette is the player's own.
-		var backpic: String = String(_view.get("player_backpic", ""))
-		if not backpic.is_empty() and not bool(_view.get("grayscale", false)):
-			player_palette = _remap(
-				_data.player_palette(String(_view.get("player_backpic_palette", "chris"))),
-				_palette_map("bg_palette_maps", Gen2BattleAnimBackground.PAL_BG_PLAYER)
-			)
-		var player_key: Array = [
-			map_key, player, _player_pixels_key, player_palette, raster,
-			vbank1.duplicate(), gray,
-		]
-		if player_key != _player_pic_key:
-			_player_pic_key = player_key
-			_show_layer(
-				_player_pic,
-				_pic_layer(
-					map, Gen2BattleScreenMap.PLAYER_BASE_TILE,
-					Gen2BattleScreenMap.PLAYER_SIDE, _player_pixels, vbank1
-				),
-				player_palette
-			)
-	else:
-		_player_pic.texture = null
-		_player_pic_key = []
+	var player_key: Array = [
+		map_key, player, _player_pixels_key, player_palette, raster,
+		vbank1.duplicate(), gray,
+	]
+	if player_key != _player_pic_key:
+		_player_pic_key = player_key
+		_show_layer(
+			_player_pic,
+			_pic_layer(
+				map, Gen2BattleScreenMap.PLAYER_BASE_TILE,
+				Gen2BattleScreenMap.PLAYER_SIDE, _player_pixels, vbank1
+			),
+			player_palette
+		)
 
 
 ## `wAttrmap` bit 3 over the screen, which is the VRAM bank each cell's tile
