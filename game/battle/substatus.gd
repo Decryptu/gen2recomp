@@ -68,6 +68,11 @@ const LOCK_ON: int = 1 << 25
 const BIDE: int = 1 << 26
 const RAGE: int = 1 << 27
 const TRANSFORMED: int = 1 << 28
+## `SUBSTATUS_IN_LOOP`, set by `endloop` on the pass that decides how many hits a
+## multi-hit move gets and cleared on the pass that runs out. A target that
+## faints mid-loop ends the move with it still set, which is the cartridge's own
+## arrangement and what `supereffectivelooptext` reads.
+const IN_LOOP: int = 1 << 29
 
 const NONE: int = 0
 

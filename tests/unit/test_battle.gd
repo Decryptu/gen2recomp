@@ -1183,16 +1183,19 @@ func test_a_two_turn_move_ignores_the_slot_it_is_asked_for_on_release() -> void:
 	assert_eq(int(_first(second_turn, Gen2Battle.USED_MOVE)["move"]), Fixture.SOLARBEAM)
 
 
-func test_skull_bashs_charge_raises_defense_only_once_it_lands() -> void:
+func test_skull_bashs_charge_raises_defense_on_the_turn_it_lowers_its_head() -> void:
+	# `BattleCommand_Charge` skips to `endturn` for Skull Bash alone, and the two
+	# commands behind that marker are `defenseup, statupmessage`. The release
+	# turn's `checkcharge` skips over `charge`, so it never reaches them.
 	var battle: Gen2Battle = _battle(
 		_mon(Fixture.PIKACHU, 50, [Fixture.SKULL_BASH]),
 		_mon(Fixture.GEODUDE, 50, [Fixture.TACKLE])
 	)
 	battle.take_turn(0, 0)
-	assert_eq(battle.player.stage("defense"), 0, "nothing moves on the charge turn")
+	assert_eq(battle.player.stage("defense"), 1, "the charge turn is what raises it")
 
 	battle.take_turn(0, 0)
-	assert_eq(battle.player.stage("defense"), 1)
+	assert_eq(battle.player.stage("defense"), 1, "and the landing turn does not raise it again")
 
 
 func test_toxic_takes_more_each_turn_than_an_ordinary_poison_would() -> void:

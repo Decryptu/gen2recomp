@@ -72,9 +72,6 @@ var bide_release: bool = false
 ## [method Gen2EffectCommands._thunder_accuracy] sets it.
 var accuracy: int = -1
 
-## Solarbeam in sun: [method Gen2EffectCommands._charge_move] locks nothing in.
-var skip_charge: bool = false
-
 ## A secondary effect's roll came up short. Not [member ended]: the damage
 ## stands and only what was behind the roll is skipped.
 var failed_chance: bool = false
@@ -92,6 +89,28 @@ var someone_is_rampaging: bool = false
 ## A drop blocked by Mist, which the fail-text step says differently from an
 ## "already at the bottom" one.
 var stat_mist_blocked: bool = false
+
+## `SkipToBattleCommand`: the command the runner walks forward to without running
+## anything, the named one included. Empty for the ordinary next step.
+var skip_to: StringName = &""
+
+## `BattleCommand_EndLoop`'s `.loop_back_to_critical`, which rewinds the script
+## pointer to the `critical` behind it. Consumed by [Gen2Battle] as soon as the
+## command returns.
+var loop_back: bool = false
+
+## `wCriticalHit` at 2, which `BattleCommand_OHKO` writes and `criticaltext`
+## reads: the hit says "It's a one-hit KO!" instead of "A critical hit!".
+var one_hit_ko: bool = false
+
+## `wBeatUpHitAtLeastOnce`, which is what `beatupfailtext` reads: a Beat Up whose
+## every member was fainted or statused says "But it failed!" and one that landed
+## anything says nothing.
+var beat_up_hit: bool = false
+
+## How many hits a multi-hit move has landed, which is the number its "hit N
+## times!" line prints. `wPlayerDamageTaken` holds it on the cartridge.
+var loop_hits: int = 0
 
 
 static func create(

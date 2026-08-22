@@ -579,6 +579,14 @@ var _faint_charged: Dictionary = {}
 ## cartridge's `wCurDamage` is move-local, not a history.
 var _last_damage_taken: Dictionary = {PLAYER: {}, ENEMY: {}}
 
+## `DoMove`'s own artefact: every effect command executed, in the order the read
+## cycle reached it, skips and loop passes included. Collected only while
+## `trace_commands` is on, which `tools/trace_battle_commands.gd` turns on so a
+## fought turn can be diffed against `.claude/oracle/battle/trace_move_commands.py`'s
+## reading of the same one.
+static var trace_commands: bool = false
+var command_trace: Array[StringName] = []
+
 ## `wPlayerFutureSightCount/Damage` and the enemy pair. Keyed by the side that
 ## foresaw the attack, so switching either active Pokémon leaves it intact and
 ## the eventual target is whoever is opposite when the count reaches one.
@@ -814,6 +822,18 @@ func schedule_future_sight(side: int, damage: int) -> bool:
 		return false
 	_future_sight[side] = {"count": 4, "damage": clampi(damage, 0, 0xFFFF)}
 	return true
+
+
+## `BattleCommand_CheckFutureSight`'s own read: the count still standing, and on
+## the turn it is one, the stored word taken and the count cleared.
+func future_sight_count(side: int) -> int:
+	return int((_future_sight.get(side, {}) as Dictionary).get("count", 0))
+
+
+func take_future_sight_damage(side: int) -> int:
+	var pending: Dictionary = _future_sight[side]
+	pending["count"] = 0
+	return int(pending.get("damage", 0))
 
 
 ## A battle is lost when a whole party is down, not when the Pokémon that is out
@@ -1577,7 +1597,9 @@ func _report_unannounced_action_faints(events: Array, since: int) -> void:
 
 
 ## `HandleFutureSight`, player then enemy: the count is decremented before it is
-## tested, and the stored base damage takes its spread on impact.
+## tested, and the move is then run through `DoMove` like any other, so the
+## stored word takes its spread, its hit roll and its faint check inside the
+## effect list rather than beside it. `checkfuturesight` is what loads it.
 func _tick_future_sight(events: Array) -> void:
 	for side: int in [PLAYER, ENEMY]:
 		var pending: Dictionary = _future_sight[side]
@@ -1588,23 +1610,13 @@ func _tick_future_sight(events: Array) -> void:
 		pending["count"] = count
 		if count != 1:
 			continue
-		pending["count"] = 0
 		if mon(side).is_fainted() or mon(opponent_of(side)).is_fainted():
+			pending["count"] = 0
 			continue
 		events.append({"type": FUTURE_SIGHT_HIT, "side": side, "target": opponent_of(side)})
-		var move: Dictionary = data.move(Gen2MoveEffect.FUTURE_SIGHT_MOVE)
-		var turn: Gen2Turn = Gen2Turn.create(
-			self, side, -1, Gen2MoveEffect.FUTURE_SIGHT_MOVE, move, events
-		)
-		turn.damage = int(pending.get("damage", 0))
-		for command: StringName in [
-			Gen2EffectCommands.DAMAGE_VARIATION, Gen2EffectCommands.CHECK_HIT,
-			Gen2EffectCommands.MOVE_ANIM_NO_SUB, Gen2EffectCommands.APPLY_DAMAGE,
-			Gen2EffectCommands.CHECK_FAINT,
-		]:
-			if turn.ended:
-				break
-			Gen2EffectCommands.run(command, turn)
+		var number: int = Gen2MoveEffect.FUTURE_SIGHT_MOVE
+		var turn: Gen2Turn = Gen2Turn.create(self, side, -1, number, data.move(number), events)
+		run_move_effect(turn)
 
 
 ## `wPlayerIsSwitching` and `wEnemyIsSwitching`, zeroed each turn the way
@@ -2567,18 +2579,45 @@ func _act(side: int, slot: int, move_number: int, events: Array) -> void:
 	# which is the cartridge's arrangement: every move goes through it, so no
 	# sequence has to remember to include it.
 	Gen2EffectCommands.run(Gen2EffectCommands.CHECK_STATUS, turn)
-	_run_move_effect(turn)
+	run_move_effect(turn)
 
 
+## The command interpreter: `DoMove`'s own read cycle over the list an effect
+## byte picks, with `SkipToBattleCommand` and `endloop`'s rewind to `critical`.
+##
 ## `ResetTurn`, used by Metronome, Mirror Move and Sleep Talk: the called move
 ## replaces the working one and starts its list from the beginning, without the
 ## once-per-action status gate. A fresh [Gen2Turn] is that clean move-struct copy,
 ## keeping the acting side and the one event stream.
-func _run_move_effect(turn: Gen2Turn, depth: int = 0) -> void:
-	for command: StringName in Gen2MoveEffect.sequence_for(turn.effect()):
+func run_move_effect(turn: Gen2Turn, depth: int = 0) -> void:
+	var sequence: Array = Gen2MoveEffect.sequence_for(turn.effect())
+	var counter: int = 0
+	while counter < sequence.size():
 		if turn.ended:
 			return
+		var command: StringName = sequence[counter]
+		counter += 1
+		# `SkipToBattleCommand` walks the pointer past the byte it matched, so
+		# the command it was sent to find is not run either.
+		if turn.skip_to != &"":
+			if command == turn.skip_to:
+				turn.skip_to = &""
+			continue
+		if trace_commands:
+			command_trace.append(command)
 		Gen2EffectCommands.run(command, turn)
+		if turn.ended:
+			return
+		if turn.loop_back:
+			# `.loop_back_to_critical` scans down for `critical` and resumes on
+			# it, not behind it.
+			turn.loop_back = false
+			var back: int = sequence.rfind(Gen2EffectCommands.CRITICAL, counter - 1)
+			if back < 0:
+				push_error("a looping effect has no critical to return to")
+				return
+			counter = back
+			continue
 		if turn.called_move_number == 0:
 			continue
 		if depth >= 16:
@@ -2597,7 +2636,7 @@ func _run_move_effect(turn: Gen2Turn, depth: int = 0) -> void:
 			self, turn.side, -1, number, called_move, turn.events
 		)
 		called_turn.called = true
-		_run_move_effect(called_turn, depth + 1)
+		run_move_effect(called_turn, depth + 1)
 		return
 
 

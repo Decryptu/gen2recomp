@@ -55,10 +55,7 @@ func _run_move(battle: Gen2Battle, move_number: int, side: int = Gen2Battle.PLAY
 		battle, side, 0, move_number, _data.move(move_number), events
 	)
 	Gen2EffectCommands.run(Gen2EffectCommands.CHECK_STATUS, turn)
-	for command: StringName in Gen2MoveEffect.sequence_for(turn.effect()):
-		if turn.ended:
-			break
-		Gen2EffectCommands.run(command, turn)
+	battle.run_move_effect(turn)
 	return events
 
 
