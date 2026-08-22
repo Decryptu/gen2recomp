@@ -1369,11 +1369,9 @@ func _teach_refusal(reason: StringName, party_index: int) -> String:
 	var target_name: String = _target_name(party_index)
 	match reason:
 		&"not_compatible":
-			return "%s is not compatible with %s. It can't learn %s." % [
-				move_name, target_name, move_name,
-			]
+			return Gen2WorldTMHM.not_compatible_text(target_name, move_name)
 		&"already_knows_move":
-			return "%s knows %s." % [target_name, move_name]
+			return Gen2WorldTMHM.knows_move_text(target_name, move_name)
 		&"cannot_forget_hm":
 			return Gen2MoveForget.cant_forget_hm_text()
 		&"invalid_forget_slot":

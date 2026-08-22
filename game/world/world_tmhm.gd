@@ -99,3 +99,17 @@ static func teach_prompt(data: GameData, item: int) -> Dictionary:
 		"hm": is_hm(item),
 		"text": "%s It contained %s. Teach %s to a #MON?" % [booted, move_name, move_name],
 	}
+
+
+## `_TMHMNotCompatibleText` (data/text/common_2.asm), which `TeachTMHM` and
+## `CheckCanLearnMoveTutorMove` both print when `CanLearnTMHMMove` says no.
+static func not_compatible_text(mon_name: String, move_name: String) -> String:
+	return "%s is not compatible with %s. It can't learn %s." % [
+		move_name, mon_name, move_name,
+	]
+
+
+## `_KnowsMoveText` (data/text/common_3.asm), printed by `KnowsMove` itself, so
+## every caller that reaches it shows this line and no other.
+static func knows_move_text(mon_name: String, move_name: String) -> String:
+	return "%s knows %s." % [mon_name, move_name]

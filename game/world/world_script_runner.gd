@@ -176,6 +176,11 @@ const SPECIAL_SELECT_APRICORN_FOR_KURT: int = 86
 ## the same shape `NameRater` does, one house further on, so it is one host
 ## request as well.
 const SPECIAL_MOVE_DELETION: int = 33
+## MoveTutor, 131, Crystal's alone: pokegold's SpecialsPointers has no row for
+## it and no Gold or Silver script reaches one. `MoveTutor` owns the party list
+## `ChooseMonToLearnTMHM` opens and the `.loop` behind it, so the whole routine
+## is one host request; the map script reads wScriptVar afterwards.
+const SPECIAL_MOVE_TUTOR: int = 131
 ## The Day-Care's five, all below the first index the two tables disagree on, so
 ## `special_index()` leaves them alone. `DayCareMan` and `DayCareLady` are the
 ## deposit and withdrawal counters; `DayCareManOutside` is the man who brings the
@@ -947,6 +952,9 @@ func complete_runtime_request(result: Dictionary) -> Dictionary:
 		## Neither routine writes anything a script reads: each returns and the
 		## map's own `waitbutton` presses the text it left standing.
 		&"name_rater_requested", &"move_deleter_requested",
+		## `MoveTutor` answers FALSE when the move was learned and -1 when the
+		## list was backed out of, which is the one branch its script reads.
+		&"move_tutor_requested",
 		## `UnownPuzzle` answers `wSolvedUnownPuzzle`, which is zero for a board
 		## left on START and one for a solved one.
 		&"unown_puzzle_requested",
@@ -2864,6 +2872,23 @@ func _execute_special(special: int) -> Dictionary:
 		SPECIAL_MOVE_DELETION:
 			return _stage_runtime_request(&"move_deleter_requested", {
 				"special": special,
+			})
+		SPECIAL_MOVE_TUTOR:
+			## `.GetMoveTutorMove` reads the value the map's own `setval` left,
+			## and a cartridge whose TMHMMoves stops at HM07 has no move to
+			## teach, which is the refusal rather than a guessed one.
+			var tutor_move: int = Gen2MoveTutor.move_for_value(data, _script_value)
+			if tutor_move <= 0:
+				return {
+					"ok": false,
+					"reason": &"unknown_move_tutor_move",
+					"special": special,
+					"value": _script_value,
+				}
+			return _stage_runtime_request(&"move_tutor_requested", {
+				"special": special,
+				"value": _script_value,
+				"move": tutor_move,
 			})
 		SPECIAL_SELECT_APRICORN_FOR_KURT:
 			## Both of the special's boxes are the host's; it answers with the

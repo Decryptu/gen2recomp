@@ -56,7 +56,7 @@ const EXPECTED_DEFERRED: Dictionary = {
 	83: "CheckLuckyNumberShowFlag", 84: "ResetLuckyNumberShowFlag",
 	85: "PrintTodaysLuckyNumber", 103: "TrainerHouse",
 	104: "PhotoStudio", 107: "Diploma", 108: "PrintDiploma",
-	126: "Reset", 131: "MoveTutor", 132: "OmanyteChamber",
+	126: "Reset", 132: "OmanyteChamber",
 	141: "HoOhChamber", 143: "CelebiShrineEvent", 144: "CheckCaughtCelebi",
 	145: "PokeSeer", 146: "BuenasPassword", 147: "BuenaPrize",
 	148: "GiveDratini", 149: "SampleKenjiBreakCountdown",
