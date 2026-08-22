@@ -2,10 +2,10 @@ extends GutTest
 
 ## `CrystalIntro`'s jumptable, driven without a cache.
 ##
-## Every frame count here is the source's own: the scenes count in
-## `wIntroSceneFrameCounter` and spend `DelayFrames`, neither of which depends on
-## the art being imported, so the whole movie runs and lands on the same frame
-## with no [GameData] at all. tools/checks/intro_movie.gd is what checks the
+## Every frame count here is the cartridge's own, measured under
+## `.claude/oracle`: the scenes count in `wIntroSceneFrameCounter` and spend
+## `DelayFrames`, neither of which depends on the art being imported, so the
+## whole movie runs and lands on the same frame with no [GameData] at all. tools/checks/intro_movie.gd is what checks the
 ## art it draws with.
 
 ## Longer than the movie, whose own total is asserted below.
@@ -13,11 +13,11 @@ const FRAME_CAP: int = 20000
 
 ## `IntroScene28` sets `JUMPTABLE_EXIT_F` on this frame. Over half of it is the
 ## setup scenes' `Request2bpp` waits, which spend a frame per eight tiles.
-const MOVIE_FRAMES: int = 2340
+const MOVIE_FRAMES: int = 2441
 ## The frame each of the twenty-eight scenes starts on.
 const SCENE_STARTS: Array[int] = [
-	0, 1, 188, 189, 359, 360, 547, 548, 733, 734, 933, 934, 1168, 1169, 1371,
-	1372, 1560, 1561, 1714, 1715, 1927, 1928, 1940, 1941, 1974, 2038, 2039, 2211,
+	0, 1, 194, 195, 368, 369, 563, 564, 762, 763, 962, 963, 1204, 1205, 1417,
+	1418, 1633, 1634, 1796, 1797, 2021, 2022, 2034, 2035, 2068, 2132, 2133, 2308,
 ]
 
 
@@ -174,9 +174,10 @@ func test_a_setup_scene_is_cleared_until_its_decompressions_are_served() -> void
 			for colour: Color in movie.palette(slot):
 				assert_eq(colour, Color.BLACK)
 		movie.advance_frame()
-	# `Intro_ClearBGPals` and `ClearTilemap` plus a frame per eight tiles of the
-	# scene's four sheets.
-	assert_eq(waits, 58)
+	# `Intro_ClearBGPals` and `ClearTilemap`, a frame per eight tiles of the
+	# scene's four sheets, and the six the cartridge spends over that
+	# (`Gen2IntroMovie.SCENE_OVERRUN`).
+	assert_eq(waits, 64)
 	# `IntroScene26` calls `ClearBGPalettes` instead, whose fill is white.
 	while movie.scene() != Gen2IntroMovie.SCENE_CRYSTAL_UNOWNS + 1 \
 			and movie.frame() < FRAME_CAP:

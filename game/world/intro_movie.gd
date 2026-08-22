@@ -222,6 +222,40 @@ const SCENE_REQUESTS: Dictionary = {
 const TILES_PER_CYCLE: int = 8
 ## `ClearTilemap`'s `WaitBGMap` tail, which every setup scene pays.
 const CLEAR_TILEMAP_FRAMES: int = 4
+## `ClearBGPalettes`' own `WaitBGMap` tail. `IntroScene26` and `IntroScene28`
+## are the two callers here.
+const CLEAR_BG_PALETTES_FRAMES: int = 4
+## `Intro_ClearBGPals`' own two `DelayFrame`s, which every other setup scene
+## opens with instead.
+const CLEAR_BG_PALS_FRAMES: int = 2
+
+## The key a setup scene's [constant SCENE_OVERRUN] entry sits under, its own
+## counter being frozen for the whole of its span.
+const SETUP_OVERRUN_KEY: int = -1
+## Frames a pass costs over the one the loop would spend, keyed by scene and then
+## by `wIntroSceneFrameCounter` at the top of that pass.
+##
+## The cause is `Decompress`, the sprite pass and `Intro_ColoredSuicuneFrameSwap`
+## costing more CPU than a frame has left, so the `DelayFrame` the loop ends on
+## lands a frame late. Measured against a real dump under `.claude/oracle` rather
+## than derived, because nothing here counts cycles: with it the movie's own
+## `wJumptableIndex` and counter agree with the cartridge's on all 2,441 frames,
+## and without it the port ends 101 frames early.
+const SCENE_OVERRUN: Dictionary = {
+	# Each setup scene, over its `Intro_ClearBGPals`, `ClearTilemap` and
+	# `Request2bpp` waits.
+	0: {-1: 6}, 2: {-1: 3}, 4: {-1: 7}, 6: {-1: 12}, 10: {-1: 7},
+	12: {-1: 9}, 14: {-1: 7}, 16: {-1: 9}, 18: {-1: 11}, 25: {-1: 3},
+	# The first pass of a body scene whose setup left a sprite anim standing.
+	7: {0: 1}, 13: {0: 1}, 19: {0: 1},
+	# `IntroScene16`, whose frame swap runs every fourth pass over a screen that
+	# has picked up its Unown: three swaps early on, then every one from $44.
+	15: {
+		0: 1, 32: 1, 44: 1, 56: 1, 68: 1, 72: 1, 76: 1, 80: 1, 84: 1, 88: 1,
+		92: 1, 96: 1, 100: 1, 104: 1, 108: 1, 112: 1, 116: 1, 120: 1, 124: 1,
+		128: 1,
+	},
+}
 
 ## `Intro_RustleGrass`'s `.RustlingGrassPointers`, four tiles at `vTiles2 tile
 ## $09` swapped every four frames for the first thirty-six of `IntroScene10`.
@@ -291,9 +325,19 @@ var _grass_frame: int = 0
 var _overlay: Array = []
 
 var _actors: Array[Dictionary] = []
+## `wShadowOAM`, which only a sprite pass writes and only `ClearSprites`
+## empties: a frame the loop spends inside a setup scene's `DelayFrames` or over
+## a pass of its own shows the buffer the pass before it left, not the structs.
+var _shadow: Array[Dictionary] = []
+## Delay frames left before a setup scene's own `ClearSprites` empties it.
+var _clear_sprites_in: int = 0
 ## Frames a scene spends inside `DelayFrames`, during which neither the
 ## jumptable nor `PlaySpriteAnimations` runs.
 var _delay: int = 0
+## Frames the loop spends without running a pass while the scene index is
+## already this scene's: `IntroScene28`'s `ClearBGPalettes`, and every pass the
+## cartridge's own work overran VBlank on ([constant SCENE_OVERRUN]).
+var _hold: int = 0
 var _frame: int = 0
 var _events: Array[Dictionary] = []
 
@@ -423,6 +467,12 @@ func screen_tilemap() -> PackedByteArray:
 ## which is the z-order: `_InitSpriteAnimStruct` takes the first free slot and
 ## `PlaySpriteAnimations` walks them in order.
 func sprites() -> Array[Dictionary]:
+	return _shadow
+
+
+## What a pass would write, out of the live structs. Only [method _run_sprites]
+## calls it: the buffer it fills is not a view of the structs.
+func _live_sprites() -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
 	for actor: Dictionary in _actors:
 		var entry: Array = _actor_frame(actor)
@@ -457,13 +507,38 @@ func advance_frame() -> Array[Dictionary]:
 	_frame += 1
 	if _delay > 0:
 		_delay -= 1
-		if _delay == 0 and not _pending_palette.is_empty():
-			_load_palettes(_pending_palette)
-			_pending_palette = ""
+		if _clear_sprites_in > 0:
+			_clear_sprites_in -= 1
+			if _clear_sprites_in == 0:
+				_shadow.clear()
+		if _delay == 0:
+			if not _pending_palette.is_empty():
+				_load_palettes(_pending_palette)
+				_pending_palette = ""
+			# The source spends these frames inside the jumptable routine, so
+			# the iteration's own `PlaySpriteAnimations` follows them rather
+			# than standing in front: nothing is in the buffer until then.
+			_run_sprites()
+		return drain_events()
+	if _hold > 0:
+		_hold -= 1
 		return drain_events()
 	_run_scene()
-	_run_sprites()
+	if _delay == 0:
+		_run_sprites()
+	# The state this pass leaves is what the cartridge's next frame is sampled
+	# at, so an overrun is held before the pass that follows it rather than
+	# after the one that caused it. A scene that asked for its own wait
+	# (`IntroScene28`) keeps it.
+	if _hold == 0:
+		_hold = _overrun(_scene, _counter)
 	return drain_events()
+
+
+## [constant SCENE_OVERRUN]'s entry for the pass a scene is about to run, in
+## frames.
+func _overrun(at_scene: int, at_counter: int) -> int:
+	return int((SCENE_OVERRUN.get(at_scene, {}) as Dictionary).get(at_counter, 0))
 
 
 ## The button `.ShutOffMusic` reads: any of A, B, START or SELECT ends the whole
@@ -600,11 +675,18 @@ func _setup_scene() -> void:
 	# setup scene that calls `ClearBGPalettes` instead, whose `WaitBGMap` tail
 	# spends four. `ClearTilemap` then spends four of its own, and every sheet
 	# the scene asks for is a `Request2bpp` wait on top.
-	_delay = CLEAR_TILEMAP_FRAMES + (4 if _scene == SCENE_CRYSTAL_UNOWNS else 2)
+	# `ClearSprites` stands *behind* the palette clear, so the scene before this
+	# one is still in the buffer for those frames.
+	_clear_sprites_in = (
+		CLEAR_BG_PALETTES_FRAMES if _scene == SCENE_CRYSTAL_UNOWNS
+		else CLEAR_BG_PALS_FRAMES
+	)
+	_delay = CLEAR_TILEMAP_FRAMES + _clear_sprites_in
 	for tiles: int in SCENE_REQUESTS.get(_scene, []):
 		# `.cycle` spends a frame per `TILES_PER_CYCLE`, and the remainder below
 		# one cycle spends a last one whether or not there is anything left.
 		_delay += tiles / TILES_PER_CYCLE + 1
+	_delay += _overrun(_scene, SETUP_OVERRUN_KEY)
 	_counter = 0
 	_timer = 0
 	_next_scene()
@@ -713,6 +795,8 @@ func _scene_attribute_bands() -> void:
 		for column: int in MAP_COLUMNS:
 			attr[row * MAP_COLUMNS + column] = value
 	_attr_override = attr
+	# `ClearSprites`, which empties the buffer without deinitialising a struct.
+	_shadow.clear()
 	_delay = 6
 	_global_x_offset = 0
 	_counter = 0
@@ -860,9 +944,13 @@ func _scene_fade_to_white() -> void:
 
 ## `IntroScene25`: $40 frames of nothing.
 func _scene_wait() -> void:
-	_counter = (_counter - 1) & 0xFF
-	if _counter == 0:
+	var value: int = (_counter - 1) & 0xFF
+	if value == 0:
+		# `.done` is jumped to before the store, so the counter is left at 1
+		# for `IntroScene26` to clear rather than reaching zero here.
 		_next_scene()
+		return
+	_counter = value
 
 
 ## `IntroScene27`: C R Y S T A L spelled out in Unown, one palette pair fading
@@ -888,9 +976,11 @@ func _scene_end() -> void:
 	var value: int = _counter
 	_counter = (_counter - 1) & 0xFF
 	if value == 0x18:
-		# `ClearBGPalettes` makes every palette white, both halves.
+		# `ClearBGPalettes` makes every palette white, both halves, and spends
+		# its `WaitBGMap` tail here the way `IntroScene26`'s does.
 		for index: int in _palettes.size():
 			_palettes[index] = WHITE
+		_hold = CLEAR_BG_PALETTES_FRAMES
 		return
 	if value == 0x08:
 		_emit(&"play_sfx", {"sfx": SFX_INTRO_WHOOSH})
@@ -1102,6 +1192,9 @@ func _run_sprites() -> void:
 		if not entry.is_empty():
 			room -= OAM_SET_SIZES[int(entry[0])]
 	_actors = kept
+	# `.loop2` zeroes shadow OAM from the last entry written to
+	# `wShadowOAMEnd`, so a pass leaves the buffer holding exactly what it drew.
+	_shadow = _live_sprites()
 
 
 ## `SpriteAnimFunc_IntroSuicune`: still until `wIntroSceneTimer` is set, then a
