@@ -3968,6 +3968,7 @@ func _apply_script_object_events(raw_events: Variant) -> Array:
 					var object: Gen2WorldObject = objects[object_index]
 					var facing: int = _facing_toward(object.cell, player_cell)
 					_object_facing_overrides[key] = facing
+				reload_objects = true
 			&"object_face_object":
 				var target_index: int = int(event.get("target_index", -1))
 				if map_group == current_map.group and map_number == current_map.number \

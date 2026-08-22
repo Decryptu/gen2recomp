@@ -2945,6 +2945,50 @@ func test_facing_interaction_commits_map_and_engine_flags_after_text() -> void:
 	assert_eq(restored.visible_objects().size(), 0)
 
 
+## `Script_faceplayer` turns the object the talk is with, and the turn has to
+## reach what is drawn on the frame it runs: the override alone leaves the
+## object standing the way its event placed it until some later reload.
+func test_faceplayer_turns_the_talked_object_toward_the_player() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	scripts["48:6190"] = [Gen2WorldScript.FACEPLAYER, Gen2WorldScript.END]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var data: GameData = GameData.open_directory(_directory)
+	var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(6, 6))
+	world.player_facing = Gen2WorldSprite.FACING_LEFT
+	var object: Gen2WorldObject = world.objects[0]
+	object.facing = Gen2WorldSprite.FACING_DOWN
+	world.current_map.events["objects"][0]["script"] = 0x6190
+	object.event_script = 0x6190
+
+	world.interact()
+	assert_eq(
+		(world.objects[0] as Gen2WorldObject).facing, Gen2WorldSprite.FACING_RIGHT,
+		"the object faces the player it was talked to by"
+	)
+
+
+## `Script_jumptextfaceplayer` jumps to JumpTextFacePlayerScript, whose first
+## command is `faceplayer`; `jumptext` and `farjumptext` enter the same script
+## one command later and turn nothing. Most NPCs in either pin are the first.
+func test_jumptextfaceplayer_turns_the_object_and_jumptext_does_not() -> void:
+	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
+	scripts["48:61A0"] = [Gen2WorldScript.JUMPTEXTFACEPLAYER, 0x00, 0x70]
+	scripts["48:61B0"] = [Gen2WorldScript.JUMPTEXT, 0x00, 0x70]
+	RomCache.write_json(RomCache.world_scripts_path(_directory), scripts)
+	var data: GameData = GameData.open_directory(_directory)
+	for row: Array in [[0x61A0, Gen2WorldSprite.FACING_RIGHT], [0x61B0, Gen2WorldSprite.FACING_DOWN]]:
+		var world: Gen2WorldAPI = Gen2WorldAPI.open(data, 1, 1, Vector2i(6, 6))
+		world.player_facing = Gen2WorldSprite.FACING_LEFT
+		var object: Gen2WorldObject = world.objects[0]
+		object.facing = Gen2WorldSprite.FACING_DOWN
+		world.current_map.events["objects"][0]["script"] = int(row[0])
+		object.event_script = int(row[0])
+
+		var waiting: Array = world.interact()
+		assert_eq(waiting[0]["event"]["text"], "AB")
+		assert_eq((world.objects[0] as Gen2WorldObject).facing, int(row[1]))
+
+
 func test_background_events_honor_source_direction_and_conditional_pointer_records() -> void:
 	var scripts: Dictionary = RomCache.read_json(RomCache.world_scripts_path(_directory))
 	scripts["48:6170"] = [Gen2WorldScript.SETEVENT, 11, 0, Gen2WorldScript.END]
