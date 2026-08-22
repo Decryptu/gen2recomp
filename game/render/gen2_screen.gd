@@ -162,6 +162,20 @@ func view_size() -> Vector2i:
 	return _view_size
 
 
+## The cartridge's own 160x144 screen, in the native layer's own pixels.
+##
+## A view on that layer is handed a rectangle and told nothing else, and every
+## hardware-pixel number it is given -- the text box's, first -- has to land
+## somewhere inside it. Framed, that mapping was the layer itself, since the
+## rectangle was a whole multiple of 160x144. Expanded it is not, so the screen
+## says where.
+func screen_rect() -> Rect2i:
+	var drawn: Vector2 = Vector2(WIDTH, HEIGHT) * _draw_scale
+	var at: Vector2 = (_interface.position if _interface != null else Vector2.ZERO) \
+		* _draw_scale
+	return Rect2i(Vector2i(at.round()), Vector2i(drawn.round()))
+
+
 ## The largest whole number of window pixels per hardware pixel that fits.
 ## Public because [Gen2GameFrame] sizes the on-screen controller off it.
 static func fit_factor(area: Vector2) -> int:

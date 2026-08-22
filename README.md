@@ -194,7 +194,9 @@ cursor -- stays inside the 160x144 rectangle in the middle of it, exactly where
 the cartridge put it. Only the surround grows.
 
 While walking, `+` and `-` zoom, `0` returns to the fitting scale, and the mouse
-wheel does the same. Zooming out past one screen pixel per map pixel is a survey
+wheel does the same. Those keys count screen pixels per Game Boy pixel, so a mod
+drawing the world in 3D keeps them for its own camera and the game leaves them
+alone. Zooming out past one screen pixel per map pixel is a survey
 of the region: the connection graph places the maps around this one and the map
 header's own border block fills what no map covers. The maps around you are a
 picture. Their people stand where their map puts them and nothing else about

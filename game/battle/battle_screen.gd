@@ -4430,6 +4430,9 @@ func _build_renderer() -> void:
 		_renderer.get_parent().remove_child(_renderer)
 		Gen2Screen.drop(_renderer)
 	_renderer = Gen2ModHost.instance().create_battle_renderer()
+	## Before the layer is chosen, because the surface's size is what
+	## `set_native_size` is about to be told.
+	_apply_screen_fill()
 	if Gen2ModHost.renderer_uses_hardware_viewport(_renderer):
 		_screen.display_content(_renderer)
 	else:
@@ -4440,6 +4443,25 @@ func _build_renderer() -> void:
 	_push_world_context()
 	_push_view()
 	_apply_renderer_interface_style()
+
+
+## SCREEN FILL, which a fight takes only when its renderer draws the place
+## rather than a picture.
+##
+## The built-in arena is `_BattleScene`'s own 160x144 and has nothing to put in a
+## wider buffer, exactly like the pack or the PC, so it keeps the bars the
+## setting gives every other laid-out screen. A renderer on the native layer,
+## staged on the map the encounter fired on, has the same world the overworld was
+## filling the window with a frame earlier, and shrinking it to 10:9 for the
+## length of the battle and back is the surface being decided with the view left
+## out of the question.
+##
+## The interface does not move either way: the panels, the bars and the boxes are
+## hardware pixels laid out in 160x144 and stay in the rectangle
+## [Gen2Screen] centres in the buffer.
+func _apply_screen_fill() -> void:
+	_screen.expanded = Gen2OptionsStore.current().screen_fill \
+		and not Gen2ModHost.renderer_uses_hardware_viewport(_renderer)
 
 
 ## The text box over a native-layer renderer, the same seam
@@ -4473,6 +4495,7 @@ func _push_world_context() -> void:
 func _on_native_size_changed(size_pixels: Vector2i) -> void:
 	if _renderer != null and _renderer.has_method(Gen2ModHost.RENDERER_RESIZE_METHOD):
 		_renderer.call(Gen2ModHost.RENDERER_RESIZE_METHOD, size_pixels)
+	Gen2ModHost.renderer_set_screen_rect(_renderer, _screen.screen_rect())
 
 
 ## Switches the live view without disturbing the battle behind it. The same one

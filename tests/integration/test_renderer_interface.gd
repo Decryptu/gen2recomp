@@ -1,9 +1,11 @@
 extends GutTest
 
 ## The interface seam a native-layer renderer gets: how opaque the screen draws
-## its own text box, and where that box is, plus the seam a mod's world actor
-## gets, which is the same shape one layer down. Both screens are the production
-## paths; only the renderer and the actor are synthetic.
+## its own text box, where that box is, when a screen laid out in 160x144 takes
+## the picture over it, and whether the surface it is handed fills the window.
+## Plus the seam a mod's world actor gets, which is the same shape one layer
+## down. Both screens are the production paths; only the renderer and the actor
+## are synthetic.
 ##
 ## The contract is that the box stays the screen's. A renderer asks and is told;
 ## it never draws or moves the box, and the frame and the glyphs are opaque
@@ -14,6 +16,8 @@ const Fixture := preload("res://tests/integration/world_trainer_fixture.gd")
 const NATIVE_SOURCE: String = """extends Node2D
 
 var rects: Array = []
+var masks: Array = []
+var screens: Array = []
 
 func set_world(_world, _animation = null) -> void:
 	pass
@@ -41,6 +45,12 @@ func interface_opacity() -> float:
 
 func set_text_box_rect(rect: Rect2i) -> void:
 	rects.append(rect)
+
+func set_interface_masked(masked: bool) -> void:
+	masks.append(masked)
+
+func set_screen_rect(rect: Rect2i) -> void:
+	screens.append(rect)
 """
 
 ## The same request from a renderer drawing in hardware pixels, which cannot be
@@ -70,6 +80,10 @@ var _battle_screen: Gen2BattleScreen = null
 
 
 func before_each() -> void:
+	# SCREEN FILL is what half of this file measures, and the persisting a zoom
+	# step does must not reach the developer's own options file.
+	Gen2OptionsStore.use_test_path()
+	Gen2OptionsStore.current().screen_fill = true
 	_forget_view()
 	Fixture.build()
 	_data = GameData.open_directory(Fixture.directory())
@@ -757,4 +771,104 @@ func test_a_consumed_press_redraws_on_the_frame_it_was_pressed() -> void:
 	## the emote is already on screen, so the icon's flip is all that is left.
 	assert_eq(
 		int(_world_screen._actors.sprites()[0]["emote"]), Gen2WorldActors.EMOTE_HEART
+	)
+
+
+## SCREEN FILL's letterbox is drawn inside the hardware viewport, and the
+## viewport is composited over the native layer, so raising it would crop a view
+## that had already filled the whole surface.
+func test_the_interface_mask_does_not_reach_the_native_layer() -> void:
+	var renderer: Node = await _open_world(NATIVE_SOURCE)
+	assert_true(_world_screen._screen.expanded, "the overworld fills the window")
+	assert_eq((renderer.get("masks") as Array), [false], "told once, before anything opened")
+
+	_world_screen.preview_battle_transition(0)
+	assert_false(
+		_world_screen._screen.interface_masked,
+		"the screen leaves the layer behind it alone",
+	)
+	assert_eq(
+		(renderer.get("masks") as Array).back(), true,
+		"and tells the view to close its own surround",
+	)
+
+
+## A renderer drawing in the hardware buffer is masked by the screen, which is
+## what the letterbox describes.
+func test_a_hardware_viewport_renderer_keeps_the_screens_own_mask() -> void:
+	await _open_world(HARDWARE_SOURCE)
+	assert_false(_world_screen._screen.interface_masked)
+	_world_screen.preview_battle_transition(0)
+	assert_true(_world_screen._screen.interface_masked)
+
+
+## Zoom counts screen pixels per HARDWARE pixel. A view that declined the
+## hardware buffer has none, so the keys are left where its own camera can read
+## them rather than spent stepping a buffer nothing draws into.
+func test_zoom_is_left_alone_for_a_view_with_no_hardware_pixel() -> void:
+	await _open_world(NATIVE_SOURCE)
+	var before: int = _world_screen._screen.zoom_step
+	assert_false(_world_screen._handle_zoom(_key(KEY_MINUS)))
+	assert_eq(_world_screen._screen.zoom_step, before, "and nothing moved")
+
+
+func test_zoom_steps_the_buffer_a_hardware_renderer_draws_into() -> void:
+	await _open_world(HARDWARE_SOURCE)
+	var before: int = _world_screen._screen.zoom_step
+	assert_true(_world_screen._handle_zoom(_key(KEY_MINUS)))
+	assert_eq(_world_screen._screen.zoom_step, before - 1)
+
+
+func _key(code: Key) -> InputEventKey:
+	var event := InputEventKey.new()
+	event.keycode = code
+	event.pressed = true
+	return event
+
+
+## A fight staged on the map in 3D has as much to fill a window with as the
+## overworld it started from; the built-in arena is a 160x144 scene and has not.
+func test_a_native_layer_battle_fills_the_window_and_the_built_in_one_does_not() -> void:
+	await _open_battle()
+	assert_true(_battle_screen._screen.expanded)
+
+	_battle_screen.free()
+	_battle_screen = null
+	assert_true(Gen2ModHost.instance().select_view(Gen2ModHost.BUILT_IN_RENDERER)["ok"])
+	var packed: PackedScene = load("res://game/battle/battle_screen.tscn")
+	_battle_screen = packed.instantiate() as Gen2BattleScreen
+	_battle_screen.set_data(_data)
+	add_child(_battle_screen)
+	await get_tree().process_frame
+	assert_false(_battle_screen._screen.expanded)
+
+
+## A hardware-pixel number means nothing on the native layer without the
+## rectangle the hardware screen occupies there. Framed it was the whole surface,
+## and filled it is not, so the screen says where.
+func test_the_native_layer_is_told_where_the_hardware_screen_is() -> void:
+	var renderer: Node = await _open_world(NATIVE_SOURCE)
+	var screen: Gen2Screen = _world_screen._screen
+	assert_true(screen.expanded)
+	var rect: Rect2i = (renderer.get("screens") as Array).back()
+	assert_eq(rect, screen.screen_rect())
+	assert_gt(rect.position.x, 0, "centred in a surface wider than the hardware's")
+	assert_eq(
+		float(rect.size.x) / float(rect.size.y),
+		float(Gen2Screen.WIDTH) / float(Gen2Screen.HEIGHT),
+		"and still ten by nine",
+	)
+	assert_lt(rect.size.x, screen.native_size().x, "with the view around it")
+
+
+## Framed, the rectangle is the whole surface, which is the mapping every
+## renderer written before this assumed.
+func test_a_framed_screen_hands_back_its_whole_surface() -> void:
+	Gen2OptionsStore.current().screen_fill = false
+	var renderer: Node = await _open_world(NATIVE_SOURCE)
+	var screen: Gen2Screen = _world_screen._screen
+	assert_false(screen.expanded)
+	assert_eq(
+		(renderer.get("screens") as Array).back(),
+		Rect2i(Vector2i.ZERO, screen.native_size()),
 	)

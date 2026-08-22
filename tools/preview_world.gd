@@ -26,7 +26,16 @@ extends SceneTree
 ##
 ##   ... live effects 4 4 1920x1080 zoom=-3
 ##
+## `view=<mod id>` photographs a registered renderer instead of the built-in one,
+## which needs `--mods` in front of the `--` so the mods are actually loaded:
+##
+##   Godot --path . -s res://tools/preview_world.gd --mods -- crystal 26 2 \
+##     /tmp/out.png live effects 4 4 1920x1080 view=voxel3d
+##
 ## `kind` is `effects` (the emote, the dust, the rustle and the headbutt tree),
+## `battle` (the wild fight `preview_battle_request` starts, settled past its
+## transition into the fight itself, which is the picture a battle renderer
+## staged on the map draws),
 ## `unown_wall` (`DisplayUnownWords`' box, read off a Ruins of Alph chamber's
 ## own wall pattern from the cell below it: maps 23 to 26 of group 3 say HO-OH,
 ## ESCAPE, WATER and LIGHT, as `crystal 3 24 ... unown_wall 3 1`),
@@ -104,6 +113,10 @@ const ICE_SLIDE_BUTTONS: Array[int] = [
 const WINDOW_SIZE := Vector2i(1152, 648)
 ## What the live mode actually opens in, which a phone-shaped argument replaces.
 var _window: Vector2i = WINDOW_SIZE
+## The renderer to photograph, empty for whichever one the installation last
+## chose. Restored after the capture so a preview never changes that choice.
+var _view: StringName = &""
+var _restore_view: StringName = &""
 ## Longer than a step onto a warp tile and the fade behind it, for the `warp`
 ## kind, which drives to a frame rather than spending a count.
 const WARP_FRAME_CAP: int = 120
@@ -206,6 +219,8 @@ func _initialize() -> void:
 				Gen2OptionsStore.current().screen_fill = false
 			elif extra.begins_with("zoom="):
 				Gen2OptionsStore.current().zoom_step = int(extra.trim_prefix("zoom="))
+			elif extra.begins_with("view="):
+				_view = StringName(extra.trim_prefix("view="))
 		_build_live(
 			data, int(args[1]), int(args[2]),
 			Vector2i(int(args[6]), int(args[7])) if args.size() >= 8 else Vector2i(-1, -1),
@@ -294,6 +309,8 @@ func _process(_delta: float) -> bool:
 	## call in [method _build_live] alone leaves the screen spending frames of
 	## its own beside the ones staged below.
 	_screen.set_process(false)
+	if _frames == 1:
+		_choose_view()
 	if _frames == 2:
 		if _kind == &"unown_wall":
 			## The chamber's own `bg_event ..., BGEVENT_UP`: face the wall from
@@ -305,6 +322,12 @@ func _process(_delta: float) -> bool:
 			## is what runs `special DisplayUnownWords` and puts the box up.
 			_screen.press_button(Gen2Button.A)
 			_screen.press_button(Gen2Button.A)
+		elif _kind == &"battle":
+			## Past the transition and into the fight it opens, which is the one
+			## picture a battle renderer staged on the map draws.
+			_screen.preview_battle_request()
+			_screen.settle_battle_transition()
+			_screen.advance_frames(STAGED_FRAMES)
 		elif _kind == &"battle_transition":
 			## `DoBattleTransition` over the map it runs on. The first of the two
 			## numbers is how many frames into it to photograph rather than a
@@ -529,8 +552,9 @@ func _process(_delta: float) -> bool:
 			_screen.preview_effect_sprites(_kind)
 		if _kind not in [
 			&"warp", &"door", &"map_name_sign", &"ledge", &"heal_machine",
-			&"battle_transition", &"level_evolution", &"egg_hatch", &"name_rater",
-			&"move_deleter", &"move_tutor", &"day_care", &"ice_slide",
+			&"battle", &"battle_transition", &"level_evolution", &"egg_hatch",
+			&"name_rater", &"move_deleter", &"move_tutor", &"day_care",
+			&"ice_slide",
 		]:
 			## Those kinds drove themselves to the frame they want; every other
 			## kind stages a sprite and then spends the frames it needs.
@@ -546,8 +570,31 @@ func _process(_delta: float) -> bool:
 		quit(1)
 		return true
 	print("Wrote %s (%dx%d)" % [_output_path, image.get_width(), image.get_height()])
+	_restore_selected_view()
 	quit(0)
 	return true
+
+
+## The mod's own renderer, once there is one to choose: `_initialize` runs before
+## the autoloads are in the tree, so nothing is registered while the screen is
+## being built and the choice has to wait for the first frame.
+func _choose_view() -> void:
+	if _view.is_empty():
+		return
+	_restore_view = Gen2ModHost.instance().selected_view()
+	var chosen: Dictionary = _screen.select_view(_view)
+	if not bool(chosen.get("ok", false)):
+		push_error("View %s unavailable: %s. Did you pass --mods?" % [
+			_view, chosen.get("reason", "unknown")
+		])
+
+
+## A view is chosen per installation and persisted, so a capture that chose one
+## puts the player's own back rather than leaving them on a mod's renderer.
+func _restore_selected_view() -> void:
+	if _view.is_empty() or _restore_view.is_empty():
+		return
+	Gen2ModHost.instance().select_view(_restore_view)
 
 
 func _render(data: GameData, map: Gen2WorldMap, tileset: Gen2WorldTileset) -> Image:
