@@ -87,6 +87,12 @@ var _master_left: int = 0
 var _master_right: int = 0
 var _mix: PackedInt32Array = PackedInt32Array()
 
+## Output gain per hardware channel, applied where the channel joins the mix and
+## nowhere else: the driver's own state is untouched, so a gain is a listening
+## level rather than a change to what the cartridge plays. [Gen2SoundEngine]
+## sets it from whichever of its eight streams owns the channel this frame.
+var channel_gain: PackedFloat32Array = PackedFloat32Array([1.0, 1.0, 1.0, 1.0])
+
 ## Register-write log, off unless a parity tool turns it on.
 var tracing: bool = false
 var trace_frame: int = 0
@@ -328,8 +334,9 @@ func _render_square(mix: PackedInt32Array, channel: int) -> void:
 	var len_enabled: bool = _len_enabled[channel] != 0
 	var capacitor: float = _capacitor[channel]
 	var enabled: bool = true
-	var left: int = _on_left[channel] * _master_left
-	var right: int = _on_right[channel] * _master_right
+	var gain: float = channel_gain[channel]
+	var left: float = float(_on_left[channel] * _master_left) * gain
+	var right: float = float(_on_right[channel] * _master_right) * gain
 	for index: int in SAMPLES_PER_FRAME:
 		if len_enabled:
 			len_counter += len_inc
@@ -384,8 +391,8 @@ func _render_square(mix: PackedInt32Array, channel: int) -> void:
 		capacitor = raw - filtered * 0.996
 		sample = int(filtered * 32768.0)
 		var at: int = index * 2
-		mix[at] += sample * left
-		mix[at + 1] += sample * right
+		mix[at] += int(float(sample) * left)
+		mix[at + 1] += int(float(sample) * right)
 	_freq_counter[channel] = freq_counter
 	_duty_counter[channel] = duty_counter
 	_value[channel] = value
@@ -411,8 +418,9 @@ func _render_wave(mix: PackedInt32Array) -> void:
 	var len_enabled: bool = _len_enabled[2] != 0
 	var capacitor: float = _capacitor[2]
 	var enabled: bool = true
-	var left: int = _on_left[2] * _master_left
-	var right: int = _on_right[2] * _master_right
+	var gain: float = channel_gain[2]
+	var left: float = float(_on_left[2] * _master_left) * gain
+	var right: float = float(_on_right[2] * _master_right) * gain
 	var shift: int = maxi(0, volume - 1)
 	# The sixteen packed sample bytes, hoisted out of the per-sample read.
 	var wave: PackedByteArray = _registers.slice(
@@ -456,8 +464,8 @@ func _render_wave(mix: PackedInt32Array) -> void:
 		capacitor = raw - filtered * 0.996
 		sample = int(filtered * 32768.0)
 		var at: int = index * 2
-		mix[at] += sample * left
-		mix[at + 1] += sample * right
+		mix[at] += int(float(sample) * left)
+		mix[at + 1] += int(float(sample) * right)
 	_freq_counter[2] = freq_counter
 	_wave_position = position
 	_len_counter[2] = len_counter
@@ -488,8 +496,9 @@ func _render_noise(mix: PackedInt32Array) -> void:
 	var len_enabled: bool = _len_enabled[3] != 0
 	var capacitor: float = _capacitor[3]
 	var enabled: bool = true
-	var left: int = _on_left[3] * _master_left
-	var right: int = _on_right[3] * _master_right
+	var gain: float = channel_gain[3]
+	var left: float = float(_on_left[3] * _master_left) * gain
+	var right: float = float(_on_right[3] * _master_right) * gain
 	for index: int in SAMPLES_PER_FRAME:
 		if len_enabled:
 			len_counter += len_inc
@@ -532,8 +541,8 @@ func _render_noise(mix: PackedInt32Array) -> void:
 		capacitor = raw - filtered * 0.996
 		sample = int(filtered * 32768.0)
 		var at: int = index * 2
-		mix[at] += sample * left
-		mix[at + 1] += sample * right
+		mix[at] += int(float(sample) * left)
+		mix[at + 1] += int(float(sample) * right)
 	_freq_counter[3] = freq_counter
 	_value[3] = value
 	_lfsr = lfsr

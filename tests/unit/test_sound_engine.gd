@@ -243,6 +243,30 @@ func test_an_effect_takes_the_music_channel_and_gives_it_back() -> void:
 	assert_true(engine.music_channels_active(), "the music never stopped")
 
 
+## The two listening levels weight the mix and nothing else: a hardware channel
+## carries the effect level exactly while an effect stream owns it, and goes
+## back to the music level with the channel.
+func test_the_output_gain_follows_whichever_stream_owns_each_channel() -> void:
+	var engine: Gen2SoundEngine = _engine()
+	engine.music_gain = 0.5
+	engine.sfx_gain = 0.25
+	assert_true(engine.play_music(_record([[0, [
+		0xD8, 0x10, 0xB1, 0xD4, 0x1F, 0xFC, 0x03, 0x40,
+	]]], 0x3B)))
+	engine.update_sound()
+	assert_almost_eq(engine.apu.channel_gain[0], 0.5, 0.001)
+
+	assert_true(engine.play_sfx(_record([[4, [
+		0xDF, 0xD8, 0x01, 0xB1, 0xD4, 0x10, 0xFF,
+	]]], 0x3C)))
+	var _stolen: Array = _writes(engine, 1)
+	assert_almost_eq(engine.apu.channel_gain[0], 0.25, 0.001)
+	assert_almost_eq(engine.apu.channel_gain[1], 0.5, 0.001, "the rest is music")
+
+	var _drain: Array = _writes(engine, 6)
+	assert_almost_eq(engine.apu.channel_gain[0], 0.5, 0.001)
+
+
 ## `PlaySFX`'s own gate. The table is ordered highest priority first, so the id
 ## still on the channels has to be less than or equal to the new one for it to
 ## be taken; the same id restarts, which is `cp e / jr c`.

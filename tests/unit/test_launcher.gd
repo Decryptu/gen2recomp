@@ -148,6 +148,33 @@ func test_the_selected_save_is_one_shared_instance_until_the_selection_changes()
 	GameRuntime.reload_selected_save()
 
 
+## The backdrop is heard as well as seen, at half the app block's music volume,
+## and it stops with the picture rather than playing on behind another page.
+func test_the_title_backdrop_plays_the_title_music_and_stops_with_the_picture() -> void:
+	var data: GameData = GameData.open_any()
+	if data == null:
+		pass_test("No imported cache on this machine.")
+		return
+	var backdrop := Gen2LauncherTitleBackdrop.new()
+	add_child_autofree(backdrop)
+	if backdrop.show_game(data) == null:
+		pass_test("This cache carries no title-screen art.")
+		return
+
+	var audio: Gen2AudioPlayer = null
+	for child: Node in backdrop.get_children():
+		if child is Gen2AudioPlayer:
+			audio = child
+	assert_not_null(audio, "the backdrop built a driver")
+	if audio == null:
+		return
+	assert_almost_eq(audio.volume_scale, Gen2LauncherTitleBackdrop.VOLUME_SCALE, 0.001)
+	assert_true(bool(audio.audio_status()["music_active"]), "the title piece started")
+
+	backdrop.hide_backdrop()
+	assert_false(bool(audio.audio_status()["music_active"]), "and it stops with it")
+
+
 func _write_probe_mod_zip() -> void:
 	var packer := ZIPPacker.new()
 	assert_eq(packer.open(_mod_archive), OK)
