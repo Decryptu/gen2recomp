@@ -1168,6 +1168,47 @@ const UNOWN_PUZZLE_BORDER_TILES: int = 8
 const PREDEFPAL_UNOWN_PUZZLE: int = 0x4C
 
 
+## `_SlotMachine`'s own data run (engine/games/slot_machine.asm), as
+## (cache name, kind, size). `strip` is a raw byte run of that many bytes and
+## `lz` a compressed one of that many tiles. `Reel1Tilemap` pins the lot: the
+## three reel strips, `SlotsTilemap` and the three LZ runs are laid out in that
+## order with nothing between them, so every entry landing on its own size is
+## what says the address is right.
+const SLOTS_SECTION: Array[Array] = [
+	["reels", "strip", 3 * SLOTS_REEL_STRIP],
+	["tilemap", "strip", SLOTS_TILEMAP_BYTES],
+	["slots_1", "lz", 37],
+	["slots_2", "lz", 64],
+	["slots_3", "lz", 64],
+]
+## `REEL_SIZE` is fifteen, and each strip carries its first three symbols again
+## behind them so a three-symbol window never has to wrap.
+const SLOTS_REEL_SIZE: int = 15
+const SLOTS_REEL_STRIP: int = SLOTS_REEL_SIZE + 3
+## `SlotsTilemap` covers the top twelve rows; the six below it are the text box.
+const SLOTS_TILEMAP_ROWS: int = 12
+const SLOTS_TILEMAP_COLUMNS: int = 20
+const SLOTS_TILEMAP_BYTES: int = SLOTS_TILEMAP_ROWS * SLOTS_TILEMAP_COLUMNS
+## `SlotMachinePals` (gfx/slots/slots.pal), the sixteen `_CGB_SlotMachine`
+## copies straight into `wBGPals1`: eight background palettes and the eight
+## object ones behind them.
+const SLOTS_PALETTES: int = 16
+## `Slots_AskBet`, `Slots_AskPlayAgain` and `Slots_PayoutText`, each a run of
+## `text_far` stubs laid out together at the end of its own routine. Byte
+## identical on all three cartridges.
+const SLOTS_BET_TEXT_ORDER: Array[String] = [
+	"bet_how_many", "start", "not_enough_coins",
+]
+const SLOTS_PLAY_AGAIN_TEXT_ORDER: Array[String] = ["ran_out_of_coins", "play_again"]
+const SLOTS_RESULT_TEXT_ORDER: Array[String] = ["lined_up", "darn"]
+## Which pin each name is walked from, the way `DAY_CARE_TEXT_RUNS` does it.
+const SLOTS_TEXT_RUNS: Array = [
+	["slots_bet_text", SLOTS_BET_TEXT_ORDER],
+	["slots_play_again_text", SLOTS_PLAY_AGAIN_TEXT_ORDER],
+	["slots_result_text", SLOTS_RESULT_TEXT_ORDER],
+]
+
+
 const PREDEFPAL_GOLDENROD: int = 0x10
 const PREDEFPAL_BLACKOUT: int = 0x1A
 const PREDEF_PALETTE_COLORS: int = 4
@@ -2016,6 +2057,13 @@ const GOLD_SILVER: Dictionary = {
 	# `_UnownPuzzle`'s art, the same two pins as Crystal's at Gold and Silver's
 	# own addresses. Both cartridges carry it at the same offsets.
 	"unown_puzzle": {"tile_borders": 0xE1F30, "section": 0xE1FD2},
+	# `_SlotMachine`'s run at Gold and Silver's own addresses, which are the same
+	# on both. The bet text sits at the end of bank $65 and the four behind it at
+	# the top of $66, which a byte walk crosses without noticing.
+	"slots": {"section": 0x9387C, "palettes": 0xBBBE},
+	"slots_bet_text": 0x93630,
+	"slots_play_again_text": 0x93683,
+	"slots_result_text": 0x93730,
 	# `GoldSilverIntro`'s art section. `Intro_WaterGFX1` is the only pinned
 	# address in it: the section is contiguous and sixteen-byte aligned, so the
 	# walk in `GS_INTRO_SECTION` reaches the other ten, and all eleven reproduce
@@ -2482,6 +2530,15 @@ const CRYSTAL: Dictionary = {
 	# `UnownPuzzleCursorGFX` are the two pinned addresses; the walk in
 	# `UNOWN_PUZZLE_SECTION` reaches the five behind the cursor.
 	"unown_puzzle": {"tile_borders": 0xE1723, "section": 0xE17C5},
+	# `_SlotMachine`'s data run and the sixteen palettes `_CGB_SlotMachine`
+	# copies. `section` is `Reel1Tilemap`, which walks the whole run; the three
+	# text pins are the stub blocks at the end of `Slots_AskBet`,
+	# `Slots_AskPlayAgain` and `Slots_PayoutText`. All five are rgblink's own
+	# addresses out of a build byte identical to this dump.
+	"slots": {"section": 0x93327, "palettes": 0xB7A9},
+	"slots_bet_text": 0x930C7,
+	"slots_play_again_text": 0x9311A,
+	"slots_result_text": 0x931DB,
 	# Crystal ships no `GoldSilverIntro`. Nested the way trainer_card is, so the
 	# -1s stay out of the flat offset checks.
 	"gs_intro": {
@@ -3177,6 +3234,26 @@ static func day_care_text_offset(layout: Dictionary, name: String) -> int:
 		var at: int = int(layout.get(run[0], -1))
 		return -1 if at < 0 else at + index * TEXT_FAR_STUB_BYTES
 	return -1
+
+
+## Where the slot machine's `text_far` stub [param name] names sits, whichever
+## of its three runs holds it.
+static func slots_text_offset(layout: Dictionary, name: String) -> int:
+	for run: Array in SLOTS_TEXT_RUNS:
+		var index: int = (run[1] as Array).find(name)
+		if index < 0:
+			continue
+		var at: int = int(layout.get(run[0], -1))
+		return -1 if at < 0 else at + index * TEXT_FAR_STUB_BYTES
+	return -1
+
+
+## Every name the three runs above carry, in their own order.
+static func slots_text_names() -> Array[String]:
+	var out: Array[String] = []
+	for run: Array in SLOTS_TEXT_RUNS:
+		out.append_array(run[1] as Array[String])
+	return out
 
 
 ## Where the mart's `text_far` stub [param name] names sits.

@@ -75,6 +75,8 @@ var _unown_walls: PackedStringArray = PackedStringArray()
 var _credits: Dictionary = {}
 var _intro_movie: Dictionary = {}
 var _unown_puzzle: Dictionary = {}
+var _slots: Dictionary = {}
+var _slots_text: Dictionary = {}
 var _gs_intro: Dictionary = {}
 var _menu_text: Dictionary = {}
 var _mart_text: Dictionary = {}
@@ -187,6 +189,10 @@ static func open_directory(path: String) -> GameData:
 	data._intro_movie = intro_movie if intro_movie is Dictionary else {}
 	var unown_puzzle: Variant = manifest.get("unown_puzzle", {})
 	data._unown_puzzle = unown_puzzle if unown_puzzle is Dictionary else {}
+	var slots: Variant = manifest.get("slots", {})
+	data._slots = slots if slots is Dictionary else {}
+	var raw_slots_text: Variant = manifest.get("slots_text", {})
+	data._slots_text = raw_slots_text if raw_slots_text is Dictionary else {}
 	var gs_intro: Variant = manifest.get("gs_intro", {})
 	data._gs_intro = gs_intro if gs_intro is Dictionary else {}
 	var raw_menu_text: Variant = manifest.get("menu_text", {})
@@ -1738,6 +1744,61 @@ func unown_puzzle_palette() -> PackedColorArray:
 	for packed: Variant in _unown_puzzle.get("palette", []) as Array:
 		colors.append(Gen2Palette.from_packed(int(packed)))
 	return colors
+
+
+## Whether the cache carries `_SlotMachine`'s art, which is the whole of what
+## the screen needs: a cartridge with no pin answers false and the special
+## refuses rather than opening an empty machine.
+func has_slots() -> bool:
+	return not (_slots.get("palettes", []) as Array).is_empty()
+
+
+## One of `_SlotMachine`'s three tile strips, by the name
+## `RomLayout.SLOTS_SECTION` gives it.
+func slots_indices(name: String) -> PackedByteArray:
+	return tile_indices(name)
+
+
+## `Reel1Tilemap`, `Reel2Tilemap` or `Reel3Tilemap` as `SLOTS_*` symbol values,
+## eighteen long: the fifteen the reel carries and its own first three again.
+func slots_reel(reel: int) -> PackedByteArray:
+	var stored: Variant = _slots.get("reels", [])
+	var out := PackedByteArray()
+	if not stored is Array or reel < 0 or reel >= (stored as Array).size():
+		return out
+	for symbol: Variant in (stored as Array)[reel] as Array:
+		out.append(int(symbol))
+	return out
+
+
+## `SlotsTilemap`, the twelve rows above the text box.
+func slots_tilemap() -> PackedByteArray:
+	var out := PackedByteArray()
+	for code: Variant in _slots.get("tilemap", []) as Array:
+		out.append(int(code))
+	return out
+
+
+## One of `SlotMachinePals`'s sixteen palettes: 0 to 7 are the background's and
+## 8 to 15 the objects', which is what `FarCopyWRAM`'s `16 palettes` copies
+## across `wBGPals1` and the `wOBPals1` behind it.
+func slots_palette(index: int) -> PackedColorArray:
+	var stored: Variant = _slots.get("palettes", [])
+	var colors := PackedColorArray()
+	if not stored is Array or index < 0:
+		return colors
+	var first: int = index * RomLayout.PREDEF_PALETTE_COLORS
+	if first + RomLayout.PREDEF_PALETTE_COLORS > (stored as Array).size():
+		return colors
+	for offset: int in RomLayout.PREDEF_PALETTE_COLORS:
+		colors.append(Gen2Palette.from_packed(int((stored as Array)[first + offset])))
+	return colors
+
+
+## One of the slot machine's seven boxes, by the name
+## `RomLayout.SLOTS_TEXT_RUNS` gives it.
+func slots_text(name: String) -> String:
+	return String(_slots_text.get(name, ""))
 
 
 ## `CreditsPalettes` for one scene: three palettes on Crystal (the banner, the

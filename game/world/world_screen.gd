@@ -159,6 +159,7 @@ var _move_deleter_host: Gen2MoveDeleterScreen = null
 ## do, so the save it was handed is kept beside it only to write nothing else.
 var _day_care_host: Gen2DayCareScreen = null
 var _unown_puzzle_host: Gen2UnownPuzzleScreen = null
+var _slot_machine_host: Gen2SlotMachineScreen = null
 ## What `DayCareManOutside` left in wScriptVar, held between the screen finishing
 ## and the request completing. -1 while no routine has written one.
 var _day_care_script_value: int = -1
@@ -688,6 +689,8 @@ func advance_frame() -> void:
 		_day_care_host.advance_frame()
 	if _unown_puzzle_host != null:
 		_unown_puzzle_host.advance_frame()
+	if _slot_machine_host != null:
+		_slot_machine_host.advance_frame()
 	_spending_frame = false
 
 
@@ -832,7 +835,8 @@ func _overlay_open() -> bool:
 		or _pokedex_host != null or _credits_host != null \
 		or _evolution_host != null or _hatch_host != null \
 		or _name_rater_host != null or _move_deleter_host != null \
-		or _day_care_host != null or _unown_puzzle_host != null
+		or _day_care_host != null or _unown_puzzle_host != null \
+		or _slot_machine_host != null
 
 
 ## Wandering objects keep to themselves while anything else owns the world. A
@@ -953,6 +957,11 @@ func _handle_button(button: int) -> bool:
 	## last piece.
 	if _unown_puzzle_host != null:
 		_unown_puzzle_host.handle_button(button)
+		return true
+	## `special SlotMachine`, which owns the whole screen until the player says
+	## no to another game or runs out of coins.
+	if _slot_machine_host != null:
+		_slot_machine_host.handle_button(button)
 		return true
 	## Before the PC and the party overlay because the Hall of Fame is the one
 	## overlay a script opens with nothing behind it: there is no map to go back
@@ -1427,6 +1436,50 @@ func _on_unown_puzzle_closed(solved: bool) -> void:
 	_script_prompt = ""
 	_show_script_results(_world.complete_runtime_request({
 		"ok": true, "script_value": 1 if solved else 0,
+	}))
+
+
+## `special SlotMachine`. `reanchormap` in front of it is what redraws the map
+## behind the machine when it closes, which the host's own overlay already does.
+func _open_slot_machine(request: Dictionary) -> bool:
+	if _slot_machine_host != null or _world == null or _data == null:
+		return false
+	var values: Dictionary = request.get("values", {})
+	var host := Gen2SlotMachineScreen.new()
+	## The bias, the reel manipulation and both streak rolls come off the
+	## world's own generator, so the run's seed reproduces a spin the way it
+	## reproduces an encounter.
+	if not host.open(
+		_data, int(values.get("coins", _world.state.coins() if _world.state != null else 0)),
+		bool(values.get("lucky", false)), _encounter_random
+	):
+		host.free()
+		_script_prompt = "Slot machine unavailable: slots_art_unavailable"
+		return false
+	host.set_audio_player(_audio_player)
+	host.closed.connect(_on_slot_machine_closed)
+	host.sfx_requested.connect(_play_sfx)
+	host.music_requested.connect(_play_music)
+	host.z_index = 30
+	_slot_machine_host = host
+	_screen.display(host)
+	_script_prompt = "Slot machine"
+	_refresh_labels()
+	return true
+
+
+## The machine's own `wCoins`, which it has been writing all game.
+func _on_slot_machine_closed(coins: int) -> void:
+	var host: Gen2SlotMachineScreen = _slot_machine_host
+	_slot_machine_host = null
+	if host != null:
+		Gen2Screen.drop(host)
+	_script_prompt = ""
+	## `_SlotMachine` stops `MUSIC_GAME_CORNER` nowhere, so the map's own track
+	## is started again where `reanchormap` would have.
+	_play_current_map_music()
+	_show_script_results(_world.complete_runtime_request({
+		"ok": true, "coins": coins,
 	}))
 
 
@@ -2427,6 +2480,56 @@ func preview_day_care(role: StringName) -> void:
 		)
 		state.set_day_care_egg(save.party[0] as Gen2SaveMon)
 	_open_day_care({"values": {"role": role}})
+
+
+## How long `preview_slot_machine` gives the loop to reach its bet menu.
+const SLOT_MACHINE_MENU_FRAME_CAP: int = 16
+
+
+## Public screenshot driver and scene-test entry for `special SlotMachine`,
+## which only the two Game Corners reach and no fixture cell does.
+##
+## [param coins] is the balance the machine opens with, [param lucky] the
+## `wScriptVar` the map's own `setval` leaves, and [param frames] how far into
+## the game to drive: the machine is pressed past its bet menu and then handed
+## A three times, which is how a spin is photographed at all.
+func preview_slot_machine(
+	coins: int = 100, lucky: bool = false, bet: int = 1, frames: int = 0
+) -> void:
+	if _world == null or _data == null or _slot_machine_host != null:
+		return
+	_open_slot_machine({"values": {"coins": coins, "lucky": lucky}})
+	var host: Gen2SlotMachineScreen = _slot_machine_host
+	if host == null:
+		return
+	## `SlotsAction_Init` runs on the first pass and `..._BetAndStart` on the
+	## second, so the menu is two frames in rather than up at the open.
+	for _frame: int in SLOT_MACHINE_MENU_FRAME_CAP:
+		if host.prompt() == Gen2SlotMachine.Prompt.BET:
+			break
+		host.advance_frame()
+	## `Slots_AskBet`'s menu opens on " 3", so a bet of one is two presses down.
+	for _step: int in clampi(3 - bet, 0, 2):
+		host.handle_button(Gen2Button.DOWN)
+	host.handle_button(Gen2Button.A)
+	## Every reel is stopped by an A press, which is the only way a spin ends at
+	## all: the driver hands one over whenever the loop is waiting for it.
+	for _frame: int in maxi(frames, 0):
+		if _slot_machine_host == null:
+			break
+		## The `WaitSFX` steps are the driver's, and a screenshot spends no wall
+		## clock for an effect to finish in, so each is cut rather than waited
+		## out: `SFXChannelsOff` is what the cartridge does to a sound it will
+		## not wait for.
+		if _audio_player != null and host.machine() != null \
+			and host.machine().waiting_for_sfx():
+			_audio_player.stop_effects()
+		host.advance_frame()
+		if host.machine() != null and host.machine().jumptable_index() in [
+			Gen2SlotMachine.SLOTS_WAIT_REEL1, Gen2SlotMachine.SLOTS_WAIT_REEL2,
+			Gen2SlotMachine.SLOTS_WAIT_REEL3,
+		]:
+			host.handle_button(Gen2Button.A)
 
 
 ## Public screenshot driver and scene-test entry for `special UnownPuzzle`,
@@ -4840,6 +4943,18 @@ func _show_script_results(results: Array) -> void:
 					if _open_day_care(request):
 						break
 					continue
+				if StringName(request.get("kind", &"")) == &"slot_machine_requested":
+					if _open_slot_machine(request):
+						break
+					## A cartridge whose cache has no slots art gives the coins
+					## back untouched rather than stopping the script.
+					_show_script_results(_world.complete_runtime_request({
+						"ok": true,
+						"coins": int((request.get("values", {}) as Dictionary).get(
+							"coins", 0
+						)),
+					}))
+					return
 				if StringName(request.get("kind", &"")) == &"unown_puzzle_requested":
 					if _open_unown_puzzle(request):
 						break

@@ -98,6 +98,7 @@ static func build(game_id: StringName = GAME_ID) -> GameData:
 	_write_pokecenter_pc(manifest)
 	_write_unown_words(manifest)
 	_write_unown_puzzle(directory, manifest)
+	_write_slots(directory, manifest)
 	_write_credits(directory, manifest, crystal_commands)
 	_write_name_input_chars(directory)
 	_write_intro_text(directory, crystal_commands)
@@ -559,6 +560,68 @@ static func _write_unown_puzzle(directory: String, manifest: Dictionary) -> void
 	manifest["tiles"] = sheets
 	## PREDEFPAL_UNOWN_PUZZLE as the cartridge stores it.
 	manifest["unown_puzzle"] = {"palette": [0x7FFF, 0x2E98, 0x2DB2, 0x0000]}
+
+
+## `_SlotMachine`'s three strips, its three reels, its tilemap and its sixteen
+## palettes. The strips are not the cartridge's picture: what the screen needs
+## from the cache is a run of the right length per name, since every symbol is
+## addressed by tile number. The reels *are* the cartridge's, because the rules
+## read them.
+static func _write_slots(directory: String, manifest: Dictionary) -> void:
+	var sheets: Dictionary = manifest.get("tiles", {})
+	var fill: int = 1
+	for row: Array in RomLayout.SLOTS_SECTION:
+		if String(row[1]) != "lz":
+			continue
+		var name: String = String(row[0])
+		var tile_count: int = int(row[2])
+		var indices: PackedByteArray = PackedByteArray()
+		indices.resize(tile_count * Gen2Tiles.TILE_PIXELS)
+		indices.fill(fill % 4)
+		fill += 1
+		RomCache.write_indices(RomCache.tile_path(directory, name), indices)
+		sheets[name] = {
+			"width": tile_count * Gen2Tiles.TILE_WIDTH,
+			"height": Gen2Tiles.TILE_HEIGHT,
+			"tiles": tile_count,
+			"first_code": 0,
+			"bits": 2,
+		}
+	manifest["tiles"] = sheets
+	var tilemap: Array = []
+	for cell: int in RomLayout.SLOTS_TILEMAP_BYTES:
+		tilemap.append(cell % 0x25)
+	var palettes: Array = []
+	for slot: int in RomLayout.SLOTS_PALETTES * RomLayout.PREDEF_PALETTE_COLORS:
+		palettes.append([0x7FFF, 0x2E98, 0x2DB2, 0x0000][slot % 4])
+	manifest["slots"] = {
+		"reels": SLOT_REELS, "tilemap": tilemap, "palettes": palettes,
+	}
+	manifest["slots_text"] = {
+		"bet_how_many": "Bet how many\ncoins?", "start": "Start!",
+		"not_enough_coins": "Not enough\ncoins.",
+		"ran_out_of_coins": "Darn… Ran out of\ncoins…",
+		"play_again": "Play again?", "lined_up": "lined up!\nWon @ coins!",
+		"darn": "Darn!",
+	}
+
+
+## `Reel1Tilemap`, `Reel2Tilemap` and `Reel3Tilemap`, which are the rules' own
+## data rather than art and so are the cartridge's bytes here.
+const SLOT_REELS: Array = [
+	[
+		0x00, 0x08, 0x14, 0x0C, 0x10, 0x00, 0x08, 0x14, 0x0C, 0x10,
+		0x04, 0x08, 0x14, 0x0C, 0x10, 0x00, 0x08, 0x14,
+	],
+	[
+		0x00, 0x0C, 0x08, 0x10, 0x14, 0x04, 0x0C, 0x08, 0x10, 0x14,
+		0x04, 0x0C, 0x08, 0x10, 0x14, 0x00, 0x0C, 0x08,
+	],
+	[
+		0x00, 0x0C, 0x08, 0x10, 0x14, 0x0C, 0x08, 0x10, 0x14, 0x0C,
+		0x04, 0x08, 0x10, 0x14, 0x0C, 0x00, 0x0C, 0x08,
+	],
+]
 
 
 static func _write_pokecenter_pc(manifest: Dictionary) -> void:
