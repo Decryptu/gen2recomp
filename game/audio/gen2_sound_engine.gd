@@ -158,6 +158,12 @@ var channels: Array[Channel] = []
 var music_playing: bool = false
 var stereo: bool = false
 
+## Listening levels, 1.0 being the cartridge's own output. Not part of the
+## driver: they leave every register write alone and only weight the mix, so a
+## parity check reads the same numbers whatever the player has these set to.
+var music_gain: float = 1.0
+var sfx_gain: float = 1.0
+
 var volume: int = 0
 var last_volume: int = 0
 var sound_output: int = 0
@@ -482,6 +488,21 @@ func update_sound() -> void:
 	_fade_music()
 	apu.write(RNR50, volume)
 	apu.write(RNR51, sound_output)
+	_apply_output_gain()
+
+
+## The two listening levels, pushed to the hardware channels each frame by which
+## stream owns each one. A hardware channel an sfx stream has taken carries the
+## effect level for as long as it holds it, which is the same rule
+## [method sfx_active] answers on, so nothing here needs a second notion of who
+## is playing what.
+func _apply_output_gain() -> void:
+	for hardware: int in NUM_MUSIC_CHANNELS:
+		apu.channel_gain[hardware] = (
+			sfx_gain
+			if channels[hardware + NUM_MUSIC_CHANNELS].channel_on
+			else music_gain
+		)
 
 
 func _update_channels() -> void:

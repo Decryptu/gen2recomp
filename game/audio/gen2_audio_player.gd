@@ -24,6 +24,14 @@ var stereo: bool = false:
 		if _engine != null:
 			_engine.stereo = value
 
+## Attenuation this host asks for on top of the player's own settings, 1.0 being
+## the level the settings alone give. The launcher's backdrop is the caller that
+## wants one: its title loop plays under the interface rather than as the game.
+var volume_scale: float = 1.0:
+	set(value):
+		volume_scale = maxf(value, 0.0)
+		_apply_volume()
+
 var _player: AudioStreamPlayer = null
 var _generator: AudioStreamGenerator = null
 var _playback: AudioStreamGeneratorPlayback = null
@@ -47,12 +55,33 @@ func _init() -> void:
 
 func _ready() -> void:
 	stereo = Gen2OptionsStore.current().stereo
+	_apply_volume()
 	_start_stream()
 	set_process(true)
 
 
 func _process(_delta: float) -> void:
+	_apply_volume()
 	_service_timeline()
+
+
+## The app block's two volumes, pushed to the driver's mix rather than to the
+## stream player: music and effects share the four hardware channels, so one
+## level on the output could not tell them apart. Read every frame because the
+## settings object is shared and edited in place, and pushed only when a number
+## actually moves.
+func _apply_volume() -> void:
+	if _engine == null:
+		return
+	var options: Gen2Options = Gen2OptionsStore.current()
+	var music: float = float(options.music_volume) / float(Gen2Options.MAX_VOLUME)
+	var sfx: float = float(options.sfx_volume) / float(Gen2Options.MAX_VOLUME)
+	music *= volume_scale
+	sfx *= volume_scale
+	if not is_equal_approx(music, _engine.music_gain):
+		_engine.music_gain = music
+	if not is_equal_approx(sfx, _engine.sfx_gain):
+		_engine.sfx_gain = sfx
 
 
 ## Plays one imported audio record. Music continues when the source asks for the
@@ -186,6 +215,13 @@ func low_health_alarm() -> bool:
 	return (_engine.low_health_alarm & (1 << Gen2SoundEngine.DANGER_ON_BIT)) != 0
 
 
+## Whether any music channel is on, which is what a host that keeps a piece up
+## for as long as its screen is up checks each frame. Separate from
+## [method audio_status] because that builds a dictionary.
+func music_playing() -> bool:
+	return _engine.music_channels_active()
+
+
 ## `_CheckSFX`, which is what `waitsfx` and the battle screen wait on.
 func effect_playing() -> bool:
 	return _engine.sfx_active()
@@ -215,6 +251,8 @@ func audio_status() -> Dictionary:
 		"sfx_active": _engine.sfx_active(),
 		"music_active": _engine.music_channels_active(),
 		"volume": _engine.volume,
+		"music_gain": _engine.music_gain,
+		"sfx_gain": _engine.sfx_gain,
 		"sound_output": _engine.sound_output,
 		"registered_banks": _engine.registered_bank_count(),
 		# The bank and address of the piece the driver is on, which is the same
@@ -268,8 +306,18 @@ func _start_stream() -> void:
 ## clock, not the renderer's: a long game frame is caught up here rather than
 ## slowing the music down.
 func _service_timeline() -> void:
-	if _player == null or not _player.playing:
+	if _player == null:
 		return
+	if not _player.playing:
+		# A stopped output under a driver whose channels are still on is silence
+		# over live music, which is what a host that stopped its stream and then
+		# asked for the same piece again used to leave behind. The output
+		# follows the driver rather than the other way round.
+		if not _engine.any_channel_active():
+			return
+		_start_stream()
+		if not _player.playing:
+			return
 	if _playback == null:
 		_playback = _player.get_stream_playback() as AudioStreamGeneratorPlayback
 		if _playback == null:

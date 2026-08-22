@@ -1,15 +1,21 @@
 class_name Gen2LauncherTitleBackdrop
 extends Node
 
-## A muted, non-interactive title-screen loop for the launcher backdrop.
+## A non-interactive title-screen loop, picture and music, for the launcher
+## backdrop.
 ##
 ## This deliberately hosts only [Gen2TitleScene] and [Gen2TitlePage]. The boot
-## cinema that advances into the intro and menu is never created, and neither is
-## an audio player. When the title timer expires, this node creates a fresh title
-## scene and starts the same title animation again.
+## cinema that advances into the intro and menu is never created. What it does
+## create is the cartridge sound driver, so the screen is heard as well as seen:
+## the same `MUSIC_TITLE` the title screen itself plays, at [constant
+## VOLUME_SCALE] of the player's settings, looping for as long as the backdrop
+## is up.
 
 const FRAME_TIME: float = 1.0 / 60.0
 const MAX_STEPS_PER_TICK: int = 4
+## The backdrop plays under an interface rather than as the game, so it takes
+## half of whatever the app block's music volume is.
+const VOLUME_SCALE: float = 0.5
 
 var _data: GameData = null
 var _page: Gen2TitlePage = null
@@ -17,6 +23,7 @@ var _scene: Gen2TitleScene = null
 var _sine: Gen2BattleAnimData = null
 var _texture: ImageTexture = null
 var _elapsed: float = 0.0
+var _audio: Gen2AudioPlayer = null
 
 
 func _ready() -> void:
@@ -39,14 +46,17 @@ func show_game(data: GameData) -> Texture2D:
 		_restart()
 	if _page == null or _scene == null:
 		set_process(false)
+		_stop_music()
 		return null
 	set_process(true)
+	_start_music()
 	return _texture
 
 
 func hide_backdrop() -> void:
 	set_process(false)
 	_elapsed = 0.0
+	_stop_music()
 
 
 func _process(delta: float) -> void:
@@ -64,6 +74,7 @@ func _process(delta: float) -> void:
 	var frame: Image = _clean_frame(_page.draw(_scene))
 	if frame != null:
 		_texture.update(frame)
+	_hold_music()
 
 
 func _restart() -> void:
@@ -80,6 +91,50 @@ func _restart() -> void:
 		_texture = ImageTexture.create_from_image(frame)
 	else:
 		_texture.update(frame)
+
+
+## `PlayMusic MUSIC_TITLE`, which is what the title screen's own entrance ends
+## on. The player is built on the first backdrop rather than in `_ready` so a
+## headless launcher run, a test or a screenshot tool never wakes the driver.
+func _start_music() -> void:
+	if _data == null:
+		return
+	var record: Dictionary = _data.world_audio(&"music", Gen2BootCinema.MUSIC_TITLE)
+	if record.is_empty():
+		return
+	if _audio == null:
+		_audio = Gen2AudioPlayer.new()
+		_audio.volume_scale = VOLUME_SCALE
+		add_child(_audio)
+	# A second request for the piece already playing is continued rather than
+	# restarted, so returning to the shelf does not start the tune over.
+	_audio.play_record(record, &"music", _audio_assets())
+
+
+func _stop_music() -> void:
+	if _audio == null:
+		return
+	_audio.stop_all()
+
+
+## The music is a property of the backdrop being up, checked on the frames the
+## backdrop draws rather than started by whichever event happened to bring it
+## back. Nothing then depends on a page, a sheet or a selection emitting the
+## signal that reaches [method show_game]: while there is a picture there is a
+## piece playing, and a piece that ends is started again on the next frame.
+func _hold_music() -> void:
+	if _audio != null and _audio.music_playing():
+		return
+	_start_music()
+
+
+## The two blobs [Gen2SoundEngine] reads outside a record, the same pair the
+## opening's own screen passes.
+func _audio_assets() -> Dictionary:
+	return {
+		"wave_samples": _data.world_audio_asset(&"wave_samples"),
+		"drumkits": _data.world_audio_asset(&"drumkits"),
+	}
 
 
 ## Removes only the title lettering from the launcher copy. The real title page

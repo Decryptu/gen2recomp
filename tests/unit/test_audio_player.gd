@@ -27,6 +27,44 @@ func _record(bank: int, index: int = 1) -> Dictionary:
 	}
 
 
+## The app block's two volumes are the game's, not only the launcher's: they are
+## pushed to the driver's mix, where music and effects can still be told apart,
+## and a host's own scale multiplies them.
+func test_the_app_volumes_and_a_host_scale_reach_the_drivers_mix() -> void:
+	var options: Gen2Options = Gen2OptionsStore.current()
+	var music: int = options.music_volume
+	var sfx: int = options.sfx_volume
+	options.music_volume = Gen2Options.MAX_VOLUME
+	options.sfx_volume = 0
+	# Edited in place while the player runs, which is what the settings slider
+	# does, so the level has to be read rather than taken once at startup.
+	_player._apply_volume()
+	var status: Dictionary = _player.audio_status()
+	assert_almost_eq(float(status["music_gain"]), 1.0, 0.001)
+	assert_almost_eq(float(status["sfx_gain"]), 0.0, 0.001)
+
+	_player.volume_scale = 0.5
+	assert_almost_eq(float(_player.audio_status()["music_gain"]), 0.5, 0.001)
+
+	options.music_volume = music
+	options.sfx_volume = sfx
+
+
+## A host that stops its own stream and then asks for music again gets sound,
+## not a live driver over a dead output.
+func test_a_stopped_output_under_live_channels_starts_itself_again() -> void:
+	assert_true(_player.play_record(_record(2), &"map_music")["played"])
+	_player._player.stop()
+	_player._service_timeline()
+	assert_true(_player._player.playing, "the output followed the driver")
+
+	# Stopping the driver as well leaves it stopped, which is what a screen
+	# closing means.
+	_player.stop_all()
+	_player._service_timeline()
+	assert_false(_player._player.playing)
+
+
 func test_music_already_playing_is_continued_rather_than_started_again() -> void:
 	var first: Dictionary = _player.play_record(_record(2), &"map_music")
 	assert_true(first["ok"])
