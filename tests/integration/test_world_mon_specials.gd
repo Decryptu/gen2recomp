@@ -412,6 +412,11 @@ func test_grooming_raises_happiness_and_leaves_the_chosen_species_standing() -> 
 	await _run_haircut(Gen2WorldScriptRunner.SPECIAL_DAISYS_GROOMING)
 	var mon: Gen2SaveMon = _world_screen.active_save().party[0]
 	mon.happiness = 100
+	## One roll in 256 walks off the end of the table and changes nothing, which
+	## is `HAPPINESS_TABLE_OVERRUN_OPCODE`'s own case and is covered where the
+	## walk lives. Pin the roll so this case is the row and not the overrun.
+	var script: Gen2WorldScriptRunner = _world_screen._world._active_script
+	script._random.seed = 1
 	_selection_list().handle_button(Gen2Button.A)
 	var runner: Gen2WorldScriptRunner = _world_screen._world._active_script
 	assert_gt(mon.happiness, 100, "HAPPINESS_GROOMING is a rise at every threshold")

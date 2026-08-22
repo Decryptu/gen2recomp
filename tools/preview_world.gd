@@ -58,6 +58,10 @@ extends SceneTree
 ## `slot_machine` (`special SlotMachine`, which no fixture cell reaches: the
 ## first number is how many frames into the game to photograph and the second
 ## the bet, 1 to 3, plus 4 for the lucky machine),
+## `tile_anim` (the map after the first number's worth of `AnimateTileset`
+## frames, which is how the water, the flowers, the lava and the cave scroll are
+## photographed at a chosen point in their cycle: `crystal 3 37 ... tile_anim 60`
+## is Union Cave a second in),
 ## `card_flip` (`special CardFlip`, which no fixture cell reaches: the first
 ## number is how many frames into the game to photograph and the second the
 ## balance in hundreds of coins),
@@ -226,7 +230,7 @@ func _build_live(data: GameData, group: int, number: int, cell: Vector2i) -> voi
 	elif cell.x >= 0 and _kind not in [
 		&"battle_transition", &"level_evolution", &"egg_hatch", &"name_rater",
 		&"move_deleter", &"day_care", &"unown_puzzle", &"slot_machine",
-		&"card_flip",
+		&"card_flip", &"tile_anim",
 	]:
 		_screen.start_cell = cell
 	## Pinned so two captures of the same map are the same picture: the seed the
@@ -345,6 +349,13 @@ func _process(_delta: float) -> bool:
 			_screen.preview_slot_machine(
 				100, maxi(_cell.y, 0) >= 4, maxi(slots_bet, 1), maxi(_cell.x, 0)
 			)
+		elif _kind == &"tile_anim":
+			## `AnimateTileset` runs once a hardware frame, so any frame of a
+			## map's own water, flowers, lava or cave scroll is reachable by
+			## spending them: the first number is how many, and the cell goes in
+			## `tile_anim@x,y` as usual.
+			for _spent: int in maxi(_cell.x, 0):
+				_screen.advance_frame()
 		elif _kind == &"card_flip":
 			## `special CardFlip`, which no fixture cell reaches either. The
 			## first number is how many frames into the game to photograph and

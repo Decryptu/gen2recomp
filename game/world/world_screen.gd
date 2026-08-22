@@ -356,7 +356,7 @@ func _build_world() -> void:
 	var rods: Array[StringName] = _world.available_fishing_rods()
 	if not rods.is_empty() and not rods.has(_selected_rod):
 		_selected_rod = rods[0]
-	_animation.configure(_world, time_of_day)
+	_animation.configure(_world, _render_time_of_day())
 	_build_renderer()
 	_screen_base_position = _screen.position
 	_audio_player = AUDIO_PLAYER_SCRIPT.new()
@@ -1203,7 +1203,7 @@ func _after_player_move(movement: Dictionary) -> bool:
 			## boundary into the same track is one continuous piece. It carries
 			## no `LoadMapGraphics` either, so the tile animation is re-pointed
 			## at the new tileset where it stands rather than restarted.
-			_animation.reload_tileset(_world, time_of_day)
+			_animation.reload_tileset(_world, _render_time_of_day())
 			_set_renderer_world()
 			_fade_to_map_music()
 		else:
@@ -1858,7 +1858,7 @@ func _swap_warped_map() -> void:
 	if not bool(transition.get("ok", false)):
 		return
 	_clear_script_fade()
-	_animation.configure(_world, time_of_day)
+	_animation.configure(_world, _render_time_of_day())
 	_set_renderer_world()
 	_fade_to_map_music()
 
@@ -2065,7 +2065,7 @@ func _update_time_of_day() -> void:
 	time_of_day = next_time_of_day
 	_world.set_object_time(_clock.hour, time_of_day)
 	if _animation != null:
-		_animation.configure(_world, time_of_day)
+		_animation.configure(_world, _render_time_of_day())
 	if _renderer != null:
 		_renderer.set_time_of_day(_render_time_of_day())
 
@@ -5112,7 +5112,7 @@ func _show_script_results(results: Array) -> void:
 			## left standing goes with it the way `closetext`'s redraw takes it.
 			_hide_money_window()
 			_world.reload_current_map()
-			_animation.configure(_world, time_of_day)
+			_animation.configure(_world, _render_time_of_day())
 			_set_renderer_world()
 			_renderer.set_time_of_day(_render_time_of_day())
 			_play_current_map_music()
@@ -5132,7 +5132,7 @@ func _show_script_results(results: Array) -> void:
 func _refresh_after_escape() -> void:
 	if _world == null:
 		return
-	_animation.configure(_world, time_of_day)
+	_animation.configure(_world, _render_time_of_day())
 	_set_renderer_world()
 	if _renderer != null:
 		_renderer.set_time_of_day(_render_time_of_day())
