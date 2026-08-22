@@ -26,11 +26,21 @@ const FILENAME: String = "mod.json"
 ## [method Gen2WorldAPI.hidden_items].
 ## 8 added [method Gen2ModHost.register_stats_page], a page of a Pokémon's stats
 ## screen past the cartridge's own three.
+## 9 added the evolution an item causes, on the item record itself.
+## 10 is the screen that fills the window: the connection graph past the
+## cartridge's three-block margin ([method Gen2WorldAPI.map_placements],
+## [method Gen2WorldAPI.expanded_block_at],
+## [method Gen2WorldAPI.connected_map_objects]), the wider drawn surface
+## ([member Gen2WorldAPI.view_pixels]) and
+## [constant Gen2ModHost.RENDERER_INTERFACE_MASK_METHOD] beside
+## [constant Gen2ModHost.RENDERER_SCREEN_RECT_METHOD]. A view on the native
+## layer needs it: whether the host claims the zoom keys and paints its letterbox
+## over that layer is a behaviour no mod can feature-detect.
 ##
 ## An optional `icon` or `thumbnail` is deliberately NOT a contract change: a
 ## host that has never heard of either ignores the field, so a mod that ships
 ## art still installs on an older launcher and simply has no face there.
-const API_VERSION: int = 9
+const API_VERSION: int = 10
 ## The oldest contract this host still answers. See [constant API_VERSION].
 const MIN_API_VERSION: int = 1
 ## Ids address directories and registry keys, so they stay to a plain lowercase

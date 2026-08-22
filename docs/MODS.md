@@ -38,7 +38,7 @@ user://mods/<id>/
 | `id` | Lowercase `[a-z0-9][a-z0-9_-]*`; addresses the directory and registry keys |
 | `name` | Shown to the player |
 | `version` | The mod's own version, not the host's |
-| `api_version` | Between `Gen2ModManifest.MIN_API_VERSION` and `API_VERSION`. Declare the oldest host you need: 9 for an item that names an evolution method, 8 for a stats-screen page, 7 for an actor's `interact`, `emote` and outbox and for hidden-item requests, 6 for `occupied` in the visible-encounter context, 5 for the run's rules, 4 for types, matchups, mod art and event mutators, 3 for mart rows and named axes, 2 for visible encounters, 1 for everything else |
+| `api_version` | Between `Gen2ModManifest.MIN_API_VERSION` and `API_VERSION`. Declare the oldest host you need: 10 for [a screen that fills the window](#a-screen-that-fills-the-window) and the maps past this one's edge, 9 for an item that names an evolution method, 8 for a stats-screen page, 7 for an actor's `interact`, `emote` and outbox and for hidden-item requests, 6 for `occupied` in the visible-encounter context, 5 for the run's rules, 4 for types, matchups, mod art and event mutators, 3 for mart rows and named axes, 2 for visible encounters, 1 for everything else |
 | `entry` | A `.gd` path inside the mod directory, or inside the pack when there is one |
 | `pack` | Optional `.pck` or `.zip` beside `mod.json`, holding the mod's files |
 | `description` | Optional |
@@ -556,7 +556,7 @@ A registered renderer is a `Node` providing:
 Registration is refused, by name, if any of these is missing or the script is
 not a `Node`, rather than failing on the first drawn frame.
 
-Two methods are optional, on either renderer kind:
+Six methods are optional, on either renderer kind:
 
 | Method | Effect |
 |---|---|
@@ -564,6 +564,8 @@ Two methods are optional, on either renderer kind:
 | `set_native_size(size: Vector2i)` | The native layer's size in window pixels, on creation and on every window change |
 | `interface_opacity() -> float` | How opaque the screen draws the field of its own text box, 0 to 1 |
 | `set_text_box_rect(rect: Rect2i)` | Where that box is, in hardware pixels, on every change and empty when none is on screen |
+| `set_interface_masked(masked: bool)` | A screen laid out in 160x144 has taken the picture, or given it back. See [A screen that fills the window](#a-screen-that-fills-the-window) |
+| `set_screen_rect(rect: Rect2i)` | Where the hardware's 160x144 screen sits inside the native layer, beside every `set_native_size` |
 
 A view built out of geometry cannot be drawn into a 160x144 buffer and then
 magnified, so the second layer is what makes a 3D or HD renderer possible at
@@ -669,6 +671,45 @@ of every cache over its whole padded rectangle and refuses a disagreement.
 
 Live `changeblock` edits are the loaded world's own and are not visible to the
 static form, which is correct for a map nobody is standing on.
+`Gen2WorldAPI.block_revision` counts them, and a map load, so a view caching the
+block buffer knows when to read it again rather than rebuilding per frame.
+
+### The maps past this one's edge
+
+`ChangeMap` copies a map into the middle of `wOverworldMapBlocks`, three blocks
+wider than the map on every side. That margin is `BUFFER_BLOCKS`, it is what a
+connection strip fills, and it is everything the cartridge holds: past it there
+is nothing at all, which is why a 20x18 screen never needed more.
+
+A view wider than that does. The connection graph is walked instead, and the
+whole neighbouring maps are placed in this map's own block coordinates.
+
+| Call | Value |
+|---|---|
+| `map_placements() -> Dictionary` | `"group:number"` to `{map, origin}` for every map the graph reaches from the loaded one, nearest first. The loaded map is not in it: it is the origin |
+| `placements_around(data, map, hops) -> Dictionary` | The same for a map nobody is standing on |
+| `connection_origin_blocks(source, target, connection) -> Vector2i` | Where one connection puts one map, which is the arithmetic the two above and the strip share |
+| `expanded_block_at(x, y) -> int` | `drawn_block_at` inside the buffer, byte for byte; past it, whichever placed map covers the coordinate, and the border block where none does |
+| `in_hardware_buffer(map, x, y) -> bool` | Which of those two answers a coordinate takes |
+
+`PLACEMENT_HOPS` and `PLACEMENT_LIMIT` bound the walk at three hops and 24 maps,
+which is as much as the furthest zoom shows.
+
+`expanded_block_at` is the whole answer for a renderer with one tileset atlas
+only if it never leaves this map's tileset. It does: a placed map is numbered in
+its OWN tileset, so a block read across a tileset boundary is a different
+picture with the same number. Read `map_placements()` and check
+`Gen2WorldMap.tileset` against the loaded one where that matters;
+`GameData.world_tileset(number)` resolves the rest, and `Gen2WorldMap.blocks` and
+`border_block` are public.
+
+`connected_map_objects() -> Array` is the people standing on those maps, as
+`{object, offset}` with the offset in walk cells. They are read-only copies and
+deliberately not part of `Gen2WorldAPI.objects`: `ReadObjectEvents` fills
+`wMapObjects` from the loaded map alone, so on the cartridge a connected map's
+people do not exist until its own map load builds them. They take the event-flag
+and visible-hours tests and nothing else. No step, no script, no sight, no
+collision, no encounter, and they cannot be talked to.
 
 ## Framing the view
 
@@ -679,6 +720,13 @@ static form, which is correct for a map nobody is standing on.
 | `player_position_cells() -> Vector2` | The committed cell plus any in-flight step, in walk cells |
 | `visible_origin_cells() -> Vector2` | The framed view's top-left in fractional walk cells, centred on that position and clamped to the map |
 | `visible_origin_cell() -> Vector2i` | The hardware page origin, which follows the committed cell |
+| `view_pixels: Vector2i` | The drawn surface in hardware pixels, `VIEW_PIXELS` (160x144) unless a screen asked for more |
+| `view_origin_pixels() -> Vector2` | That surface's top-left in world pixels, which is `visible_origin_cells()` scaled when the surface is the hardware's own |
+| `player_view_pixel() -> Vector2i` | The player's pixel inside it, which is `player_pixel_position()` plus half of whatever surround a wider surface added |
+
+The extra a wider surface adds is spread evenly around the screen the cartridge
+would have drawn, so the player keeps the place `PLAYER_VIEW_CELL` puts him in
+and only the surround grows. A renderer framing its own view can ignore all six.
 
 `player_cell` commits at the start of a step, so the hardware page origin moves a
 whole cell the instant one begins. That is what the 160x144 tile page wants and
@@ -693,6 +741,68 @@ runs. `Gen2WorldScreen.select_view()` is that switch, and `cycle_view()` is what
 `V` is bound to: the map, the player and any running script are untouched,
 because a renderer reads world state and must not write it. Two views of one
 world have to agree.
+
+## A screen that fills the window
+
+A window is not the Game Boy's 10:9. **SCREEN FILL** (`Gen2Options.screen_fill`,
+on by default, Settings > Application > Screen) grows the drawn surface to the
+whole control instead of framing 160x144 inside it, and the overworld fills it
+with more map: see [The maps past this one's edge](#the-maps-past-this-ones-edge).
+
+**Everything the cartridge laid out stays put.** Text boxes, menus and the start
+menu go inside a 160x144 rectangle centred in the surface and clipped to it, so
+a mod reading `set_text_box_rect` reads the same numbers it always did.
+
+| Read | Value |
+|---|---|
+| `Gen2Screen.expanded` | Whether this screen grew to its control |
+| `Gen2Screen.view_size() -> Vector2i` | The drawn surface in hardware pixels |
+| `Gen2Screen.view_size_changed(size)` | Emitted when it changes |
+| `Gen2Screen.interface_layer() -> Control` | The 160x144 rectangle, positioned in surface pixels |
+| `Gen2Screen.interface_masked` | Whether the screen is painting its own letterbox |
+| `Gen2Screen.screen_rect() -> Rect2i` | The 160x144 screen in native-layer pixels, which is what `set_screen_rect` pushes |
+
+**`set_native_size` may now be the whole control.** It was always "the screen's
+rectangle at window resolution"; framed, that rectangle was a whole multiple of
+160x144, and expanded it is not. A renderer that sized itself to what it was
+handed needed no edit for this.
+
+**`set_screen_rect` is where the Game Boy screen is inside it**, pushed beside
+every `set_native_size`. That is what turns a hardware-pixel number into a place
+on the surface, `set_text_box_rect`'s rectangle first: framed, the mapping was
+the surface itself, and filled it is not. A hardware pixel `p` lands at
+`rect.position + p * rect.size / Vector2i(160, 144)`.
+
+**A native-layer renderer keeps the zoom keys.** `+`, `-`, `0` and the wheel step
+`Gen2Screen.zoom_step`, and that ladder counts screen pixels per HARDWARE pixel.
+A view that answered `uses_hardware_viewport()` false has no hardware pixel, so
+the screen does not claim those events and they reach `handle_world_input` and a
+mod's own registered actions as usual. Its zoom is its camera's.
+
+**The letterbox is not painted over the native layer.** When a screen laid out in
+160x144 takes the picture -- the pack, the party, the PC, the dex, the trainer
+card, an evolution, a hatch, the day-care, the slot machine, card flip, a battle,
+and `DoBattleTransition` -- the surround becomes bars rather than the world
+behind it. That mask is drawn inside the hardware viewport, which composites over
+the native layer, so raising it would crop a view that had already filled the
+whole surface. It is not raised there. `set_interface_masked(masked)` is how such
+a renderer closes its own surround instead, and the transition is the case it
+exists for: twenty by eighteen cells cannot be widened, so a wedge reaching the
+edge of a filled window is a shape only the view drawing that window can draw. A
+renderer that does not take it keeps drawing what it was drawing.
+`mods/examples/voxel_preview` draws the four bands around `set_screen_rect`'s
+rectangle, which is the same shape the screen paints for a hardware-pixel view.
+
+**A battle fills the window when its renderer draws the place.** `_BattleScene`
+is a 160x144 picture with nothing to put in a wider surface, so the built-in
+arena keeps the bars. A battle renderer on the native layer, staged on the map
+the encounter fired on, has the same world the overworld was filling the window
+with a frame earlier, and takes the setting with it. The HUD does not move either
+way: the panels, the bars and the boxes are hardware pixels in that same centred
+rectangle.
+
+`Gen2Options.zoom_step` is the ladder's position, persisted because it is a view
+preference rather than part of a run.
 
 ## Choosing the view
 

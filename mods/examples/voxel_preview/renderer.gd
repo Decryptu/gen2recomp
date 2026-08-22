@@ -7,9 +7,12 @@ extends SubViewportContainer
 ## permission, the block grid, the tileset's palettes, the player's cell) and
 ## extrudes a solid per cell with a camera on the player.
 ##
-## It answers [code]uses_hardware_viewport[/code] false, so it gets the Game Boy
-## screen's rectangle at window resolution rather than a 160x144 buffer. Text
-## boxes and menus stay hardware pixels over the top.
+## It answers [code]uses_hardware_viewport[/code] false, so it gets the screen's
+## own rectangle at window resolution rather than a 160x144 buffer, which under
+## SCREEN FILL is the whole window. Text boxes and menus stay hardware pixels
+## over the top, inside the rectangle [method set_screen_rect] names, and the
+## letterbox around them is this view's own to draw ([method
+## set_interface_masked]) because the screen's cannot reach this layer.
 ##
 ## It reads the world and never writes it, so the two renderers can be swapped
 ## mid-step and neither can tell the other what changed.
@@ -52,6 +55,12 @@ var _objects: Node3D = null
 var _time_of_day: int = 0
 var _camera_pitch: float = CAMERA_PITCH_DEGREES
 var _text_box_rect := Rect2i()
+## Where the cartridge's own screen sits inside this view, and whether a screen
+## laid out in it currently owns the picture. See [method set_screen_rect] and
+## [method set_interface_masked].
+var _screen_rect := Rect2i()
+var _interface_masked: bool = false
+var _surround: Control = null
 
 
 func _init() -> void:
@@ -96,6 +105,14 @@ func _init() -> void:
 	_player.material_override = _material(Color("#d34a5a"))
 	_viewport.add_child(_player)
 
+	# Over the viewport rather than in it: this is the letterbox the screen draws
+	# for a hardware-pixel renderer and cannot draw for this one.
+	_surround = Control.new()
+	_surround.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_surround.visible = false
+	_surround.draw.connect(_draw_surround)
+	add_child(_surround)
+
 	# The setting mod.gd registered, read once here and again whenever it
 	# changes, so a value picked in the start menu or the launcher reaches the
 	# camera without this view polling for it. Null means the entry script did
@@ -134,6 +151,58 @@ func text_box_rect() -> Rect2i:
 	return _text_box_rect
 
 
+## Where the hardware's 160x144 screen is inside this view, which is what turns
+## a hardware-pixel number such as [method text_box_rect] into a place on it. It
+## is the whole view when the screen is framed and a rectangle in the middle when
+## it fills the window. See Gen2ModHost.RENDERER_SCREEN_RECT_METHOD.
+func set_screen_rect(rect: Rect2i) -> void:
+	_screen_rect = rect
+	_place_surround()
+
+
+func screen_rect() -> Rect2i:
+	return _screen_rect
+
+
+## A screen laid out in 160x144 has taken the picture. The host's own letterbox
+## is drawn inside the hardware viewport and cannot reach this layer, so a view
+## that filled the window closes its own surround, around the rectangle
+## [method set_screen_rect] named. A view drawing `DoBattleTransition`'s own
+## wedge across the whole window would draw that here instead. See
+## Gen2ModHost.RENDERER_INTERFACE_MASK_METHOD.
+func set_interface_masked(masked: bool) -> void:
+	_interface_masked = masked
+	_place_surround()
+
+
+func interface_masked() -> bool:
+	return _interface_masked
+
+
+func _place_surround() -> void:
+	if _surround == null:
+		return
+	_surround.visible = _interface_masked and _screen_rect.size.x > 0
+	_surround.size = size
+	_surround.queue_redraw()
+
+
+## The four bands around the hardware screen, which is the same shape
+## [Gen2Screen] paints for a renderer drawing in hardware pixels. Dimmed rather
+## than filled, because there is a diorama under it worth still seeing.
+func _draw_surround() -> void:
+	var inside := Rect2(_screen_rect)
+	var shade := Color(0.0, 0.0, 0.0, 0.72)
+	for band: Rect2 in [
+		Rect2(0.0, 0.0, size.x, inside.position.y),
+		Rect2(0.0, inside.end.y, size.x, size.y - inside.end.y),
+		Rect2(0.0, inside.position.y, inside.position.x, inside.size.y),
+		Rect2(inside.end.x, inside.position.y, size.x - inside.end.x, inside.size.y),
+	]:
+		if band.size.x > 0.0 and band.size.y > 0.0:
+			_surround.draw_rect(band, shade, true)
+
+
 func _on_option_changed(id: StringName, key: StringName, value: Variant) -> void:
 	if id != MOD_ID:
 		return
@@ -156,9 +225,12 @@ func _on_action_changed(id: StringName, key: StringName, pressed: bool) -> void:
 
 
 ## The container's own size is all that is set here: a stretching
-## SubViewportContainer owns its viewport's size and refuses a manual one.
+## SubViewportContainer owns its viewport's size and refuses a manual one. It may
+## be the whole window rather than a whole multiple of 160x144, which is what
+## SCREEN FILL means for this layer.
 func set_native_size(size_pixels: Vector2i) -> void:
 	size = Vector2(size_pixels)
+	_place_surround()
 
 
 func set_world(world: Gen2WorldAPI, _animation: Gen2WorldAnimation = null) -> void:

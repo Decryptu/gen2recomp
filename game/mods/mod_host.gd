@@ -103,6 +103,27 @@ const RENDERER_INTERFACE_OPACITY_METHOD: String = "interface_opacity"
 ## when no box is on screen. A renderer composing around the box reads this
 ## instead of assuming the standard twenty by six at row twelve.
 const RENDERER_TEXT_BOX_METHOD: String = "set_text_box_rect"
+## Optional, both renderer kinds. Called when a screen laid out in 160x144 takes
+## the picture over the view, and again when it gives it back.
+##
+## A renderer drawing in hardware pixels needs nothing: the screen paints its own
+## letterbox around the rectangle and that mask is inside the hardware viewport.
+## A native-layer renderer is not covered by it, deliberately, since the mask
+## would crop a view that already filled the whole surface. This is how such a
+## renderer closes its own surround instead, and `DoBattleTransition` is the case
+## it exists for: twenty by eighteen cells cannot be widened, so the wedge
+## closing over a filled window is a shape only the view drawing that window can
+## draw. A renderer that does not take it keeps drawing what it was drawing.
+const RENDERER_INTERFACE_MASK_METHOD: String = "set_interface_masked"
+## Optional, both renderer kinds, and only meaningful on the native layer. Called
+## beside [constant RENDERER_RESIZE_METHOD] with the cartridge's own 160x144
+## screen expressed in that layer's pixels.
+##
+## Every hardware-pixel number a renderer is handed -- the text box's rectangle,
+## first -- has to land somewhere inside the surface it draws on. Framed, that
+## mapping was the surface itself, because it was a whole multiple of 160x144.
+## A surface filling the window is not, so this is where the screen is.
+const RENDERER_SCREEN_RECT_METHOD: String = "set_screen_rect"
 ## The id of the built-in 2D renderer, which is always registered for both
 ## renderer kinds.
 const BUILT_IN_RENDERER: StringName = &"gen2"
@@ -1377,6 +1398,25 @@ static func renderer_set_text_box_rect(renderer: Node, rect: Rect2i) -> void:
 	if renderer == null or not renderer.has_method(RENDERER_TEXT_BOX_METHOD):
 		return
 	renderer.call(RENDERER_TEXT_BOX_METHOD, rect)
+
+
+## Tells [param renderer] that a screen laid out in the hardware's own 160x144
+## has taken the picture, or given it back. See
+## [constant RENDERER_INTERFACE_MASK_METHOD]; a renderer that does not ask is not
+## called.
+static func renderer_set_interface_masked(renderer: Node, masked: bool) -> void:
+	if renderer == null or not renderer.has_method(RENDERER_INTERFACE_MASK_METHOD):
+		return
+	renderer.call(RENDERER_INTERFACE_MASK_METHOD, masked)
+
+
+## Tells [param renderer] where the hardware's 160x144 screen sits inside the
+## layer it draws on. See [constant RENDERER_SCREEN_RECT_METHOD]; a renderer that
+## does not ask is not called.
+static func renderer_set_screen_rect(renderer: Node, rect: Rect2i) -> void:
+	if renderer == null or not renderer.has_method(RENDERER_SCREEN_RECT_METHOD):
+		return
+	renderer.call(RENDERER_SCREEN_RECT_METHOD, rect)
 
 
 static func _renderer_takes_input(renderer: Node, method: String, event: InputEvent) -> bool:

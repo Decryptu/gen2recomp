@@ -236,6 +236,11 @@ var _spending_frame: bool = false
 var _sound_schedule: Array = []
 var _sound_schedule_frame: int = 0
 var _screen_base_position: Vector2 = Vector2.ZERO
+## Whether a screen laid out in 160x144 owns the picture, as last told to the
+## renderer, and whether it has been told at all: [method _apply_interface_mask]
+## runs every frame, and a renderer swapped in mid-scene has heard nothing.
+var _interface_owned: bool = false
+var _interface_owned_pushed: bool = false
 
 @onready var _screen: Gen2Screen = %Screen
 @onready var _caption: Label = %Caption
@@ -449,6 +454,8 @@ func _apply_renderer_interface_style() -> void:
 	# A renderer swapped in mid-scene has no rectangle, so this one is not deduped.
 	_text_box_rect_pushed = false
 	_push_text_box_rect()
+	_interface_owned_pushed = false
+	_apply_interface_mask()
 
 
 ## Pushed only when the rectangle actually changes, and never while a page turn
@@ -506,8 +513,17 @@ func _apply_screen_fill() -> void:
 ## nothing wider, so a wedge pattern in a filled window would stop where the
 ## cartridge's screen ended. It closes the surround for the battle that follows
 ## it, which is masked for the same reason.
+##
+## The mask is drawn inside the hardware viewport and the viewport is composited
+## over the native layer, so raising it would crop a renderer that is not drawing
+## in the buffer it describes: one of those has already filled the whole surface,
+## and a letterbox around a rectangle it never used has nothing to say about it.
+## Such a renderer is told instead
+## ([constant Gen2ModHost.RENDERER_INTERFACE_MASK_METHOD]) and closes its own
+## surround in its own units, which is the only way a transition's wedge reaches
+## the edge of a filled window.
 func _apply_interface_mask() -> void:
-	_screen.interface_masked = _screen.expanded and (
+	var owned: bool = (
 		_battle_transition != null
 		or _battle_host != null or _service_host != null or _party_host != null
 		or _hall_of_fame_host != null or _trainer_card_host != null
@@ -518,6 +534,13 @@ func _apply_interface_mask() -> void:
 		or _unown_puzzle_host != null or _slot_machine_host != null
 		or _card_flip_host != null
 	)
+	_screen.interface_masked = _screen.expanded and owned \
+		and Gen2ModHost.renderer_uses_hardware_viewport(_renderer)
+	if _interface_owned_pushed and owned == _interface_owned:
+		return
+	_interface_owned = owned
+	_interface_owned_pushed = true
+	Gen2ModHost.renderer_set_interface_masked(_renderer, owned)
 
 
 func _on_view_size_changed(size_pixels: Vector2i) -> void:
@@ -534,6 +557,7 @@ func _on_native_size_changed(size_pixels: Vector2i) -> void:
 	if _renderer != null \
 		and _renderer.has_method(Gen2ModHost.RENDERER_RESIZE_METHOD):
 		_renderer.call(Gen2ModHost.RENDERER_RESIZE_METHOD, size_pixels)
+	Gen2ModHost.renderer_set_screen_rect(_renderer, _screen.screen_rect())
 
 
 ## Switches the live view without disturbing the world behind it. The choice is
@@ -1192,9 +1216,16 @@ func _complete_unattended_request() -> Array:
 ## laid out against the 160x144 rectangle and moving the surface under one is
 ## the player losing their place. A framed screen refuses the step, since there
 ## is no more world to show and it would only shrink the picture
-## ([method Gen2Screen.step_zoom]).
+## ([method Gen2Screen.step_zoom]), and so does a view on the native layer, which
+## has no hardware pixel for the ladder to count.
 func _handle_zoom(event: InputEvent) -> bool:
 	if not _renderer_input_free() or not _screen.expanded:
+		return false
+	## A view that declined the hardware buffer has no hardware pixel to scale:
+	## the ladder's unit is screen pixels per one of those, and what a step moves
+	## is a buffer that renderer never draws into. Its zoom is its camera's own
+	## registered action, and leaving the event alone is what reaches it.
+	if not Gen2ModHost.renderer_uses_hardware_viewport(_renderer):
 		return false
 	var delta: int = 0
 	var key := event as InputEventKey
