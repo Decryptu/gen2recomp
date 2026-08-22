@@ -325,7 +325,11 @@ func _build_world() -> void:
 		initial_hour = int(saved_clock.get("hour", initial_hour))
 		initial_minute = int(saved_clock.get("minute", initial_minute))
 	elif selected_save != null:
-		_world = Gen2WorldAPI.open(_data, map_group, map_number, start_cell)
+		var saveless_state := Gen2WorldState.new()
+		Gen2WorldSpawn.apply_initial_decorations(saveless_state)
+		_world = Gen2WorldAPI.open(
+			_data, map_group, map_number, start_cell, saveless_state
+		)
 	else:
 		var development_state := Gen2WorldState.new(
 			{}, {}, {
@@ -333,6 +337,10 @@ func _build_world() -> void:
 				Gen2WorldPartyHost.ITEM_POKE_BALL: 1,
 			}
 		)
+		## `InitDecorations` runs at new game, so a world the screen builds
+		## without a saved one still stands in the room the player's own game
+		## would put them in rather than in a bedroom with no bed.
+		Gen2WorldSpawn.apply_initial_decorations(development_state)
 		_world = Gen2WorldAPI.open(
 			_data, map_group, map_number, start_cell, development_state
 		)

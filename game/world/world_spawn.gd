@@ -29,8 +29,19 @@ static func new_game_snapshot(data: GameData) -> Gen2WorldSnapshot:
 	snapshot.player_facing = HOME_FACING
 	snapshot.movement_mode = Gen2WorldAPI.MOVEMENT_WALK
 	snapshot.world_state = Gen2WorldState.new({}, {}, {}, {0: START_MONEY})
+	apply_initial_decorations(snapshot.world_state)
+	return snapshot
+
+
+## `InitDecorations` on its own, for a world built without going through
+## [method new_game_snapshot]. It runs once at new game and every state the
+## game can be in has run it, so a world that skips it stands in a room the
+## player's bedroom never is: no bed and no poster, and the `.blk`'s own
+## placeholder blocks in their place.
+static func apply_initial_decorations(state: Gen2WorldState) -> void:
+	if state == null:
+		return
 	for category: StringName in INITIAL_MAPTILE_DECORATIONS:
-		snapshot.world_state.set_maptile_decoration(
+		state.set_maptile_decoration(
 			category, int(INITIAL_MAPTILE_DECORATIONS[category])
 		)
-	return snapshot
