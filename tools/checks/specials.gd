@@ -50,7 +50,7 @@ const EXPECTED_DEFERRED: Dictionary = {
 	## reads a save field nothing writes.
 	25: "CheckMagikarpLength", 26: "MagikarpHouseSign",
 	34: "BankOfMom", 39: "UnownPrinter", 40: "MapRadio",
-	43: "CardFlip", 57: "GameCornerPrizeMonCheckDex",
+	57: "GameCornerPrizeMonCheckDex",
 	75: "GiveShuckle", 76: "ReturnShuckie",
 	82: "CheckForLuckyNumberWinners",
 	83: "CheckLuckyNumberShowFlag", 84: "ResetLuckyNumberShowFlag",

@@ -160,6 +160,7 @@ var _move_deleter_host: Gen2MoveDeleterScreen = null
 var _day_care_host: Gen2DayCareScreen = null
 var _unown_puzzle_host: Gen2UnownPuzzleScreen = null
 var _slot_machine_host: Gen2SlotMachineScreen = null
+var _card_flip_host: Gen2CardFlipScreen = null
 ## What `DayCareManOutside` left in wScriptVar, held between the screen finishing
 ## and the request completing. -1 while no routine has written one.
 var _day_care_script_value: int = -1
@@ -691,6 +692,8 @@ func advance_frame() -> void:
 		_unown_puzzle_host.advance_frame()
 	if _slot_machine_host != null:
 		_slot_machine_host.advance_frame()
+	if _card_flip_host != null:
+		_card_flip_host.advance_frame()
 	_spending_frame = false
 
 
@@ -836,7 +839,7 @@ func _overlay_open() -> bool:
 		or _evolution_host != null or _hatch_host != null \
 		or _name_rater_host != null or _move_deleter_host != null \
 		or _day_care_host != null or _unown_puzzle_host != null \
-		or _slot_machine_host != null
+		or _slot_machine_host != null or _card_flip_host != null
 
 
 ## Wandering objects keep to themselves while anything else owns the world. A
@@ -962,6 +965,11 @@ func _handle_button(button: int) -> bool:
 	## no to another game or runs out of coins.
 	if _slot_machine_host != null:
 		_slot_machine_host.handle_button(button)
+		return true
+	## `special CardFlip`, the Game Corner's other machine, which owns the screen
+	## on the same terms.
+	if _card_flip_host != null:
+		_card_flip_host.handle_button(button)
 		return true
 	## Before the PC and the party overlay because the Hall of Fame is the one
 	## overlay a script opens with nothing behind it: there is no map to go back
@@ -1477,6 +1485,48 @@ func _on_slot_machine_closed(coins: int) -> void:
 	_script_prompt = ""
 	## `_SlotMachine` stops `MUSIC_GAME_CORNER` nowhere, so the map's own track
 	## is started again where `reanchormap` would have.
+	_play_current_map_music()
+	_show_script_results(_world.complete_runtime_request({
+		"ok": true, "coins": coins,
+	}))
+
+
+## `special CardFlip`. Its objects are drawn in `wOBPals1` palette 0, which
+## `CardFlip_InitAttrPals` never writes, so the map's own `PAL_OW_RED` is handed
+## over with the request.
+func _open_card_flip(request: Dictionary) -> bool:
+	if _card_flip_host != null or _world == null or _data == null:
+		return false
+	var values: Dictionary = request.get("values", {})
+	var host := Gen2CardFlipScreen.new()
+	if not host.open(
+		_data, int(values.get("coins", _world.state.coins() if _world.state != null else 0)),
+		_data.overworld_sprite_palette(0, _render_time_of_day()), _encounter_random
+	):
+		host.free()
+		_script_prompt = "Card flip unavailable: card_flip_art_unavailable"
+		return false
+	host.set_audio_player(_audio_player)
+	host.closed.connect(_on_card_flip_closed)
+	host.sfx_requested.connect(_play_sfx)
+	host.music_requested.connect(_play_music)
+	host.z_index = 30
+	_card_flip_host = host
+	_screen.display(host)
+	_script_prompt = "Card flip"
+	_refresh_labels()
+	return true
+
+
+## The table's own `wCoins`, which it has been writing all game.
+func _on_card_flip_closed(coins: int) -> void:
+	var host: Gen2CardFlipScreen = _card_flip_host
+	_card_flip_host = null
+	if host != null:
+		Gen2Screen.drop(host)
+	_script_prompt = ""
+	## `_CardFlip` starts `MUSIC_GAME_CORNER` and stops it nowhere, so the map's
+	## own track is started again where `reanchormap` would have.
 	_play_current_map_music()
 	_show_script_results(_world.complete_runtime_request({
 		"ok": true, "coins": coins,
@@ -2530,6 +2580,42 @@ func preview_slot_machine(
 			Gen2SlotMachine.SLOTS_WAIT_REEL3,
 		]:
 			host.handle_button(Gen2Button.A)
+
+
+## How long `preview_card_flip` gives the loop to reach a prompt.
+const CARD_FLIP_PROMPT_FRAME_CAP: int = 240
+
+
+## Public screenshot driver and scene-test entry for `special CardFlip`, which
+## only the two Game Corners reach and no fixture cell does.
+##
+## [param coins] is the balance the table opens with and [param frames] how far
+## into the game to drive: every `YesNoBox` is answered YES and every
+## `WaitPressAorB` pressed, so the table deals, toggles and pays without the
+## driver knowing which state it is in.
+func preview_card_flip(coins: int = 100, frames: int = 0) -> void:
+	if _world == null or _data == null or _card_flip_host != null:
+		return
+	_open_card_flip({"values": {"coins": coins}})
+	var host: Gen2CardFlipScreen = _card_flip_host
+	if host == null:
+		return
+	for _frame: int in maxi(frames, 0):
+		if _card_flip_host == null:
+			break
+		## The `WaitSFX` steps are the driver's, and a screenshot spends no wall
+		## clock for an effect to finish in, so each is cut rather than waited
+		## out, the way `preview_slot_machine` does it.
+		if _audio_player != null and host.game() != null \
+			and host.game().waiting_for_sfx():
+			_audio_player.stop_effects()
+		host.advance_frame()
+		match host.prompt():
+			Gen2CardFlip.Prompt.YES_NO, Gen2CardFlip.Prompt.PRESS, \
+			Gen2CardFlip.Prompt.CHOOSE, Gen2CardFlip.Prompt.BET:
+				host.handle_button(Gen2Button.A)
+			_:
+				pass
 
 
 ## Public screenshot driver and scene-test entry for `special UnownPuzzle`,
@@ -4948,6 +5034,18 @@ func _show_script_results(results: Array) -> void:
 						break
 					## A cartridge whose cache has no slots art gives the coins
 					## back untouched rather than stopping the script.
+					_show_script_results(_world.complete_runtime_request({
+						"ok": true,
+						"coins": int((request.get("values", {}) as Dictionary).get(
+							"coins", 0
+						)),
+					}))
+					return
+				if StringName(request.get("kind", &"")) == &"card_flip_requested":
+					if _open_card_flip(request):
+						break
+					## A cartridge whose cache has no card flip art gives the
+					## coins back untouched rather than stopping the script.
 					_show_script_results(_world.complete_runtime_request({
 						"ok": true,
 						"coins": int((request.get("values", {}) as Dictionary).get(

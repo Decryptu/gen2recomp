@@ -58,6 +58,9 @@ extends SceneTree
 ## `slot_machine` (`special SlotMachine`, which no fixture cell reaches: the
 ## first number is how many frames into the game to photograph and the second
 ## the bet, 1 to 3, plus 4 for the lucky machine),
+## `card_flip` (`special CardFlip`, which no fixture cell reaches: the first
+## number is how many frames into the game to photograph and the second the
+## balance in hundreds of coins),
 ## `unown_puzzle` (`special UnownPuzzle`'s board, which no fixture cell reaches:
 ## the first number is how many frames in to photograph and the second which
 ## picture, 0 Kabuto, 1 Omanyte, 2 Aerodactyl and 3 Ho-Oh, or 4 to 7 for the
@@ -223,6 +226,7 @@ func _build_live(data: GameData, group: int, number: int, cell: Vector2i) -> voi
 	elif cell.x >= 0 and _kind not in [
 		&"battle_transition", &"level_evolution", &"egg_hatch", &"name_rater",
 		&"move_deleter", &"day_care", &"unown_puzzle", &"slot_machine",
+		&"card_flip",
 	]:
 		_screen.start_cell = cell
 	## Pinned so two captures of the same map are the same picture: the seed the
@@ -340,6 +344,13 @@ func _process(_delta: float) -> bool:
 			var slots_bet: int = maxi(_cell.y, 0) % 4
 			_screen.preview_slot_machine(
 				100, maxi(_cell.y, 0) >= 4, maxi(slots_bet, 1), maxi(_cell.x, 0)
+			)
+		elif _kind == &"card_flip":
+			## `special CardFlip`, which no fixture cell reaches either. The
+			## first number is how many frames into the game to photograph and
+			## the second the balance in hundreds of coins, 0 meaning 100.
+			_screen.preview_card_flip(
+				maxi(_cell.y, 0) * 100 if _cell.y > 0 else 100, maxi(_cell.x, 0)
 			)
 		elif _kind == &"day_care":
 			## The Day-Care's five, driven the way the two above are. The first

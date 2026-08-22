@@ -350,6 +350,10 @@ static func verify_layout(rom: RomFile) -> Dictionary:
 	if not slots["ok"]:
 		return slots
 
+	var card_flip: Dictionary = verify_card_flip(rom, layout)
+	if not card_flip["ok"]:
+		return card_flip
+
 	var credits: Dictionary = verify_credits(rom, layout)
 	if not credits["ok"]:
 		return credits
@@ -1593,6 +1597,39 @@ static func verify_slots(rom: RomFile, layout: Dictionary) -> Dictionary:
 	if int(entry.get("palettes", -1)) < 0:
 		return {"ok": false, "message": "No pin for the slot machine's palettes."}
 	return {"ok": true, "message": "Slot machine verified."}
+
+
+## `_CardFlip`. The section walk is most of the check; what is left is the
+## tilemap the walk lands on, which has to be the same eleven-wide picture the
+## routine places, and the eight boxes, which have to decode in a row.
+static func verify_card_flip(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var entry: Dictionary = layout.get("card_flip", {})
+	if entry.is_empty() or int(entry.get("section", -1)) < 0:
+		return {"ok": true, "message": "No card flip on this cartridge."}
+
+	var section: Dictionary = read_card_flip_section(rom, layout)
+	if section.is_empty():
+		return {"ok": false, "message": "The card flip section does not walk."}
+
+	# The tilemap's own first column is the twelve unlit bulbs `.ChooseACard`
+	# writes `CARDFLIP_LIGHT_ON` into one of, and every other cell is a tile the
+	# two background sheets carry rather than a character. A walk that landed
+	# anywhere else fails both.
+	var map: PackedByteArray = section["tilemap"]
+	for row: int in RomLayout.CARD_FLIP_TILEMAP_ROWS:
+		for column: int in RomLayout.CARD_FLIP_TILEMAP_COLUMNS:
+			var code: int = map[row * RomLayout.CARD_FLIP_TILEMAP_COLUMNS + column]
+			var wanted: bool = code == RomLayout.CARD_FLIP_LIGHT_OFF_TILE if column == 0 \
+				else code < RomLayout.FONT_FIRST_CODE
+			if not wanted:
+				return {"ok": false, "message": "The card flip tilemap is not one."}
+
+	if read_card_flip_texts(rom, layout).size() != RomLayout.CARD_FLIP_TEXT_ORDER.size():
+		return {"ok": false, "message": "The card flip's texts do not walk."}
+
+	if int(entry.get("palettes", -1)) < 0:
+		return {"ok": false, "message": "No pin for the card flip's palettes."}
+	return {"ok": true, "message": "Card flip verified."}
 
 
 ## `GoldSilverIntro`. The section walk is most of the check; what is left is the
@@ -4134,6 +4171,8 @@ func import_rom(rom: RomFile, on_progress: Callable = Callable()) -> Dictionary:
 		"unown_puzzle": _import_unown_puzzle(rom, layout),
 		"slots": _import_slots(rom, layout),
 		"slots_text": _import_slots_text(rom, layout),
+		"card_flip": _import_card_flip(rom, layout),
+		"card_flip_text": _import_card_flip_text(rom, layout),
 		"unown_words": Array(read_unown_words(rom, layout)),
 		"unown_walls": Array(read_unown_walls(rom, layout)),
 		"credits": _import_credits(rom, layout),
@@ -5665,6 +5704,94 @@ func _import_slots_text(rom: RomFile, layout: Dictionary) -> Dictionary:
 	return out
 
 
+## `_CardFlip`'s art run, walked whole from `.palettes`.
+##
+## Returns {name: PackedByteArray} in `CARD_FLIP_SECTION` order plus `tilemap`,
+## the run's own tail, or an empty Dictionary if any entry does not land on its
+## size. Unlike the slot machine's the run has no alignment fill between
+## entries: every address is the previous one's consumed length exactly.
+static func read_card_flip_section(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var at: int = int((layout.get("card_flip", {}) as Dictionary).get("section", -1))
+	if at < 0:
+		return {}
+	var lz := Gen2Lz.new()
+	var out: Dictionary = {}
+	for row: Array in RomLayout.CARD_FLIP_SECTION:
+		var name: String = String(row[0])
+		var wanted: int = int(row[2]) * Gen2Tiles.TILE_BYTES
+		if String(row[1]) == "lz":
+			var raw: PackedByteArray = lz.decompress(rom.bytes(), at)
+			if lz.failed or raw.size() != wanted:
+				return {}
+			out[name] = raw
+			at += lz.consumed
+			continue
+		if not rom.in_bounds(at, wanted):
+			return {}
+		out[name] = rom.slice(at, wanted)
+		at += wanted
+	if not rom.in_bounds(at, RomLayout.CARD_FLIP_TILEMAP_BYTES):
+		return {}
+	out["tilemap"] = rom.slice(at, RomLayout.CARD_FLIP_TILEMAP_BYTES)
+	return out
+
+
+## The five graphics runs of the section above, written the way the slots' are.
+func _import_card_flip_sheets(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var section: Dictionary = read_card_flip_section(rom, layout)
+	if section.is_empty():
+		return {}
+	var directory: String = RomCache.directory_for(rom.id, rom.sha1)
+	var out: Dictionary = {}
+	for row: Array in RomLayout.CARD_FLIP_SECTION:
+		var name: String = String(row[0])
+		var tiles: int = int(row[2])
+		if not RomCache.write_indices(
+			RomCache.tile_path(directory, name),
+			Gen2Tiles.decode_2bpp_strip(section[name], 0, tiles)
+		):
+			return {}
+		out[name] = _strip_sheet_entry(tiles)
+	return out
+
+
+## The card flip's data half: `CardFlipTilemap` and the nine palettes
+## `CardFlip_InitAttrPals` copies into `wBGPals1`.
+func _import_card_flip(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var section: Dictionary = read_card_flip_section(rom, layout)
+	var at: int = int((layout.get("card_flip", {}) as Dictionary).get("palettes", -1))
+	if section.is_empty() or at < 0:
+		return {}
+	return {
+		"tilemap": Array(section["tilemap"]),
+		"palettes": _packed_palette(
+			rom, at, RomLayout.CARD_FLIP_PALETTES * RomLayout.PREDEF_PALETTE_COLORS
+		),
+	}
+
+
+## The card flip's eight boxes. They are one contiguous run of text rather than
+## a run of `text_far` stubs, so each is walked from where the last one ended.
+static func read_card_flip_texts(rom: RomFile, layout: Dictionary) -> Dictionary:
+	var at: int = int(layout.get("card_flip_text", -1))
+	if at < 0:
+		return {}
+	var out: Dictionary = {}
+	for name: String in RomLayout.CARD_FLIP_TEXT_ORDER:
+		var decoded: Dictionary = Gen2WorldScript.decode_text(
+			rom.slice(at, RomLayout.OAK_TEXT_MAX_BYTES)
+		)
+		if not bool(decoded.get("ok", false)) or String(decoded["text"]).is_empty():
+			return {}
+		out[name] = String(decoded["text"])
+		at += int(decoded["bytes"])
+	return out
+
+
+func _import_card_flip_text(rom: RomFile, layout: Dictionary) -> Dictionary:
+	return read_card_flip_texts(rom, layout)
+
+
 ## `GameFreakDittoGFX`, the one LZ run in the splash. `GameFreakPresentsInit`
 ## splits it over `vTiles0` and `vTiles1` as 128 tiles each, and the OAM sets
 ## index the result with a stride of $10, so it is kept as one strip of 256 and
@@ -6035,6 +6162,7 @@ func _import_tiles(rom: RomFile, layout: Dictionary, on_progress: Callable) -> D
 	written.merge(_import_gs_intro_sheets(rom, layout), true)
 	written.merge(_import_unown_puzzle_sheets(rom, layout), true)
 	written.merge(_import_slots_sheets(rom, layout), true)
+	written.merge(_import_card_flip_sheets(rom, layout), true)
 	var done: int = 0
 	for name: String in sheets:
 		var sheet: Dictionary = sheets[name]

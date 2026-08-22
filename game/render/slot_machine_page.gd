@@ -13,9 +13,10 @@ extends RefCounted
 ##   writes twenty-four shadow-OAM entries and `SlotsTilemap` leaves the three
 ##   columns they stand in empty, which is why a reel can sit between two
 ##   symbols at all: an object y is a pixel and a tilemap row is not.
-## - **`rLCDC`'s `B_LCDC_OBJ_SIZE` is set for the whole game**, so every object
-##   here is eight by sixteen and draws its own tile and the one behind it. That
-##   is why a symbol is two OAM entries and not four.
+## - **`.InitGFX` sets `rLCDC`'s `B_LCDC_OBJ_SIZE` itself**, so every object here
+##   is eight by sixteen and draws its own tile and the one behind it, which is
+##   why a symbol is two OAM entries and not four. The exit path resets it, and
+##   no other screen in the game turns it on.
 ## - **An object's palette is its own tile number shifted twice.**
 ##   `.LoadOAM` writes `srl a / srl a / set B_OAM_PRIO, a` as the attribute
 ##   byte, so symbol `SLOTS_STARYU` ($14) draws in object palette 5. The unused
@@ -79,9 +80,17 @@ const TEXT_SPACING: int = 2
 const BET_MENU_AT: Vector2i = Vector2i(14, 10)
 const BET_MENU_SIZE: Vector2i = Vector2i(6, 8)
 const BET_MENU_ITEMS: Array[String] = [" 3", " 2", " 1"]
-## `Slots_AskPlayAgain`'s `lb bc, 14, 12`, which is `PlaceYesNoBox`'s corner.
-const YES_NO_AT: Vector2i = Vector2i(12, 14)
-const YES_NO_SIZE: Vector2i = Vector2i(6, 4)
+## `Slots_AskPlayAgain`'s `lb bc, 14, 12`: `_YesNoBox` reads b as the left
+## coordinate and c as the top, and adds 5 and 4 to them for the other corner,
+## so the box is six by five at column 14 rather than at row 14.
+const YES_NO_AT: Vector2i = Vector2i(14, 12)
+const YES_NO_SIZE: Vector2i = Vector2i(6, 5)
+## `GetMenuTextStartCoord` starts one row down, and again unless the header sets
+## `STATICMENU_NO_TOP_SPACING`; `PlaceVerticalMenuItems` then steps
+## `2 * SCREEN_WIDTH` an item. `YesNoMenuHeader` sets the flag and
+## `Slots_AskBet.MenuData` does not.
+const YES_NO_FIRST_ROW: int = 1
+const BET_MENU_FIRST_ROW: int = 2
 ## `Place2DMenuCursor`'s own "▶".
 const CURSOR_CODE: int = 0xED
 
@@ -384,7 +393,7 @@ func _draw_bet_menu(into: PackedByteArray, cursor: int) -> void:
 		BET_MENU_SIZE.x, BET_MENU_SIZE.y
 	)
 	for index: int in BET_MENU_ITEMS.size():
-		var y: int = (BET_MENU_AT.y + 1 + index * TEXT_SPACING) * TILE
+		var y: int = (BET_MENU_AT.y + BET_MENU_FIRST_ROW + index * TEXT_SPACING) * TILE
 		if index == cursor - 1:
 			font.draw_code(CURSOR_CODE, into, WIDTH, (BET_MENU_AT.x + 1) * TILE, y)
 		font.draw_text(
@@ -400,7 +409,7 @@ func _draw_yes_no(into: PackedByteArray, cursor: int) -> void:
 	)
 	var rows: Array[String] = ["YES", "NO"]
 	for index: int in rows.size():
-		var y: int = (YES_NO_AT.y + 1 + index) * TILE
+		var y: int = (YES_NO_AT.y + YES_NO_FIRST_ROW + index * TEXT_SPACING) * TILE
 		if index == cursor - 1:
 			font.draw_code(CURSOR_CODE, into, WIDTH, (YES_NO_AT.x + 1) * TILE, y)
 		font.draw_text(rows[index], into, WIDTH, (YES_NO_AT.x + 2) * TILE, y)
