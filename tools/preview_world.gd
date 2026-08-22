@@ -267,7 +267,7 @@ func _build_live(data: GameData, group: int, number: int, cell: Vector2i) -> voi
 	elif cell.x >= 0 and _kind not in [
 		&"battle_transition", &"level_evolution", &"egg_hatch", &"name_rater",
 		&"move_deleter", &"move_tutor", &"day_care", &"unown_puzzle", &"slot_machine",
-		&"card_flip", &"tile_anim", &"ice_slide",
+		&"card_flip", &"tile_anim", &"ice_slide", &"whiteout",
 	]:
 		_screen.start_cell = cell
 	## Pinned so two captures of the same map are the same picture: the seed the
@@ -370,6 +370,20 @@ func _process(_delta: float) -> bool:
 				if hatching == null:
 					break
 				if hatching.awaiting_press():
+					_screen.press_button(Gen2Button.A)
+		elif _kind == &"whiteout":
+			## `Script_Whiteout`, which no fixture cell reaches: the party is
+			## poisoned down to its last point and the pass `CountStep` owes is
+			## spent. The first number is how many of its presses to spend, so 0
+			## is the faint line, 1 the first page of `_WhitedOutText` and 3 the
+			## map the player wakes up on.
+			_screen.preview_whiteout()
+			## The box reveals a letter at a time at the OPTION menu's own speed,
+			## so each press is given behind the frames its page costs.
+			for _press: int in maxi(_cell.x, 0) + 1:
+				for _frame: int in 120:
+					_screen.advance_frame()
+				if _press < maxi(_cell.x, 0):
 					_screen.press_button(Gen2Button.A)
 		elif _kind == &"unown_puzzle":
 			## `special UnownPuzzle`, which no fixture cell reaches. The first
@@ -554,7 +568,7 @@ func _process(_delta: float) -> bool:
 			&"warp", &"door", &"map_name_sign", &"ledge", &"heal_machine",
 			&"battle", &"battle_transition", &"level_evolution", &"egg_hatch",
 			&"name_rater", &"move_deleter", &"move_tutor", &"day_care",
-			&"ice_slide",
+			&"ice_slide", &"whiteout",
 		]:
 			## Those kinds drove themselves to the frame they want; every other
 			## kind stages a sprite and then spends the frames it needs.

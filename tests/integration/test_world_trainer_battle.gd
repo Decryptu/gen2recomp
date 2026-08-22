@@ -348,7 +348,11 @@ func test_gold_profile_victory_commits_beaten_flag_and_reloads_objects() -> void
 	assert_true(world["just_battled"])
 
 
-func test_defeat_displays_imported_loss_text_and_uses_save_recovery() -> void:
+## `LostBattle`'s `.not_canlose` prints nothing of its own: the loss text is the
+## trainer's, and `_WhitedOutText` belongs to `Script_Whiteout` on the map that
+## `Script_reloadmapafterbattle` jumps to. So the battle ends on the imported
+## line and the overworld opens the whiteout's own box.
+func test_defeat_displays_imported_loss_text_and_then_whites_the_player_out() -> void:
 	await _open_world(true)
 	await _trigger_trainer()
 	var host: Gen2BattleScreen = _battle_child()
@@ -363,14 +367,15 @@ func test_defeat_displays_imported_loss_text_and_uses_save_recovery() -> void:
 
 	host.finish()
 	host.advance()
-	assert_eq(host.battle_snapshot()["message"], "Blackout! Party restored.")
-
-	host.finish()
-	host.advance()
 	await get_tree().process_frame
+	assert_true(_world_screen._field_move_text, "the whiteout owns the box")
+	var lines: PackedStringArray = _world_screen._text_box.text_lines()
+	assert_true(
+		"".join(lines).contains("whited"),
+		"_WhitedOutText, not an invented one: %s" % "".join(lines)
+	)
 	var world: Dictionary = _world_screen.world_snapshot()
-	assert_eq(world["player_cell"], Vector2i(5, 5))
-	assert_eq(world["visible_objects"], 1)
+	assert_eq(world["player_cell"], Vector2i(5, 5), "nothing moves before the press")
 	assert_false(world["just_battled"])
 
 
@@ -1339,3 +1344,62 @@ func test_yes_opens_the_naming_screen_and_its_entry_becomes_the_nickname() -> vo
 	await _settle_hatch()
 	assert_null(_world_screen.get("_hatch_host"))
 	assert_eq(save.party[0].nickname.length(), 1, "the one letter that was entered")
+
+
+## `CountStep`'s `cp 4` and the `DoPoisonStep` behind it. Three steps are below
+## the compare and the fourth is the pass, and a member the point does not
+## finish keeps its status.
+func test_the_fourth_step_takes_one_hp_off_a_poisoned_party_member() -> void:
+	await _open_world(true)
+	var save: Gen2SaveData = _world_screen._injected_save
+	var mon: Gen2SaveMon = save.party[0]
+	mon.is_egg = false
+	mon.hp = 9
+	mon.status = Gen2Status.POISON
+	var state: Gen2WorldState = _world_screen._world.state
+	for _step: int in 3:
+		state.count_step()
+		assert_false(_world_screen._spend_poison_steps(), "cp 4 has not been reached")
+	assert_eq(mon.hp, 9)
+	state.count_step()
+	assert_false(_world_screen._spend_poison_steps(), "a survivor takes no turn")
+	assert_eq(mon.hp, 8)
+	assert_eq(state.poison_step_count(), 0, "the pass clears the counter")
+	assert_eq(mon.status, Gen2Status.POISON, "a survivor keeps its status")
+
+
+## `.Script_MonFaintedToPoison`: the fainted member's own line, and then
+## `_WhitedOutText` because `CheckPlayerPartyForFitMon` answers zero. The press
+## behind the last page is what runs `Script_Whiteout`.
+func test_the_last_member_fainting_to_poison_opens_the_whiteout() -> void:
+	await _open_world(true)
+	var save: Gen2SaveData = _world_screen._injected_save
+	var mon: Gen2SaveMon = save.party[0]
+	mon.is_egg = false
+	mon.hp = 1
+	mon.status = Gen2Status.POISON
+	var state: Gen2WorldState = _world_screen._world.state
+	for _step: int in Gen2WorldState.POISON_STEP_PHASE:
+		state.count_step()
+	assert_true(_world_screen._spend_poison_steps(), "the pass takes the turn")
+	assert_true(_world_screen._field_move_text, "the faint owns the box")
+	assert_eq(mon.hp, 0)
+	assert_eq(mon.status, Gen2Status.NONE, "the faint clears the status")
+	assert_true(
+		"".join(_world_screen._text_box.text_lines()).contains("fainted"),
+		"_PoisonFaintText comes first"
+	)
+	_world_screen.press_button(Gen2Button.A)
+	assert_true(
+		"".join(_world_screen._text_box.text_lines()).contains("whited"),
+		"_WhitedOutText stands behind it"
+	)
+	## `_WhitedOutText` carries a `para`, so its second page costs a press of its
+	## own before the one that runs the script behind it.
+	for _press: int in 200:
+		if not _world_screen._field_move_text:
+			break
+		_world_screen.advance_frame()
+		_world_screen.press_button(Gen2Button.A)
+	assert_false(_world_screen._field_move_text, "and the last press runs it")
+	assert_true(mon.hp > 0, "Script_Whiteout's own `special HealParty`")

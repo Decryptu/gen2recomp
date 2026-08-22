@@ -22,6 +22,9 @@ const SCRIPT_MEMORY_CAPACITY: int = 64
 ## `CountStep`'s `cp $80`: the step count `DoEggStep` runs on, half a wrap away
 ## from the `StepHappiness` pass at zero.
 const EGG_STEP_PHASE: int = 0x80
+## `CountStep`'s own `cp 4` on `wPoisonStepCount`: the pass that reaches
+## `DoPoisonStep`, counted in steps rather than in frames.
+const POISON_STEP_PHASE: int = 4
 const PHONE_RECEIVE_DELAYS: Array[int] = [20, 10, 5, 3]
 ## `StoreSwarmMapIndices`' own two arguments, `constants/script_constants.asm`.
 const SWARM_DUNSPARCE: int = 0
@@ -1136,6 +1139,15 @@ func step_count() -> int:
 
 func poison_step_count() -> int:
 	return _poison_step_count
+
+
+## `CountStep`'s `ld [hl], 0`, which runs on the pass that reached the compare
+## whether or not anything in the party was poisoned.
+func clear_poison_step_count() -> void:
+	if _poison_step_count == 0:
+		return
+	_poison_step_count = 0
+	changed.emit()
 
 
 ## Takes the owed `StepHappiness` passes and forgets them, so a caller that has

@@ -1253,11 +1253,14 @@ func _execute(command: Dictionary, frame: Dictionary) -> Dictionary:
 			var jump_result: Dictionary = _replace_frame(pointer_bank, pointer_address)
 			return jump_result
 		Gen2WorldScript.BLACKOUTMOD:
-			## BLACKOUTMOD changes the cartridge's recovery destination. The current
-			## save boundary does not yet relocate a player on ordinary blackout, so
-			## retain the source value as an explicit event rather than discarding it.
+			## `Script_blackoutmod` writes `wLastSpawnMapGroup` and
+			## `wLastSpawnMapNumber`, which is the pair `GetWhiteoutSpawn` reads
+			## back through `IsSpawnPoint`. Writing it here is what makes a
+			## scripted destination reach the blackout: nothing else consults the
+			## command.
 			_emit_runtime_event(&"blackout_destination_changed", {
-				"map": int(command.get("value", 0)),
+				"map_group": int(command.get("map_group", 0)),
+				"map_number": int(command.get("map_number", 0)),
 			})
 		Gen2WorldScript.SJUMP:
 			return _replace_frame(bank, int(command["address"]))

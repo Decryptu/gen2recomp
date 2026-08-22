@@ -1260,3 +1260,85 @@ func test_the_tutor_asks_before_replacing_a_full_moveset_and_charges_nothing() -
 	assert_eq(int(replaced["forgot"]), 3)
 	assert_eq(_save.party[0].moves, [1, 2, MT03_MOVE, 4])
 	assert_eq(_save.party[0].happiness, 71)
+
+
+## `DoPoisonStep`'s `.DamageMonIfPoisoned`: one HP off a poisoned member that is
+## still standing, and nothing at all off one that is already down.
+func test_a_poison_step_takes_one_hp_off_every_poisoned_member() -> void:
+	var first: Gen2SaveMon = _save.party[0]
+	first.is_egg = false
+	first.hp = 5
+	first.status = Gen2Status.POISON
+	var second: Gen2SaveMon = Gen2SaveMon.new()
+	second.species = first.species
+	second.level = first.level
+	second.hp = 9
+	second.status = Gen2Status.NONE
+	_save.party.append(second)
+	var pass_result: Dictionary = Gen2WorldPartyHost.apply_poison_step(_data, _save)
+	assert_eq(first.hp, 4)
+	assert_eq(second.hp, 9)
+	assert_eq(Array(pass_result["damaged"]), [0])
+	assert_true(Array(pass_result["fainted"]).is_empty())
+	assert_true(bool(pass_result["sfx"]), "%01 alone still plays SFX_POISON")
+	assert_false(bool(pass_result["whiteout"]))
+
+
+## The `%10` branch: the point that finishes a member clears its status, charges
+## HAPPINESS_POISONFAINT and prints `_PoisonFaintText`, and the whiteout behind
+## it is `CheckPlayerPartyForFitMon` rather than the faint itself.
+func test_the_last_member_fainting_to_poison_whites_the_player_out() -> void:
+	var mon: Gen2SaveMon = _save.party[0]
+	mon.is_egg = false
+	mon.hp = 1
+	mon.status = Gen2Status.POISON
+	mon.happiness = 200
+	while _save.party.size() > 1:
+		_save.party.remove_at(1)
+	var pass_result: Dictionary = Gen2WorldPartyHost.apply_poison_step(_data, _save)
+	assert_eq(mon.hp, 0)
+	assert_eq(mon.status, Gen2Status.NONE)
+	assert_lt(mon.happiness, 200, "HAPPINESS_POISONFAINT subtracts")
+	assert_eq(Array(pass_result["fainted"]), [0])
+	assert_eq(
+		Array(pass_result["texts"]),
+		[Gen2WorldPartyHost.poison_faint_text(
+			String(_data.species(mon.species).get("name", ""))
+		)],
+		"an unnicknamed row falls back to its species name"
+	)
+	assert_true(bool(pass_result["whiteout"]))
+
+
+## `CheckPlayerPartyForFitMon` ORs HP words and never asks about eggs, and
+## `GiveEgg` zeroes an egg's HP, so an egg cannot keep a fainted party standing.
+func test_an_egg_is_not_a_fit_mon() -> void:
+	while _save.party.size() > 1:
+		_save.party.remove_at(1)
+	var mon: Gen2SaveMon = _save.party[0]
+	mon.is_egg = true
+	mon.hp = 0
+	assert_false(Gen2WorldPartyHost.party_has_fit_mon(_save))
+	mon.hp = 1
+	assert_true(Gen2WorldPartyHost.party_has_fit_mon(_save))
+
+
+## `Script_Whiteout` in its own order: `special HealParty`, then `HalveMoney`,
+## and only then the spawn. The fixture cache carries no `SpawnPoints` table, so
+## the warp is what fails here and the two writes in front of it are what the
+## order is proved by.
+func test_the_whiteout_heals_and_halves_the_money_before_it_warps() -> void:
+	for mon: Gen2SaveMon in _save.party:
+		mon.is_egg = false
+		mon.hp = 0
+		mon.status = Gen2Status.POISON
+	_world.state.apply_changes({}, {}, {"money": {0: 4001}})
+	_world.last_spawn_map = Vector2i(-1, -1)
+	assert_eq(_world.whiteout_spawn(), RomLayout.SPAWN_HOME,
+		"no Pokemon Center entered is SPAWN_HOME")
+	var result: Dictionary = Gen2WorldPartyHost.whiteout(_world, _save, false)
+	assert_false(bool(result["ok"]), "the fixture has no spawn to warp to")
+	assert_eq(_world.state.money(0), 2000, "srl/rra over three bytes floors")
+	assert_true(Gen2WorldPartyHost.party_has_fit_mon(_save))
+	for mon: Gen2SaveMon in _save.party:
+		assert_eq(mon.status, Gen2Status.NONE)

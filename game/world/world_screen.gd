@@ -38,6 +38,9 @@ const SFX_WATERFALL: int = 0x51
 ## plays (engine/events/field_moves.asm). SFX_HEADBUTT is a battle-move effect
 ## and is referenced by nothing in either pin's overworld code.
 const SFX_HEADBUTT_TREE: int = 0x6D
+## `.PlayPoisonSFX`, the sound the overworld poison pass plays whether or not
+## anything fainted to it.
+const SFX_POISON: int = 0x0B
 ## constants/music_constants.asm, which AnimateHallOfFame plays over the whole
 ## induction.
 const MUSIC_HALL_OF_FAME: int = 20
@@ -171,6 +174,12 @@ var _day_care_script_value: int = -1
 ## Whether a field-move message is on screen waiting for its acknowledge. The
 ## world is idle while it is, the same way a script text pause holds it.
 var _field_move_text: bool = false
+## `PlayerEventScriptPointers`: an engine script the overworld runs on its own
+## rather than out of a map. Each entry is one `writetext`/`waitbutton` pair and
+## [member _player_event_after] is whatever the script does past its last one,
+## so the blackout's two ways in spend the same presses in the same order.
+var _player_event_texts: PackedStringArray = PackedStringArray()
+var _player_event_after: Callable = Callable()
 ## Whether the text on screen owes a press of its own. A `writetext` whose last
 ## page ends in `<DONE>` does not: `MapTextbox` prints and returns, and the
 ## press is the `waitbutton` behind the command.
@@ -1456,6 +1465,109 @@ func _spend_egg_steps() -> void:
 	_open_hatch(hatches, save)
 
 
+## `DoPoisonStep`, which `CountStep` reaches on the pass `wPoisonStepCount`
+## carries to 4 and which resets the counter whether or not anything is
+## poisoned. The party lives on the save, so the walk counts the step and this
+## spends it, the way [method _spend_step_happiness] does for `StepHappiness`.
+##
+## Answers whether it took the screen: a faint is `PLAYEREVENT_WHITEOUT`'s own
+## script, and everything a step still owes waits behind its presses.
+func _spend_poison_steps() -> bool:
+	if _world == null or _world.state == null or _data == null:
+		return false
+	if _world.state.poison_step_count() < Gen2WorldState.POISON_STEP_PHASE:
+		return false
+	_world.state.clear_poison_step_count()
+	var save: Gen2SaveData = active_save()
+	if save == null:
+		return false
+	var pass_result: Dictionary = Gen2WorldPartyHost.apply_poison_step(_data, save)
+	if bool(pass_result.get("sfx", false)):
+		_play_sfx(SFX_POISON)
+	var texts: PackedStringArray = pass_result.get("texts", PackedStringArray())
+	if texts.is_empty():
+		if not PackedInt32Array(pass_result.get("damaged", PackedInt32Array())).is_empty():
+			_refresh_labels()
+		return false
+	## `.CheckWhitedOut` prints every fainted member's line and only then asks
+	## whether anything can still fight, so the whiteout stands behind them all.
+	var lines: PackedStringArray = texts.duplicate()
+	if bool(pass_result.get("whiteout", false)):
+		lines.append_array(_whiteout_texts())
+		_show_player_event(lines, _finish_whiteout)
+	else:
+		_persist_after_poison_step(save)
+		_show_player_event(lines, Callable())
+	return true
+
+
+## The save write the poison pass owes. `DoPoisonStep` writes WRAM and the
+## cartridge commits on the player's own save, but this port keeps the party on
+## disk, so a pass that moved HP is written where it happened; a whiteout writes
+## once at the end of its own script instead.
+func _persist_after_poison_step(save: Gen2SaveData) -> void:
+	if save == null or _data == null or _injected_save != null:
+		return
+	var written: Dictionary = Gen2SaveStore.save(save, _data)
+	if not bool(written.get("ok", false)):
+		push_error("Could not save the poison step: %s" % String(written.get("message", "")))
+	_refresh_labels()
+
+
+## `_WhitedOutText`, with the player name the save carries.
+func _whiteout_texts() -> PackedStringArray:
+	var save: Gen2SaveData = active_save()
+	var player_name: String = save.player_name if save != null else "<PLAYER>"
+	return PackedStringArray([Gen2WorldPartyHost.whited_out_text(player_name)])
+
+
+## `Script_BattleWhiteout` and `OverworldWhiteoutScript`, which differ only in
+## the screen they came from: both fall into `Script_Whiteout`, so the text and
+## everything behind it is one sequence here.
+func _start_whiteout() -> void:
+	_show_player_event(_whiteout_texts(), _finish_whiteout)
+
+
+## `Script_Whiteout` past its `waitbutton`: `HealParty`, `HalveMoney`, the spawn
+## and the `newloadmap MAPSETUP_WARP` behind them.
+func _finish_whiteout() -> void:
+	if _world == null:
+		return
+	var save: Gen2SaveData = active_save()
+	var recovered: Dictionary = Gen2WorldPartyHost.whiteout(
+		_world, save, _injected_save == null
+	)
+	if not bool(recovered.get("ok", false)):
+		_script_prompt = "Blackout unavailable: %s" % String(
+			recovered.get("reason", "unknown")
+		)
+		_refresh_labels()
+		return
+	## `newloadmap MAPSETUP_WARP`: the spawn is on a map of its own, so the
+	## renderer, the tile animation and the music all belong to it now. This is
+	## the same tail an escape move owes, and `PlayerEvents` zeroes
+	## `wLandmarkSignTimer` for every event but a connection and a facing change.
+	_zero_map_name_sign_timer()
+	_script_prompt = ""
+	_refresh_after_escape()
+
+
+## One player event's lines put up in order, the tail run once the last has been
+## pressed past. The box and the press are the field-move message's, because a
+## `writetext`/`waitbutton` pair is the same box wherever it was written.
+func _show_player_event(texts: PackedStringArray, after: Callable) -> void:
+	if texts.is_empty():
+		_player_event_after = Callable()
+		if after.is_valid():
+			after.call()
+		return
+	_player_event_texts = texts.duplicate()
+	_player_event_after = after
+	var first: String = _player_event_texts[0]
+	_player_event_texts.remove_at(0)
+	_show_field_move_text(first)
+
+
 ## `DayCareStep`, which `CountStep` reaches on every step that did not hatch an
 ## egg: `jr nz, .hatch` jumps over the `farcall`, and the hatch screen standing
 ## is what says this step was one of those.
@@ -1913,6 +2025,12 @@ func _after_map_settled() -> bool:
 	if not sight_results.is_empty():
 		_zero_map_name_sign_for(sight_results)
 		_show_script_results(sight_results)
+		return true
+	## `CheckTileEvent`'s own order: the warp and the coord events above, then
+	## `CountStep`, and only then `RandomEncounter`. A poison pass that reaches a
+	## script answers with carry, so the step it runs on rolls no wild, and
+	## `CheckTimeEvents` below is a caller further on.
+	if _spend_poison_steps():
 		return true
 	var special_attempt: Dictionary = _world.try_special_phone_call()
 	var special_results: Array = special_attempt.get("results", [])
@@ -2999,6 +3117,28 @@ func preview_egg_hatch(species: int = 0) -> void:
 	_open_hatch([summary], save)
 
 
+## Public screenshot driver for the blackout. It poisons the whole party down to
+## its last point and spends the pass `CountStep` owes, which is the same
+## `DoPoisonStep` a walk reaches: the faint line, `_WhitedOutText` behind it and
+## `Script_Whiteout` behind the last press.
+func preview_whiteout() -> void:
+	if _world == null or _data == null:
+		return
+	var save: Gen2SaveData = _embedded_party_save()
+	if save == null or save.party.is_empty():
+		_script_prompt = "Blackout preview needs a party"
+		_refresh_labels()
+		return
+	for mon: Gen2SaveMon in save.party:
+		mon.is_egg = false
+		mon.hp = 1
+		mon.status = Gen2Status.POISON
+	_injected_save = save
+	for _step: int in Gen2WorldState.POISON_STEP_PHASE:
+		_world.state.count_step()
+	_spend_poison_steps()
+
+
 ## The first `EVOLVE_ITEM` row this cache carries, as `{species, item}`. Walked
 ## rather than named, so the driver works on all three without a table.
 func _first_stone_evolution() -> Dictionary:
@@ -3790,6 +3930,14 @@ func _finish_battle_exit(result: Dictionary, fought_save: Gen2SaveData) -> void:
 			_script_prompt = "Battle finished: %s" % String(
 				result.get("outcome", result.get("reason", "unknown"))
 			)
+		## `WildBattleScript` ends in `reloadmapafterbattle` like every other
+		## battle, so a wild fight that was lost reaches `Script_BattleWhiteout`
+		## even though no script of the map's was suspended.
+		if StringName(result.get("outcome", &"")) == Gen2WorldBattleAdapter.OUTCOME_LOST:
+			_active_battle_save = null
+			_active_battle_persist = false
+			_start_whiteout()
+			return
 	else:
 		_show_script_results(resumed)
 	_active_battle_save = null
@@ -4875,9 +5023,21 @@ func _acknowledge_field_move_text() -> void:
 	if _text_box != null and _text_box.has_pages_left():
 		_text_box.advance()
 		return
+	## A player event's own pages come next, and its tail runs once the last has
+	## been pressed past: nothing it does can be reached while a line is still up.
+	if not _player_event_texts.is_empty():
+		var next_text: String = _player_event_texts[0]
+		_player_event_texts.remove_at(0)
+		_show_field_move_text(next_text)
+		return
 	_field_move_text = false
 	if _text_box != null:
 		_text_box.visible = false
+	if _player_event_after.is_valid():
+		var tail: Callable = _player_event_after
+		_player_event_after = Callable()
+		tail.call()
+		return
 	if _world == null:
 		_script_prompt = ""
 		_refresh_labels()
@@ -5112,8 +5272,7 @@ func _show_script_results(results: Array) -> void:
 	var failed: bool = false
 	var map_changed: bool = false
 	var clock_changed: bool = false
-	var recovered: bool = false
-	var recovery_prompt: String = ""
+	var blacked_out: bool = false
 	for source_result: Dictionary in results:
 		var result: Dictionary = Gen2ModHost.publish(Gen2ModHost.CHANNEL_WORLD, source_result)
 		## Applied before the status below, and before any branch of it that leaves
@@ -5178,16 +5337,11 @@ func _show_script_results(results: Array) -> void:
 			elif result_event.get("type", &"") == &"battle_map_reload_requested":
 				map_changed = true
 			elif result_event.get("type", &"") == &"blackout":
-				recovered = true
-				var recovery: Variant = result_event.get("recovery", {})
-				var source: StringName = StringName(
-					recovery.get("source", &"save") if recovery is Dictionary else &"save"
-				)
-				recovery_prompt = (
-					"Blackout recovered from the development party"
-					if source == &"development"
-					else "Blackout recovered from the last saved party"
-				)
+				## `Script_reloadmapafterbattle`'s LOSE branch, which is
+				## `ScriptJump Script_BattleWhiteout` and ends the script: the
+				## runner has already stopped, so the sequence is started here
+				## and owns the screen from its first line.
+				blacked_out = true
 			elif result_event.get("type", &"") in [
 				&"item_changed", &"money_changed", &"coins_changed", &"movement_blocked",
 				&"movement_failed",
@@ -5345,13 +5499,13 @@ func _show_script_results(results: Array) -> void:
 					request.get("kind", "effect")
 				)
 		elif status == &"recovered":
-			recovered = true
+			## `_recovered_result`'s own status, raised on the same result the
+			## `blackout` event above is on.
+			blacked_out = true
 		elif not bool(result.get("ok", false)):
 			failed = true
 			_script_prompt = "Script stopped: %s" % String(result.get("reason", "unknown"))
-	if recovered and not recovery_prompt.is_empty():
-		_script_prompt = recovery_prompt
-	elif not waiting and not failed:
+	if not waiting and not failed:
 		_script_prompt = ""
 	if clock_changed:
 		_sync_host_clock()
@@ -5370,6 +5524,9 @@ func _show_script_results(results: Array) -> void:
 	## Decided in the loop and spent here, because a special drawing its own
 	## pages is an event on the same result as the text waiting behind them.
 	if continue_after_text and _continue_if_text_settled():
+		return
+	if blacked_out:
+		_start_whiteout()
 		return
 	_refresh_labels()
 
