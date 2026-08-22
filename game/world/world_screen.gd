@@ -2224,6 +2224,9 @@ func world_snapshot() -> Dictionary:
 		"just_battled": _world.state.just_battled() if _world != null else false,
 		"fishing_state": _world.fishing_state() if _world != null else Gen2WorldFishing.STATE_IDLE,
 		"swarm_map": _world.state.swarm_map() if _world != null else Vector2i(-1, -1),
+		"yanma_swarm_map": _world.state.swarm_map(
+			Gen2WorldState.SWARM_YANMA
+		) if _world != null else Vector2i(-1, -1),
 		"roaming_count": _world.state.roaming_mons().size() if _world != null else 0,
 		"owned_rods": _world.available_fishing_rods() if _world != null else [],
 		"owned_balls": Gen2WorldPartyHost.owned_capture_balls(_world) if _world != null else [],

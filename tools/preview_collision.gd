@@ -40,7 +40,7 @@ func _initialize() -> void:
 
 	var map: Gen2WorldMap = world.current_map
 	var tileset: Gen2WorldTileset = world.current_tileset
-	var indices: PackedByteArray = data.world_tileset_indices(tileset.number)
+	var indices: PackedByteArray = data.map_tile_indices(map, tileset)
 	var palettes: Array = Gen2WorldPalette.tile_palettes(
 		data, map, tileset, Gen2WorldPalette.TIME_DAY, -1, -1
 	)

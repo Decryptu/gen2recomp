@@ -601,7 +601,7 @@ func _render(data: GameData, map: Gen2WorldMap, tileset: Gen2WorldTileset) -> Im
 	var width: int = map.width_blocks * RomLayout.MAP_BLOCK_TILE_WIDTH * Gen2Tiles.TILE_WIDTH
 	var height: int = map.height_blocks * RomLayout.MAP_BLOCK_TILE_WIDTH * Gen2Tiles.TILE_HEIGHT
 	var image := Image.create(width, height, false, Image.FORMAT_RGBA8)
-	var pixels: PackedByteArray = data.world_tileset_indices(tileset.number)
+	var pixels: PackedByteArray = data.map_tile_indices(map, tileset)
 	var atlas_width: int = tileset.tile_count * Gen2Tiles.TILE_WIDTH
 	var palettes: Array = Gen2WorldPalette.tile_palettes(data, map, tileset)
 

@@ -811,12 +811,18 @@ func complete_runtime_request(result: Dictionary) -> Dictionary:
 		var map_group: int = int(result.get("map_group", values.get("map_group", -1)))
 		var map_number: int = int(result.get("map_number", values.get("map_number", -1)))
 		var fishing_species: int = int(result.get("fishing_species", 0))
+		var swarm_kind: int = int(
+			result.get("kind", values.get("kind", Gen2WorldState.SWARM_DUNSPARCE))
+		)
 		if active and (map_group < 0 or map_number < 0):
 			return _fail(&"invalid_swarm_map", result)
 		if fishing_species not in [0, 0xD3, 0xDF]:
 			return _fail(&"invalid_fishing_swarm_species", result)
+		if swarm_kind not in [Gen2WorldState.SWARM_DUNSPARCE, Gen2WorldState.SWARM_YANMA]:
+			return _fail(&"invalid_swarm_kind", result)
 		_staged_swarm = {
 			"active": active,
+			"kind": swarm_kind,
 			"map_group": map_group,
 			"map_number": map_number,
 			"fishing_species": fishing_species,
@@ -824,6 +830,7 @@ func complete_runtime_request(result: Dictionary) -> Dictionary:
 		_has_staged_swarm = true
 		_events.append({
 			"type": &"swarm_changed",
+			"kind": swarm_kind,
 			"map_group": map_group,
 			"map_number": map_number,
 			"active": active,
@@ -2003,7 +2010,11 @@ func _execute_later_command(source_opcode: int, command: Dictionary, bank: int) 
 				return given
 			return _stage_give_item_script(verbose_item, verbose_name)
 		0x9E:
+			## Crystal's `swarm` carries which of the two swarms it is setting
+			## and pokegold's does not, because `StoreSwarmMapIndices` there
+			## writes one pair whatever `c` holds.
 			return _stage_runtime_request(&"swarm_requested", {
+				"kind": int(command.get("flag", Gen2WorldState.SWARM_DUNSPARCE)),
 				"map_group": int(command.get("map_group", 0)),
 				"map_number": int(command.get("map_number", 0)),
 			})

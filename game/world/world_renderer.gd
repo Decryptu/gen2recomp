@@ -163,17 +163,26 @@ func refresh_animation() -> void:
 	var changed: PackedInt32Array = _animation.changed_tiles()
 	if changed.is_empty():
 		return
-	var indices: PackedByteArray = _animation.current_indices()
+	var animated: PackedByteArray = _animation.current_indices()
 	for entry: Dictionary in _atlases.values():
 		if not bool(entry["animated"]):
 			continue
+		# The roof stands over `vTiles2 tile $0a` for as long as the map is
+		# loaded, so an animation pass rebuilds the strip under it rather than
+		# replacing it.
+		var indices: PackedByteArray = _world.data.roofed_tile_indices(
+			animated, int(entry["roof"]), int(entry["tile_count"])
+		)
 		var image: Image = entry["image"]
 		var palettes: Array = entry["palettes"]
 		for tile: int in changed:
 			_paint_tile(image, indices, palettes, tile)
 		(entry["texture"] as ImageTexture).update(image)
 		entry["indices"] = indices
-	_priority_indices = indices
+	# The priority strip is the map being walked on, not whichever cached strip
+	# the loop ended on: a connected map in another group has its own roof.
+	var current: Dictionary = _atlas_for(_world.current_map, _world.current_tileset)
+	_priority_indices = current["indices"] if not current.is_empty() else animated
 	_priority_atlas = null
 	queue_redraw()
 
@@ -208,7 +217,7 @@ func _rebuild_atlas() -> void:
 func _atlas_for(map: Gen2WorldMap, tileset: Gen2WorldTileset) -> Dictionary:
 	if map == null or tileset == null or _world == null or _world.data == null:
 		return {}
-	var key: String = "%d:%d" % [tileset.number, map.environment]
+	var key: String = "%d:%d:%d" % [tileset.number, map.environment, map.group]
 	if _atlases.has(key):
 		return _atlases[key]
 	var indices: PackedByteArray = _world.data.world_tileset_indices(tileset.number)
@@ -219,6 +228,8 @@ func _atlas_for(map: Gen2WorldMap, tileset: Gen2WorldTileset) -> Dictionary:
 		indices = _animation.current_indices()
 	if indices.size() < tileset.tile_count * Gen2Tiles.TILE_PIXELS:
 		return {}
+	var roof: int = _world.data.map_group_roof(map.group)
+	indices = _world.data.roofed_tile_indices(indices, roof, tileset.tile_count)
 	var palettes: Array = _tile_palettes_for(map, tileset)
 	var image := Image.create(
 		tileset.tile_count * Gen2Tiles.TILE_WIDTH, Gen2Tiles.TILE_HEIGHT,
@@ -232,6 +243,8 @@ func _atlas_for(map: Gen2WorldMap, tileset: Gen2WorldTileset) -> Dictionary:
 		"palettes": palettes,
 		"indices": indices,
 		"animated": animated,
+		"roof": roof,
+		"tile_count": tileset.tile_count,
 	}
 	_atlases[key] = entry
 	return entry

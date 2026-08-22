@@ -2132,8 +2132,11 @@ func repel_steps() -> int:
 	return state.repel_steps()
 
 
-func set_swarm_map(map_key: Vector2i, active: bool = true, fishing_species: int = 0) -> void:
-	state.set_swarm_map(map_key, active, fishing_species)
+func set_swarm_map(
+	map_key: Vector2i, active: bool = true, fishing_species: int = 0,
+	kind: int = Gen2WorldState.SWARM_DUNSPARCE,
+) -> void:
+	state.set_swarm_map(map_key, active, fishing_species, kind)
 
 
 func roaming_mons() -> Array:
@@ -2155,6 +2158,7 @@ func advance_schedule(random: RandomNumberGenerator = null) -> Dictionary:
 			"reason": &"missing_schedule_random",
 			"roaming": [],
 			"swarm_map": state.swarm_map(),
+			"yanma_swarm_map": state.swarm_map(Gen2WorldState.SWARM_YANMA),
 			"fishing_swarm_species": state.fishing_swarm_species(),
 		}
 	var moved: Array = advance_roaming(random)
@@ -2163,6 +2167,7 @@ func advance_schedule(random: RandomNumberGenerator = null) -> Dictionary:
 		"kind": &"world_schedule_updated",
 		"roaming": moved,
 		"swarm_map": state.swarm_map(),
+		"yanma_swarm_map": state.swarm_map(Gen2WorldState.SWARM_YANMA),
 		"fishing_swarm_species": state.fishing_swarm_species(),
 	}
 

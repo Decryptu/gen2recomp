@@ -192,6 +192,24 @@ func _write_cache() -> void:
 	RomCache.write_json(
 		RomCache.world_animation_assets_path(_directory), {"water": water, "forest": forest}
 	)
+	# Two roofs of nine tiles each, every pixel carrying its own roof number, and
+	# a group table naming one, the other and none.
+	var roof_tiles: Array = []
+	for roof: int in 2:
+		var run: Array = []
+		run.resize(RomLayout.ROOF_TILES * Gen2Tiles.TILE_PIXELS)
+		for index: int in run.size():
+			run[index] = roof + 1
+		roof_tiles.append(run)
+	var roof_groups: Array = [0, 1, 0xFF]
+	var roof_palettes: Array = []
+	for group: int in roof_groups.size():
+		roof_palettes.append([
+			0x0001 + group, 0x0002 + group, 0x0003 + group, 0x0004 + group,
+		])
+	RomCache.write_json(RomCache.world_roofs_path(_directory), {
+		"groups": roof_groups, "tiles": roof_tiles, "palettes": roof_palettes,
+	})
 	RomCache.write_json(RomCache.manifest_path(_directory), {
 		"format_version": RomCache.FORMAT_VERSION,
 		"game_id": "testanimation",
@@ -404,3 +422,62 @@ func _lit_row(animation: Gen2WorldAnimation, tile: int) -> int:
 		if animation.current_indices()[y * width + tile * Gen2Tiles.TILE_WIDTH] != 0:
 			return y
 	return -1
+
+
+## `LoadMapGroupRoof` copies nine tiles over `vTiles2 tile $0a` and touches
+## nothing else, and a group whose entry is -1 leaves the strip alone.
+func test_a_map_group_roof_replaces_nine_tiles_of_the_strip() -> void:
+	var data: GameData = GameData.open_directory(_directory)
+	var tileset: Gen2WorldTileset = data.world_tileset(0)
+	var base: PackedByteArray = data.world_tileset_indices(0)
+	var width: int = tileset.tile_count * Gen2Tiles.TILE_WIDTH
+	var left: int = RomLayout.ROOF_VRAM_TILE * Gen2Tiles.TILE_WIDTH
+	var span: int = RomLayout.ROOF_TILES * Gen2Tiles.TILE_WIDTH
+
+	assert_eq(data.map_group_roof(0), 0)
+	assert_eq(data.map_group_roof(1), 1)
+	assert_eq(data.map_group_roof(2), -1)
+
+	for group: int in 2:
+		var map := Gen2WorldMap.from_cache({"group": group, "tileset": 0})
+		var drawn: PackedByteArray = data.map_tile_indices(map, tileset)
+		assert_eq(drawn.size(), base.size())
+		for y: int in Gen2Tiles.TILE_HEIGHT:
+			for x: int in width:
+				var inside: bool = x >= left and x < left + span
+				assert_eq(
+					drawn[y * width + x], group + 1 if inside else base[y * width + x],
+					"group %d pixel %d,%d" % [group, x, y],
+				)
+
+	var plain := Gen2WorldMap.from_cache({"group": 2, "tileset": 0})
+	assert_eq(data.map_tile_indices(plain, tileset), base)
+
+
+## `_LoadMapPals`' tail: colours 1 and 2 of `PAL_BG_ROOF` come from the map
+## group, on a TOWN or ROUTE map alone, and `cp NITE_F` puts DARKNESS on the
+## nite pair rather than a third one.
+func test_roof_colours_replace_two_slots_on_outdoor_maps_only() -> void:
+	var data: GameData = GameData.open_directory(_directory)
+	var morning: PackedColorArray = Gen2WorldPalette.roof_colors(
+		data, Gen2WorldPalette.ENVIRONMENT_TOWN, Gen2WorldPalette.TIME_MORNING, 1
+	)
+	assert_eq(morning.size(), 2)
+	assert_eq(morning[0], Gen2Palette.from_packed(0x0002))
+	assert_eq(morning[1], Gen2Palette.from_packed(0x0003))
+	for time: int in [Gen2WorldPalette.TIME_NIGHT, Gen2WorldPalette.TIME_DARK]:
+		var night: PackedColorArray = Gen2WorldPalette.roof_colors(
+			data, Gen2WorldPalette.ENVIRONMENT_ROUTE, time, 1
+		)
+		assert_eq(night[0], Gen2Palette.from_packed(0x0004))
+		assert_eq(night[1], Gen2Palette.from_packed(0x0005))
+	for environment: int in [0, 3, 4, 6, 7]:
+		assert_eq(Gen2WorldPalette.roof_colors(
+			data, environment, Gen2WorldPalette.TIME_DAY, 1
+		).size(), 0, "environment %d has no roof branch" % environment)
+	# `_LoadMapPals` reads `RoofPals` off `wMapGroup` alone and never consults
+	# `MapGroupRoofs`, so a group with no roof tiles still tints the slot.
+	assert_eq(data.map_group_roof(2), -1)
+	assert_eq(Gen2WorldPalette.roof_colors(
+		data, Gen2WorldPalette.ENVIRONMENT_TOWN, Gen2WorldPalette.TIME_DAY, 2
+	)[0], Gen2Palette.from_packed(0x0003))

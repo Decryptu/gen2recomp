@@ -4698,6 +4698,49 @@ func test_swarm_runtime_request_commits_its_map_indices_as_one_transaction() -> 
 	assert_eq(state.fishing_swarm_species(), 0xD3)
 
 
+## Crystal's two swarms are two WRAM pairs with a `wSwarmFlags` bit each, and
+## `_SwarmWildmonCheck` tries Dunsparce before Yanma, so setting one leaves the
+## other standing. pokegold has one pair and its `StoreSwarmMapIndices` takes no
+## kind at all.
+func test_the_two_crystal_swarms_stand_at_once() -> void:
+	RomCache.write_json(RomCache.world_scripts_path(_directory), {
+		"48:60B0": [0xA0, Gen2WorldState.SWARM_DUNSPARCE, 1, 2, 0x91],
+		"48:60C0": [0xA0, Gen2WorldState.SWARM_YANMA, 3, 4, 0x91],
+	})
+	var data: GameData = GameData.open_directory(_directory)
+	var state := Gen2WorldState.new()
+	for entry: Array in [
+		[0x60B0, Gen2WorldState.SWARM_DUNSPARCE, 1, 2],
+		[0x60C0, Gen2WorldState.SWARM_YANMA, 3, 4],
+	]:
+		var runner := Gen2WorldScriptRunner.begin(data, state, {
+			"kind": &"test", "bank": 48, "script": int(entry[0]),
+		})
+		var waiting: Dictionary = runner.advance()
+		assert_eq(waiting["event"]["request"]["values"]["kind"], int(entry[1]))
+		var done: Dictionary = runner.complete_runtime_request({
+			"ok": true, "active": true,
+			"map_group": int(entry[2]), "map_number": int(entry[3]),
+		})
+		assert_eq(done["status"], &"complete")
+
+	assert_eq(state.swarm_map(Gen2WorldState.SWARM_DUNSPARCE), Vector2i(1, 2))
+	assert_eq(state.swarm_map(Gen2WorldState.SWARM_YANMA), Vector2i(3, 4))
+	assert_true(state.swarm_active_on(1, 2))
+	assert_true(state.swarm_active_on(3, 4))
+	assert_false(state.swarm_active_on(1, 4))
+
+	var restored: Gen2WorldState = Gen2WorldState.from_dict(state.to_dict())
+	assert_eq(restored.swarm_map(Gen2WorldState.SWARM_YANMA), Vector2i(3, 4))
+	# A state written before the second slot existed restores with Yanma clear.
+	var old_state: Dictionary = state.to_dict()
+	old_state.erase("yanma_swarm_map")
+	assert_eq(
+		Gen2WorldState.from_dict(old_state).swarm_map(Gen2WorldState.SWARM_YANMA),
+		Vector2i(-1, -1),
+	)
+
+
 func test_crystal_engine_flags_and_hall_of_fame_commit_at_script_end() -> void:
 	RomCache.write_json(RomCache.world_scripts_path(_directory), {
 		"48:60C0": [
