@@ -207,10 +207,17 @@ func supports_game(game_id: StringName) -> bool:
 ## registry does not know keeps its own name, so a mod for a later generation
 ## says so rather than disappearing from its own card.
 func game_titles() -> Array[String]:
+	return titles_for(games)
+
+
+## The same titles for a list of ids that has no manifest behind it, which is
+## what a feed row is before the mod is installed.
+static func titles_for(ids: Array) -> Array[String]:
 	var out: Array[String] = []
-	for game: StringName in games:
-		var title: String = RomRegistry.title_for(game)
-		out.append(title if not title.is_empty() else String(game))
+	for game: Variant in ids:
+		var id := StringName(game)
+		var title: String = RomRegistry.title_for(id)
+		out.append(title if not title.is_empty() else String(id))
 	return out
 
 

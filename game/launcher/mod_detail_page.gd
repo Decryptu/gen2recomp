@@ -132,10 +132,10 @@ func _summary(row: Dictionary) -> Control:
 	# the mod refused to load. A mod that declares nothing is for every cartridge
 	# and says nothing here.
 	var manifest: Gen2ModManifest = row["manifest"]
-	if manifest != null:
-		var titles: Array[String] = manifest.game_titles()
-		if not titles.is_empty():
-			column.add_child(Gen2LauncherUI.field(_theme, "For", _value(", ".join(titles))))
+	var titles: Array[String] = manifest.game_titles() if manifest != null \
+		else Gen2ModManifest.titles_for(row.get("listed_games", []))
+	if not titles.is_empty():
+		column.add_child(Gen2LauncherUI.field(_theme, "For", _value(", ".join(titles))))
 
 	var actions: HFlowContainer = Gen2LauncherUI.actions()
 	column.add_child(actions)
